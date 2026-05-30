@@ -1,0 +1,29 @@
+# --- Frontend (Svelte/Vite) ---
+node_modules/
+dist/
+.svelte-kit/
+build/
+.env
+.env.local
+
+# --- Backend (Python FastAPI) ---
+backend/.env
+backend/.venv/
+backend/__pycache__/
+backend/*.pyc
+backend/.pytest_cache/
+backend/data/
+backend/bin/
+backend/projects.db
+backend/test_*.py
+
+# --- Emulator Service (Python) ---
+# PlatformIO build output for the bundled firmware; regenerated with
+# `pio run -d backend/emulator/Blinky`.
+backend/emulator/Blinky/.pio/
+
+# --- Contract test suite (repo-root tests/) ---
+.venv-tests/
+.pytest_cache/
+tests/__pycache__/
+__pycache__/
