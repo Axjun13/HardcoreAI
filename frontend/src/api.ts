@@ -167,7 +167,7 @@ export const api = {
     return res.json();
   },
 
-  async askAgent(query: string, conversationHistory?: any[], phase?: string, provider: string = "openrouter") {
+  async askAgent(query: string, conversationHistory?: any[], phase?: string, provider: string = "openrouter", buildOutput: string = "") {
     const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/agent/solve`, {
       method: "POST",
       headers: {
@@ -178,7 +178,8 @@ export const api = {
         provider,
         problem: query,
         conversation_history: conversationHistory,
-        phase: phase
+        phase: phase,
+        build_output: buildOutput
       })
     });
     if (!res.ok) throw new Error(await res.text());
@@ -197,6 +198,7 @@ export const api = {
     conversationHistory?: any[],
     phase?: string,
     provider: string = "openrouter",
+    buildOutput: string = "",
     signal?: AbortSignal
   ) {
     const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/agent/stream`, {
@@ -209,7 +211,8 @@ export const api = {
         provider,
         problem: query,
         conversation_history: conversationHistory,
-        phase: phase
+        phase: phase,
+        build_output: buildOutput
       }),
       signal
     });

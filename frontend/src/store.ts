@@ -722,6 +722,7 @@ export const actions = {
     try {
       let history: any[] = [];
       let currentPhase: string | undefined = undefined;
+      let buildOutput = "";
 
       let selectedProvider = "openrouter";
       workspaceStore.update(s => {
@@ -737,6 +738,7 @@ export const actions = {
 
         // Read the currently selected LLM provider
         selectedProvider = (s as any).selectedProvider || "openrouter";
+        buildOutput = s.buildLogs.join("\n").slice(-20000);
 
         return s;
       });
@@ -890,7 +892,7 @@ export const actions = {
             }
             break;
         }
-      }, history, currentPhase, selectedProvider);
+      }, history, currentPhase, selectedProvider, buildOutput);
 
       // Stream closed. Refresh files so the editor shows anything the agent wrote.
       let currentActiveProjectId: string | null = null;

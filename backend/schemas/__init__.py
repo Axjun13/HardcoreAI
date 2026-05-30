@@ -104,6 +104,7 @@ class AgentRequest(BaseModel):
     problem: str = ""
     conversation_history: list[dict[str, Any]] | None = None
     phase: str | None = None
+    build_output: str = ""
 
 
 class PhaseTrace(BaseModel):

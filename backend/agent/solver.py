@@ -142,6 +142,13 @@ When writing firmware, it MUST comply with ALL of these:
 After calling write_file, respond with a brief plain-text summary of what you wrote.
 Do NOT write THINK or CALL after the code. Stop after the summary.
 
+══════════════════════════════════════════════════════════════
+RULE 4.5 — BUILD OUTPUT DEBUGGING
+══════════════════════════════════════════════════════════════
+If the user asks about a build failure, compiler error, linker error, warning,
+or says the project did not compile, call read_build_output before explaining or
+editing code. Use the exact diagnostics from that console to decide what to fix.
+
 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 RULE 5 \u2014 CONVERSATION AWARENESS
 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
@@ -156,11 +163,15 @@ CURRENT PROJECT CODE (src/main.c):
 
 REFERENCE MANUALS AVAILABLE: {has_docs}
 
+BUILD OUTPUT CONSOLE:
+{build_output_status}
+
 USER REQUEST:
 {problem}
 
 Check RULE 1 first: if this is a hardware request and no board has been specified yet,
-call ask_user immediately. Otherwise proceed with RULE 3 (questions) or RULE 4 (code).
+call ask_user immediately. If the request is about a build/compile failure, call
+read_build_output first. Otherwise proceed with RULE 3 (questions) or RULE 4 (code).
 """
 
 
@@ -188,6 +199,7 @@ async def run_agent_phase(
     files: dict,
     user_id: str,
     messages: list[dict] | None = None,
+    build_output: str = "",
     on_event=None,
 ) -> tuple[AgentTrace, dict]:
     """Run the conversational STM32 copilot. Returns (trace, mutated-files).
@@ -204,6 +216,7 @@ async def run_agent_phase(
         files=files,
         user_id=user_id,
         project_id=project_id,
+        build_output=build_output,
     )
 
     # Include the current main.c so the agent can see existing code (capped to save tokens)
@@ -216,6 +229,12 @@ async def run_agent_phase(
         if user_id else
         "No documents uploaded yet."
     )
+    build_output = (build_output or "").strip()
+    build_output_status = (
+        "Available. Call read_build_output() to inspect the latest build log."
+        if build_output else
+        "Empty or unavailable."
+    )
 
     system = _AGENT_SYSTEM.format(tools=_tool_block(toolbox))
 
@@ -224,7 +243,9 @@ async def run_agent_phase(
         # Explicitly tell the model to check if it has everything and generate code.
         user_prompt = (
             f'The user answered: "{problem}"\n\n'
+            f"Build Output console: {build_output_status}\n\n"
             "Review the conversation history above. "
+            "If this turn is about a build/compile/link failure, call read_build_output() first. "
             "If you now know the board, pins, and all required parameters — "
             'call write_file("src/main.c") IMMEDIATELY with the complete firmware. '
             "Do NOT ask any more questions. Do NOT re-confirm anything. Just write the code."
@@ -234,6 +255,7 @@ async def run_agent_phase(
         user_prompt = _AGENT_USER.format(
             current_code=current_code,
             has_docs=has_docs,
+            build_output_status=build_output_status,
             problem=problem or "(no request provided)",
         )
 

@@ -132,6 +132,7 @@ async def agent_solve(project_id: str, payload: AgentRequest, user_id: str = Dep
             files=copy.deepcopy(files_dict),
             user_id=user_id,
             messages=prior_history,
+            build_output=payload.build_output,
         )
     except llm.LLMError as exc:
         raise HTTPException(status_code=502, detail=f"LLM error: {exc}")
@@ -210,6 +211,7 @@ async def agent_stream(project_id: str, payload: AgentRequest, user_id: str = De
                 files=copy.deepcopy(files_dict),
                 user_id=user_id,
                 messages=prior_history,
+                build_output=payload.build_output,
                 on_event=on_event,
             )
             final_state, final_files = _persist_files(

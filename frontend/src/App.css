@@ -1590,6 +1590,38 @@ input, button, select, textarea {
   color: var(--text-active);
 }
 
+.drawer-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-right: 10px;
+}
+
+.drawer-icon-btn {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.drawer-icon-btn:hover:not(:disabled) {
+  color: var(--text-active);
+  background-color: var(--bg-tertiary);
+}
+
+.drawer-icon-btn:disabled {
+  color: var(--text-dark);
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .drawer-content {
   flex: 1;
   overflow: hidden;

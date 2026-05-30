@@ -56,6 +56,7 @@ class Toolbox:
         files: dict[str, dict[str, Any]] | None = None,
         user_id: str | None = None,
         project_id: str | None = None,
+        build_output: str = "",
     ) -> None:
         self.project_name = project_name
         self.problem = problem
@@ -68,6 +69,7 @@ class Toolbox:
         self.call_body = ""
         self.user_id = user_id
         self.project_id = project_id
+        self.build_output = build_output or ""
 
     # -- registry --------------------------------------------------------
 
@@ -190,6 +192,17 @@ class Toolbox:
             return context.strip()
         except Exception as e:
             return f"ERROR: Failed to search manuals: {e}"
+
+    @tool
+    def read_build_output(self) -> str:
+        """Read the latest Build Output console text from the frontend."""
+        output = (self.build_output or "").strip()
+        if not output:
+            return "Build Output console is empty. Ask the user to build the project, or have them copy and paste the Build Output if this snapshot is unavailable."
+        if len(output) > 12000:
+            output = output[-12000:]
+            return "(showing the last 12000 characters of Build Output)\n" + output
+        return output
 
 
 # ---------------------------------------------------------------------------

@@ -33,6 +33,8 @@
     Sliders,
     Trash2,
     MonitorPlay,
+    Copy,
+    Check,
   } from "lucide-svelte";
 
   let aiInput = "";
@@ -41,6 +43,7 @@
   let aiOpen = true;
   let showConfigurator = false;
   let terminalOpen = true;
+  let buildOutputCopied = false;
   const agentWorkingPhrases = [
     "Thinking through firmware state",
     "Checking registers and files",
@@ -64,6 +67,7 @@
   // DOM Elements
   let canvasEl: HTMLCanvasElement;
   let terminalEndRef: HTMLDivElement;
+  let buildOutputEndRef: HTMLDivElement;
   let monacoEditor: monaco.editor.IStandaloneCodeEditor | null = null;
 
   async function handleMouseMove(e: MouseEvent) {
@@ -154,6 +158,36 @@
     setTimeout(() => {
       terminalEndRef.scrollIntoView({ behavior: "smooth" });
     }, 50);
+  }
+
+  $: if ($workspaceStore.buildLogs && buildOutputEndRef) {
+    setTimeout(() => {
+      buildOutputEndRef.scrollIntoView({ behavior: "smooth" });
+    }, 50);
+  }
+
+  async function copyBuildOutput() {
+    const output = $workspaceStore.buildLogs.join("\n");
+    if (!output.trim()) return;
+
+    try {
+      await navigator.clipboard.writeText(output);
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = output;
+      textarea.style.position = "fixed";
+      textarea.style.left = "-9999px";
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+    }
+
+    buildOutputCopied = true;
+    window.setTimeout(() => {
+      buildOutputCopied = false;
+    }, 1400);
   }
 
   function initMonaco(node: HTMLElement) {
@@ -1430,7 +1464,23 @@
                 <span>BUILD OUTPUT</span>
               </button>
             </div>
-            <div style="margin-left: auto; display: flex; align-items: center; padding-right: 10px;">
+            <div class="drawer-actions">
+              {#if $workspaceStore.activeBottomTab === "memory"}
+                <button
+                  class="drawer-icon-btn"
+                  type="button"
+                  onclick={copyBuildOutput}
+                  disabled={$workspaceStore.buildLogs.length === 0}
+                  title={buildOutputCopied ? "Copied" : "Copy Build Output"}
+                  aria-label={buildOutputCopied ? "Copied build output" : "Copy build output"}
+                >
+                  {#if buildOutputCopied}
+                    <Check size={13} />
+                  {:else}
+                    <Copy size={13} />
+                  {/if}
+                </button>
+              {/if}
               <button class="close-ai-btn" type="button" onclick={() => (terminalOpen = false)} title="Minimize Terminal">
                 <X size={13} />
               </button>
@@ -1549,6 +1599,7 @@
                     {log}
                   </div>
                 {/each}
+                <div bind:this={buildOutputEndRef}></div>
               </div>
             </div>
           {/if}
