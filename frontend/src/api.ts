@@ -5,6 +5,17 @@ const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || DEFAULT_BACKEND_URL;
 const EMULATOR_URL = import.meta.env.VITE_EMULATOR_URL || "http://127.0.0.1:62019";
 let activeProjectId: string | null = null; // Default to null so Landing Page shows
 
+async function fetchEmulator(path: string, init?: RequestInit) {
+  try {
+    return await fetch(`${EMULATOR_URL}${path}`, init);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Could not reach emulator service at ${EMULATOR_URL}. Start it with node scripts/dev.mjs or set VITE_EMULATOR_URL. ${detail}`
+    );
+  }
+}
+
 export const api = {
   setActiveProject(id: string) {
     activeProjectId = id;
@@ -249,7 +260,7 @@ export const api = {
       });
     }
 
-    const res = await fetch(`${EMULATOR_URL}/platformio/build`, {
+    const res = await fetchEmulator("/platformio/build", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ projectPath: "./Blinky", files: pioFiles })
@@ -259,9 +270,7 @@ export const api = {
   },
 
   async runEmulation() {
-    const res = await fetch(`${EMULATOR_URL}/qemu/run`, {
-      method: "POST"
-    });
+    const res = await fetchEmulator("/qemu/run", { method: "GET" });
     if (!res.ok) throw new Error(await res.text());
     return res.text();
   },
@@ -275,19 +284,19 @@ export const api = {
   },
 
   async connectDebugger() {
-    const res = await fetch(`${EMULATOR_URL}/debug/connect`, { method: "POST" });
+    const res = await fetchEmulator("/debug/connect", { method: "GET" });
     if (!res.ok) throw new Error(await res.text());
     return res.text();
   },
 
   async getRegisters() {
-    const res = await fetch(`${EMULATOR_URL}/debug/registers`, { method: "GET" });
+    const res = await fetchEmulator("/debug/registers", { method: "GET" });
     if (!res.ok) throw new Error(await res.text());
     return res.text();
   },
 
   async stepDebugger() {
-    const res = await fetch(`${EMULATOR_URL}/debug/step`, { method: "POST" });
+    const res = await fetchEmulator("/debug/step", { method: "GET" });
     if (!res.ok) throw new Error(await res.text());
     return res.text();
   }

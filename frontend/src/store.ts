@@ -463,6 +463,7 @@ export const actions = {
 
     if (!projectId) {
       actions.addEmulationLog("Error: No active project to emulate.");
+      workspaceStore.update(s => ({ ...s, emulationRunning: false }));
       return;
     }
 
@@ -495,6 +496,7 @@ export const actions = {
 
     } catch (e: any) {
       actions.addEmulationLog(`Error starting emulator: ${e.message}`);
+      workspaceStore.update(s => ({ ...s, emulationRunning: false }));
     }
   },
   stopEmulation: () => {

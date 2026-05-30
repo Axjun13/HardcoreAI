@@ -254,11 +254,13 @@
     display: flex;
     gap: 16px;
     height: 100%;
+    min-height: 0;
     width: 100%;
     background: #09090D;
     color: var(--text-light);
     font-family: var(--font-sans);
     box-sizing: border-box;
+    overflow: auto;
   }
 
   .emu-controls-col {
@@ -266,6 +268,7 @@
     display: flex;
     flex-direction: column;
     gap: 10px;
+    min-height: 0;
     background: #0E0E14;
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm);
@@ -278,6 +281,7 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
+    min-height: 0;
     background: #0E0E14;
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm);
@@ -452,6 +456,7 @@
     font-family: var(--font-mono);
     font-size: 0.65rem;
     height: 95px;
+    flex-shrink: 0;
     overflow-y: auto;
     display: flex;
     flex-direction: column;
@@ -477,6 +482,7 @@
     grid-template-columns: repeat(2, 1fr);
     gap: 6px;
     flex-grow: 1;
+    min-height: 0;
     overflow-y: auto;
   }
 

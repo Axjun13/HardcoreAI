@@ -11,6 +11,8 @@ const isWindows = process.platform === "win32";
 
 const backendHost = process.env.BACKEND_HOST || "127.0.0.1";
 const backendPort = process.env.BACKEND_PORT || "62018";
+const emulatorHost = process.env.EMULATOR_HOST || "127.0.0.1";
+const emulatorPort = process.env.EMULATOR_PORT || "62019";
 const npmCommand = isWindows ? "npm.cmd" : "npm";
 
 const children = new Set();
@@ -70,6 +72,22 @@ function backendCommand() {
   };
 }
 
+function emulatorCommand() {
+  const uvCommand = isWindows ? "uv.exe" : "uv";
+
+  if (commandExists(uvCommand)) {
+    return {
+      command: uvCommand,
+      args: ["run", "python", "-m", "emulator.app"],
+    };
+  }
+
+  return {
+    command: backendPython(),
+    args: ["-m", "emulator.app"],
+  };
+}
+
 function prefixStream(stream, name) {
   let pending = "";
 
@@ -92,8 +110,8 @@ function prefixStream(stream, name) {
   });
 }
 
-function startProcess(name, command, args, cwd) {
-  const env = { ...process.env };
+function startProcess(name, command, args, cwd, extraEnv = {}) {
+  const env = { ...process.env, ...extraEnv };
   if (!("NO_COLOR" in env)) {
     env.FORCE_COLOR = env.FORCE_COLOR || "1";
   }
@@ -184,9 +202,12 @@ Usage:
 Environment:
   BACKEND_HOST  Backend bind host, default 127.0.0.1
   BACKEND_PORT  Backend bind port, default 62018
+  EMULATOR_HOST Emulator bind host, default 127.0.0.1
+  EMULATOR_PORT Emulator bind port, default 62019
 
 Services:
   backend   http://${backendHost}:${backendPort}
+  emulator  http://${emulatorHost}:${emulatorPort}
   frontend  http://127.0.0.1:62016`);
 }
 
@@ -196,13 +217,19 @@ if (process.argv.includes("--help") || process.argv.includes("-h")) {
 }
 
 const backend = backendCommand();
+const emulator = emulatorCommand();
 
 console.log("Starting HardcoreAI dev servers...");
 console.log(`backend   http://${backendHost}:${backendPort}`);
+console.log(`emulator  http://${emulatorHost}:${emulatorPort}`);
 console.log("frontend  http://127.0.0.1:62016");
-console.log("Press Ctrl+C to stop both.");
+console.log("Press Ctrl+C to stop all.");
 
 startProcess("backend", backend.command, backend.args, backendDir);
+startProcess("emulator", emulator.command, emulator.args, backendDir, {
+  EMULATOR_HOST: emulatorHost,
+  EMULATOR_PORT: emulatorPort,
+});
 startProcess("frontend", npmCommand, ["run", "dev"], frontendDir);
 
 process.on("SIGINT", () => stopAll(0));

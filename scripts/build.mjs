@@ -75,5 +75,4 @@ runStep(
 
 console.log("\nSingle app build is ready.");
 console.log("Run it with:");
-console.log("  cd backend");
-console.log("  uv run uvicorn main:app --host 0.0.0.0 --port 62018");
+console.log("  node scripts/run-build.mjs --skip-build");
