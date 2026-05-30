@@ -1,4 +1,7 @@
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "http://127.0.0.1:62018";
+const DEFAULT_BACKEND_URL = import.meta.env.DEV
+  ? "http://127.0.0.1:62018"
+  : window.location.origin;
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || DEFAULT_BACKEND_URL;
 const EMULATOR_URL = import.meta.env.VITE_EMULATOR_URL || "http://127.0.0.1:62019";
 let activeProjectId: string | null = null; // Default to null so Landing Page shows
 

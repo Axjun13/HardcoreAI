@@ -10,9 +10,12 @@ Run with ``python main.py`` or ``uvicorn main:app`` from the backend directory.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from api.routers import (
     agent,
@@ -25,6 +28,10 @@ from api.routers import (
     workbench,
 )
 from db.migrations import lifespan
+
+BACKEND_DIR = Path(__file__).resolve().parent
+FRONTEND_DIST_DIR = BACKEND_DIR.parent / "frontend" / "dist"
+FRONTEND_ASSETS_DIR = FRONTEND_DIST_DIR / "assets"
 
 app = FastAPI(title="HardcoreAI API", version="0.3.0", lifespan=lifespan)
 
@@ -46,6 +53,33 @@ app.include_router(files.router)
 app.include_router(agent.router)
 app.include_router(conversations.router)
 app.include_router(rag.router)
+
+if FRONTEND_ASSETS_DIR.exists():
+    app.mount(
+        "/assets",
+        StaticFiles(directory=FRONTEND_ASSETS_DIR),
+        name="frontend-assets",
+    )
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+async def serve_frontend(full_path: str) -> FileResponse:
+    if full_path.startswith("api/"):
+        raise HTTPException(status_code=404, detail="Not found")
+
+    index_file = FRONTEND_DIST_DIR / "index.html"
+    requested_file = (FRONTEND_DIST_DIR / full_path).resolve()
+
+    if requested_file.is_relative_to(FRONTEND_DIST_DIR) and requested_file.is_file():
+        return FileResponse(requested_file)
+
+    if index_file.is_file():
+        return FileResponse(index_file)
+
+    raise HTTPException(
+        status_code=404,
+        detail="Frontend build not found. Run npm run build from the frontend directory.",
+    )
 
 
 if __name__ == "__main__":
