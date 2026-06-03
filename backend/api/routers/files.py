@@ -49,6 +49,20 @@ def upsert_file(project_id: str, file_path: str, payload: CodeFileUpsert, user_i
         session.add(project)
         session.commit()
         session.refresh(code_file)
+
+        # Sync files to local git repo
+        try:
+            from agent.git_manager import GitManager
+            git_mgr = GitManager(project_id)
+            rows = session.exec(
+                select(CodeFileRow).where(CodeFileRow.project_id == project.id)
+            ).all()
+            files_dict = {r.path: {"language": r.language, "content": r.content} for r in rows}
+            git_mgr.sync_db_to_disk(files_dict)
+        except Exception as e:
+            # Prevent Git sync errors from failing the save operation
+            print(f"ERROR: Failed to sync user edit to git: {e}")
+
         return CodeFileRead(
             path=code_file.path, language=code_file.language,
             content=code_file.content, updated_at=code_file.updated_at,

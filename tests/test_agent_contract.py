@@ -224,3 +224,127 @@ def test_strip_duplicate_turn():
     # Empty / None -> None.
     assert _strip_duplicate_turn(None, "x") is None
     assert _strip_duplicate_turn([], "x") is None
+
+
+def test_new_filesystem_and_search_tools():
+    """Verify list_files, view_file, create_file, copy_file, move_file, grep_search, and sed_replace."""
+    _, CodingToolbox = _import_agent()
+    
+    # Initialize with default files
+    tb = CodingToolbox(
+        project_name="test",
+        problem="Test",
+        catalogue={},
+        workbench={"placed_components": [], "wires": []},
+        files={
+            "src/main.c": {"language": "c", "content": "line 1\nline 2\nline 3\n"},
+            "README.md": {"language": "markdown", "content": "# README\nThis is a test project.\n"}
+        },
+        user_id=None,
+        project_id="test_proj",
+    )
+    
+    # Test list_files
+    files_list = tb.list_files()
+    assert "src/main.c" in files_list
+    assert "README.md" in files_list
+    
+    # Test view_file (full and range)
+    view_full = tb.view_file("src/main.c")
+    assert "line 1" in view_full
+    assert "line 3" in view_full
+    assert "3: line 3" in view_full
+    
+    view_range = tb.view_file("src/main.c", start_line=2, end_line=3)
+    assert "line 1" not in view_range
+    assert "2: line 2" in view_range
+    assert "3: line 3" in view_range
+    
+    # Test create_file
+    create_res = tb.create_file("src/utils.h", "#define UTILS_H")
+    assert "src/utils.h" in tb.files
+    assert tb.files["src/utils.h"]["content"] == "#define UTILS_H"
+    
+    # Test copy_file
+    copy_res = tb.copy_file("src/utils.h", "src/utils_backup.h")
+    assert "src/utils_backup.h" in tb.files
+    assert tb.files["src/utils_backup.h"]["content"] == "#define UTILS_H"
+    
+    # Test move_file
+    move_res = tb.move_file("src/utils_backup.h", "src/utils_backup_final.h")
+    assert "src/utils_backup.h" not in tb.files
+    assert "src/utils_backup_final.h" in tb.files
+    assert tb.files["src/utils_backup_final.h"]["content"] == "#define UTILS_H"
+    
+    # Test grep_search
+    grep_res = tb.grep_search("line 2")
+    assert "src/main.c:2: line 2" in grep_res
+    
+    # Test sed_replace
+    sed_res = tb.sed_replace("src/main.c", "line 2", "modified line 2")
+    assert tb.files["src/main.c"]["content"] == "line 1\nmodified line 2\nline 3\n"
+    assert "=== Unified Diff ===" in sed_res
+    assert "-line 2" in sed_res
+    assert "+modified line 2" in sed_res
+    
+    # Test delete_file (safeguard unconfirmed)
+    from agent.tools import AskUserException
+    with pytest.raises(AskUserException) as excinfo:
+        tb.delete_file("src/utils.h", confirmed=False)
+    assert "Are you sure you want to delete" in str(excinfo.value)
+    assert "src/utils.h" in tb.files # still exists
+    
+    # Test delete_file (confirmed)
+    delete_res = tb.delete_file("src/utils.h", confirmed=True)
+    assert "src/utils.h" not in tb.files # deleted!
+
+
+def test_git_tools_with_gitmanager(tmp_path, monkeypatch):
+    """Verify git_log, git_diff, and git_show using real GitManager redirected to tmp_path."""
+    _, CodingToolbox = _import_agent()
+    from agent.git_manager import GitManager
+    
+    # Redirect GitManager storage to the pytest tmp_path
+    def mock_init(self, project_id):
+        self.project_id = project_id
+        self.workspace_dir = tmp_path / "workspaces" / str(project_id)
+        
+    monkeypatch.setattr(GitManager, "__init__", mock_init)
+    
+    tb = CodingToolbox(
+        project_name="test",
+        problem="Test",
+        catalogue={},
+        workbench={"placed_components": [], "wires": []},
+        files={
+            "src/main.c": {"language": "c", "content": "int main() { return 0; }\n"}
+        },
+        user_id=None,
+        project_id="test_proj",
+    )
+    
+    # Instantiate GitManager directly to sync files initially
+    git_mgr = GitManager("test_proj")
+    git_mgr.sync_db_to_disk(tb.files)
+    git_mgr.commit_changes("Initial commit")
+    
+    # Make a change and commit it
+    tb.files["src/main.c"]["content"] = "int main() { return 1; }\n"
+    git_mgr.sync_db_to_disk(tb.files)
+    git_mgr.commit_changes("Update main return value")
+    
+    # Test git_log tool
+    log_output = tb.git_log()
+    assert "Initial commit" in log_output
+    assert "Update main return value" in log_output
+    
+    # Test git_diff tool (diff between HEAD~1 and HEAD)
+    diff_output = tb.git_diff("HEAD~1", "HEAD")
+    assert "return 0;" in diff_output
+    assert "return 1;" in diff_output
+    
+    # Test git_show tool
+    show_output = tb.git_show("HEAD")
+    assert "Update main return value" in show_output
+    assert "+int main() { return 1; }" in show_output
+

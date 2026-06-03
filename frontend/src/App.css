@@ -2780,3 +2780,157 @@ body.dragging-col {
   color: var(--accent-error);
   background: rgba(239, 68, 68, 0.08);
 }
+
+/* Delete Confirmation Modal Styles */
+.delete-modal-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(4, 4, 6, 0.75);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+}
+
+.delete-modal-card {
+  background: #09090D;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  width: 400px;
+  max-width: 90vw;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.7), 0 0 20px rgba(239, 68, 68, 0.05);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.delete-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border-color);
+  background: #0B0B10;
+}
+
+.delete-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text-active);
+}
+
+.delete-warning-icon {
+  color: var(--accent-error);
+}
+
+.delete-close-btn {
+  background: none;
+  border: none;
+  color: var(--text-dark);
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  transition: all 0.15s ease;
+}
+
+.delete-close-btn:hover {
+  color: var(--text-active);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.delete-modal-body {
+  padding: 20px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.delete-msg-main {
+  font-size: 0.82rem;
+  color: var(--text-active);
+  line-height: 1.4;
+}
+
+.delete-msg-main strong {
+  color: var(--accent-error);
+}
+
+.delete-msg-sub {
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.delete-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border-color);
+  background: #06060A;
+}
+
+.delete-btn-cancel {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.delete-btn-cancel:hover {
+  color: var(--text-active);
+  background: var(--bg-tertiary);
+  border-color: var(--text-dark);
+}
+
+.delete-btn-confirm {
+  background: var(--accent-error);
+  border: none;
+  border-radius: var(--radius-sm);
+  color: white;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 6px 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.15s ease;
+}
+
+.delete-btn-confirm:hover {
+  background: #DC2626; /* Slightly darker red */
+}
+
+/* Close Tab Button Style */
+.close-tab {
+  font-size: 0.85rem;
+  margin-left: 4px;
+  color: var(--text-dark);
+  border-radius: 2px;
+  padding: 0 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+.close-tab:hover {
+  color: var(--text-active);
+  background-color: rgba(255, 255, 255, 0.15);
+}

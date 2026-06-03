@@ -55,6 +55,27 @@
   $: activeAgentStreaming = $workspaceStore.aiMessages.some((m) => m.sender === "ai" && m.streaming);
   $: queuedAiFollowup = $workspaceStore.queuedAiFollowup;
 
+  // Delete confirmation modal state
+  let deleteConfirmModal = {
+    show: false,
+    projectId: "",
+    projectName: "",
+    isActiveProject: false
+  };
+
+  // Input prompt modal state (New File/Folder)
+  let inputPromptModal = {
+    show: false,
+    title: "",
+    placeholder: "",
+    value: "",
+    actionType: "file" as "file" | "folder"
+  };
+
+  let gitCommitMessage = "";
+  let gitCommitting = false;
+  let gitCommitFeedback = "";
+
   // Panel sizing
   let sidebarWidth = 260;
   let rightSidebarWidth = 380;
@@ -407,6 +428,30 @@
       .replace(/__([^_]+)__/g, "<strong>$1</strong>")
       .replace(/\*([^*\n]+)\*/g, "<em>$1</em>")
       .replace(/_([^_\n]+)_/g, "<em>$1</em>");
+  }
+
+  function parseDiff(resultText: string): Array<{ text: string, type: string }> {
+    const idx = resultText.indexOf("=== Unified Diff ===");
+    if (idx === -1) return [];
+    
+    let diffContent = resultText.substring(idx + "=== Unified Diff ===".length).trim();
+    if (diffContent.endsWith("============")) {
+      diffContent = diffContent.substring(0, diffContent.length - "============".length).trim();
+    }
+    
+    return diffContent.split("\n").map(line => {
+      let type = "normal";
+      if (line.startsWith("+") && !line.startsWith("+++")) {
+        type = "add";
+      } else if (line.startsWith("-") && !line.startsWith("---")) {
+        type = "del";
+      } else if (line.startsWith("@@")) {
+        type = "meta";
+      } else if (line.startsWith("+++") || line.startsWith("---")) {
+        type = "file";
+      }
+      return { text: line, type };
+    });
   }
 
   function renderMarkdown(markdown: string) {
@@ -827,11 +872,14 @@
                     class="control-icon-btn close-btn-highlight" 
                     title="Delete Project"
                     style="padding: 6px; border-radius: 4px;"
-                    onclick={async (e) => {
+                    onclick={(e) => {
                       e.stopPropagation();
-                      if (confirm(`Are you sure you want to delete '${project.name}'?`)) {
-                        await actions.deleteProject(project.id);
-                      }
+                      deleteConfirmModal = {
+                        show: true,
+                        projectId: project.id,
+                        projectName: project.name,
+                        isActiveProject: false
+                      };
                     }}
                   >
                     <Trash2 size={14} />
@@ -1011,8 +1059,13 @@
                 <button 
                   class="project-control-btn delete-hover" 
                   title="Delete Project"
-                  onclick={async () => {
-                    await actions.deleteActiveProject($workspaceStore.activeProjectId!);
+                  onclick={() => {
+                    deleteConfirmModal = {
+                      show: true,
+                      projectId: $workspaceStore.activeProjectId!,
+                      projectName: activeProject.name,
+                      isActiveProject: true
+                    };
                   }}
                 >
                   <Trash2 size={12} />
@@ -1028,8 +1081,13 @@
                 class="close-ai-btn"
                 title="New File"
                 onclick={() => {
-                  const name = prompt("Enter file name (e.g. src/main.c):");
-                  if (name) actions.createFile(name);
+                  inputPromptModal = {
+                    show: true,
+                    title: "Create New File",
+                    placeholder: "e.g. src/main.c",
+                    value: "",
+                    actionType: "file"
+                  };
                 }}
               >
                 <Plus size={13} />
@@ -1039,8 +1097,13 @@
                 class="close-ai-btn"
                 title="New Folder"
                 onclick={() => {
-                  const name = prompt("Enter folder name:");
-                  if (name) actions.createFolder(name);
+                  inputPromptModal = {
+                    show: true,
+                    title: "Create New Folder",
+                    placeholder: "e.g. src/components",
+                    value: "",
+                    actionType: "folder"
+                  };
                 }}
               >
                 <FolderOpen size={12} />
@@ -1174,24 +1237,101 @@
           <div class="panel-title">Source Control</div>
         </div>
         <div class="panel-body">
-          <div class="sidebar-git-panel">
-            <input type="text" placeholder="Commit message (Ctrl+Enter)..." />
-            <button class="git-commit-btn">Commit Changes</button>
-            <div
-              style="font-size: 0.75rem; color: var(--text-muted); margin-top: 12px; border-top: 1px solid var(--border-color); padding-top: 8px;"
+          <div class="sidebar-git-panel" style="display: flex; flex-direction: column; gap: 8px; padding: 12px;">
+            <input 
+              type="text" 
+              placeholder="Commit message (Ctrl+Enter)..." 
+              bind:value={gitCommitMessage}
+              disabled={gitCommitting}
+              onkeydown={async (e) => {
+                if (e.key === 'Enter' && e.ctrlKey && !gitCommitting) {
+                  const msg = gitCommitMessage.trim();
+                  if (msg) {
+                    gitCommitting = true;
+                    gitCommitFeedback = "";
+                    try {
+                      await actions.commitChanges(msg);
+                      gitCommitMessage = "";
+                      gitCommitFeedback = "Commit successful!";
+                      setTimeout(() => { gitCommitFeedback = ""; }, 3000);
+                    } catch (err) {
+                      gitCommitFeedback = "Failed to commit.";
+                      setTimeout(() => { gitCommitFeedback = ""; }, 4000);
+                    } finally {
+                      gitCommitting = false;
+                    }
+                  }
+                }
+              }}
+              style="width: 100%; padding: 6px 10px; font-size: 0.76rem;"
+            />
+            <button 
+              class="git-commit-btn" 
+              disabled={!gitCommitMessage.trim() || gitCommitting} 
+              onclick={async () => {
+                const msg = gitCommitMessage.trim();
+                if (msg) {
+                  gitCommitting = true;
+                  gitCommitFeedback = "";
+                  try {
+                    await actions.commitChanges(msg);
+                    gitCommitMessage = "";
+                    gitCommitFeedback = "Commit successful!";
+                    setTimeout(() => { gitCommitFeedback = ""; }, 3000);
+                  } catch (err) {
+                    gitCommitFeedback = "Failed to commit.";
+                    setTimeout(() => { gitCommitFeedback = ""; }, 4000);
+                  } finally {
+                    gitCommitting = false;
+                  }
+                }
+              }}
+              style="width: 100%; margin-top: 4px;"
             >
-              <strong style="display: block; margin-bottom: 4px;"
-                >Staged Changes (2)</strong
+              {gitCommitting ? "Committing..." : "Commit Changes"}
+            </button>
+            
+            {#if gitCommitFeedback}
+              <div 
+                style="font-size: 0.72rem; text-align: center; margin-top: 2px; font-weight: 500;
+                  {gitCommitFeedback.includes('Failed') ? 'color: var(--accent-error);' : 'color: var(--accent-success);'}"
               >
-              <div
-                style="padding: 2px 0; color: var(--accent-success); font-family: var(--font-mono); font-size: 0.7rem;"
-              >
-                M Core/Src/main.c
+                {gitCommitFeedback}
               </div>
-              <div
-                style="padding: 2px 0; color: var(--text-muted); font-family: var(--font-mono); font-size: 0.7rem;"
-              >
-                M CMakeLists.txt
+            {/if}
+            
+            <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 12px; border-top: 1px solid var(--border-color); padding-top: 8px;">
+              <strong style="display: block; margin-bottom: 6px;">
+                Changed Files ({$workspaceStore.gitChanges.length})
+              </strong>
+              
+              <div style="max-height: 250px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;">
+                {#each $workspaceStore.gitChanges as change}
+                  <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; background: rgba(255,255,255,0.02); border-radius: 3px; font-family: var(--font-mono); font-size: 0.7rem;">
+                    <span 
+                      style="text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 180px; color: var(--text-active);"
+                      title={change.path}
+                    >
+                      {change.path}
+                    </span>
+                    <span 
+                      style="font-weight: 700; font-size: 0.65rem; padding: 1px 4px; border-radius: 2px;
+                        {change.status.includes('M') ? 'color: var(--accent-warning); background: rgba(245,158,11,0.1);' : 
+                         change.status.includes('?') ? 'color: var(--accent-cyan); background: rgba(6,182,212,0.1);' : 
+                         change.status.includes('A') ? 'color: var(--accent-success); background: rgba(16,185,129,0.1);' : 
+                         change.status.includes('D') ? 'color: var(--accent-error); background: rgba(239,68,68,0.1);' : 
+                         'color: var(--text-muted);'}"
+                    >
+                      {change.status}
+                    </span>
+                  </div>
+                {/each}
+                
+                {#if $workspaceStore.gitChanges.length === 0}
+                  <div style="font-size: 0.7rem; color: var(--text-dark); padding: 8px 0; font-style: italic;">
+                    No staged or unstaged changes.
+                  </div>
+                {/if}
               </div>
             </div>
           </div>
@@ -1314,18 +1454,30 @@
       <section class="monaco-editor-frame">
         <!-- Editor Header Tab bar -->
         <div class="editor-tabs">
-          {#if $workspaceStore.activeFile}
-            <div class="editor-tab active">
-              <FileCode size={12} style="color: var(--accent-violet-hover);" />
-              <span>{$workspaceStore.activeFile.split("/").pop()}</span>
+          {#each $workspaceStore.openFiles as path}
+            <!-- svelte-ignore a11y-click-events-have-key-events -->
+            <!-- svelte-ignore a11y-no-static-element-interactions -->
+            <div 
+              class="editor-tab {path === $workspaceStore.activeFile ? 'active' : ''}"
+              onclick={() => actions.setActiveFile(path)}
+            >
+              {#if path === $workspaceStore.activeFile}
+                <div class="active-tab-top-bar"></div>
+              {/if}
+              <FileCode size={12} style="color: {path === $workspaceStore.activeFile ? 'var(--accent-violet-hover)' : 'var(--text-dark)'};" />
+              <span>{path.split("/").pop()}</span>
               <!-- svelte-ignore a11y-click-events-have-key-events -->
               <!-- svelte-ignore a11y-no-static-element-interactions -->
               <span
                 class="close-tab"
-                onclick={() => actions.setActiveFile(null)}>×</span
-              >
+                onclick={(e) => {
+                  e.stopPropagation();
+                  actions.closeFileTab(path);
+                }}
+                title="Close Tab"
+              >×</span>
             </div>
-          {/if}
+          {/each}
           <button
             class="configurator-toggle-tab"
             onclick={() => (showConfigurator = !showConfigurator)}
@@ -1680,7 +1832,10 @@
                   <div class="agent-trace">
                     {#each msg.steps as step}
                       {#if step.kind === 'think'}
-                        <!-- thinking handled by the collapsible block below; skip inline -->
+                        <div class="agent-think-step">
+                          <span class="agent-think-icon">💭</span>
+                          <span class="agent-think-text-inline">{step.text}</span>
+                        </div>
                       {:else if step.kind === 'call'}
                         <div class="agent-call-card">
                           <span class="agent-call-icon"><Sparkles size={11} /></span>
@@ -1696,7 +1851,14 @@
                           <pre class="agent-code-body"><code>{step.code}</code></pre>
                         </div>
                       {:else if step.kind === 'result'}
-                        <div class="agent-result-line">↳ {step.result}</div>
+                        {#if step.result && step.result.includes('=== Unified Diff ===')}
+                          <div class="agent-result-line">↳ Code edits applied:</div>
+                          <div class="agent-diff-card">
+                            <pre class="agent-diff-body"><code>{#each parseDiff(step.result) as line}<span class="diff-line {line.type}">{line.text}</span>{"\n"}{/each}</code></pre>
+                          </div>
+                        {:else}
+                          <div class="agent-result-line">↳ {step.result}</div>
+                        {/if}
                       {:else if step.kind === 'note'}
                         <div class="agent-note-line">{step.text}</div>
                       {:else if step.kind === 'error'}
@@ -2019,6 +2181,139 @@
     </div>
   {/if}
 </div>
+
+<!-- Delete Project Confirmation Modal -->
+{#if deleteConfirmModal.show}
+  <!-- svelte-ignore a11y-click-events-have-key-events -->
+  <!-- svelte-ignore a11y-no-static-element-interactions -->
+  <div class="delete-modal-backdrop" onclick={() => deleteConfirmModal.show = false}>
+    <div class="delete-modal-card" onclick={(e) => e.stopPropagation()}>
+      <div class="delete-modal-header">
+        <div class="delete-modal-title">
+          <AlertTriangle size={16} class="delete-warning-icon" />
+          <span>Confirm Deletion</span>
+        </div>
+        <button class="delete-close-btn" onclick={() => deleteConfirmModal.show = false} title="Close">
+          <X size={14} />
+        </button>
+      </div>
+
+      <div class="delete-modal-body">
+        <p class="delete-msg-main">
+          Are you sure you want to delete <strong>'{deleteConfirmModal.projectName}'</strong>?
+        </p>
+        {#if deleteConfirmModal.isActiveProject}
+          <p class="delete-msg-sub">
+            This will permanently erase all project files and close the active workspace. This action cannot be undone.
+          </p>
+        {:else}
+          <p class="delete-msg-sub">
+            This will permanently erase all project files from the database. This action cannot be undone.
+          </p>
+        {/if}
+      </div>
+
+      <div class="delete-modal-footer">
+        <button class="delete-btn-cancel" onclick={() => deleteConfirmModal.show = false}>
+          Cancel
+        </button>
+        <button 
+          class="delete-btn-confirm" 
+          onclick={async () => {
+            const id = deleteConfirmModal.projectId;
+            const isActive = deleteConfirmModal.isActiveProject;
+            deleteConfirmModal.show = false;
+            if (isActive) {
+              await actions.deleteActiveProject(id);
+            } else {
+              await actions.deleteProject(id);
+            }
+          }}
+        >
+          <Trash2 size={13} style="margin-right: 4px;" />
+          Delete Workspace
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- Input Prompt Modal (New File / New Folder) -->
+{#if inputPromptModal.show}
+  <!-- svelte-ignore a11y-click-events-have-key-events -->
+  <!-- svelte-ignore a11y-no-static-element-interactions -->
+  <div class="delete-modal-backdrop" onclick={() => inputPromptModal.show = false}>
+    <div class="delete-modal-card" onclick={(e) => e.stopPropagation()}>
+      <div class="delete-modal-header">
+        <div class="delete-modal-title">
+          {#if inputPromptModal.actionType === 'file'}
+            <Plus size={15} style="color: var(--accent-violet);" />
+          {:else}
+            <FolderOpen size={14} style="color: var(--accent-violet);" />
+          {/if}
+          <span>{inputPromptModal.title}</span>
+        </div>
+        <button class="delete-close-btn" onclick={() => inputPromptModal.show = false} title="Close">
+          <X size={14} />
+        </button>
+      </div>
+
+      <div class="delete-modal-body">
+        <div class="modal-param-group">
+          <!-- svelte-ignore a11y-label-has-associated-control -->
+          <label style="font-size: 0.68rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; display: block;">
+            Name / Path
+          </label>
+          <input 
+            type="text" 
+            class="modal-input" 
+            placeholder={inputPromptModal.placeholder}
+            bind:value={inputPromptModal.value}
+            onkeydown={(e) => {
+              if (e.key === "Enter") {
+                const val = inputPromptModal.value.trim();
+                if (val) {
+                  inputPromptModal.show = false;
+                  if (inputPromptModal.actionType === "file") {
+                    actions.createFile(val);
+                  } else {
+                    actions.createFolder(val);
+                  }
+                }
+              } else if (e.key === "Escape") {
+                inputPromptModal.show = false;
+              }
+            }}
+            use:focusElement
+          />
+        </div>
+      </div>
+
+      <div class="delete-modal-footer">
+        <button class="delete-btn-cancel" onclick={() => inputPromptModal.show = false}>
+          Cancel
+        </button>
+        <button 
+          class="save-btn" 
+          disabled={!inputPromptModal.value.trim()}
+          onclick={() => {
+            const val = inputPromptModal.value.trim();
+            if (val) {
+              inputPromptModal.show = false;
+              if (inputPromptModal.actionType === "file") {
+                actions.createFile(val);
+              } else {
+                actions.createFolder(val);
+              }
+            }
+          }}
+        >
+          Create
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <style>
   /* Custom layouts specifically needed for Svelte overlays and resize indicators */
@@ -2586,5 +2881,72 @@
   }
   .chat-approve-btn:hover {
     opacity: 0.9;
+  }
+
+  /* Inline thinking step styling */
+  .agent-think-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 6px 0;
+    padding: 6px 10px;
+    background: rgba(255, 255, 255, 0.02);
+    border-left: 2px solid rgba(255, 255, 255, 0.15);
+    border-radius: 0 4px 4px 0;
+    font-size: 0.78rem;
+    color: #a1a1aa;
+  }
+  .agent-think-icon {
+    font-size: 0.9rem;
+    opacity: 0.8;
+  }
+  .agent-think-text-inline {
+    margin: 0;
+    font-style: italic;
+    line-height: 1.4;
+  }
+
+  /* Unified Diff visualization styles */
+  .agent-diff-card {
+    background: #0f1419; /* dark terminal background */
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    margin: 8px 0;
+    overflow: hidden;
+    max-width: 100%;
+  }
+  .agent-diff-body {
+    margin: 0;
+    padding: 10px;
+    font-family: var(--font-mono, monospace);
+    font-size: 0.72rem;
+    line-height: 1.5;
+    overflow-x: auto;
+    white-space: pre;
+  }
+  .diff-line {
+    display: block;
+    width: 100%;
+    padding: 0 4px;
+  }
+  .diff-line.add {
+    background: rgba(16, 185, 129, 0.15); /* green addition */
+    color: #34d399;
+  }
+  .diff-line.del {
+    background: rgba(239, 68, 68, 0.15); /* red deletion */
+    color: #f87171;
+  }
+  .diff-line.meta {
+    color: #60a5fa; /* blue headers/hunks */
+    font-weight: bold;
+    background: rgba(96, 165, 250, 0.05);
+  }
+  .diff-line.file {
+    color: #a78bfa; /* violet file paths */
+    font-weight: bold;
+  }
+  .diff-line.normal {
+    color: #d4d4d8;
   }
 </style>

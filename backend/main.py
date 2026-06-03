@@ -22,6 +22,7 @@ from api.routers import (
     components,
     conversations,
     files,
+    git,
     health,
     projects,
     rag,
@@ -53,6 +54,7 @@ app.include_router(files.router)
 app.include_router(agent.router)
 app.include_router(conversations.router)
 app.include_router(rag.router)
+app.include_router(git.router)
 
 if FRONTEND_ASSETS_DIR.exists():
     app.mount(
@@ -88,5 +90,5 @@ if __name__ == "__main__":
     uvicorn.run(
         app,
         host=os.environ.get("BACKEND_HOST", "127.0.0.1"),
-        port=int(os.environ.get("BACKEND_PORT", "62018")),
+        port=int(os.environ.get("BACKEND_PORT", "32018")),
     )
