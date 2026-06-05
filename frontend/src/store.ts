@@ -116,6 +116,8 @@ export const workspaceStore = writable({
   activeProjectId: null as string | null,
   projectsList: [] as any[],
   activeFile: null as string | null,
+  openFiles: [] as string[],
+  gitChanges: [] as { path: string; status: string }[],
   fileContents: {} as Record<string, string>,
   fileTree: [] as FileItem[],
 
@@ -145,6 +147,7 @@ export const workspaceStore = writable({
   aiMessages: [] as ChatMessage[],
   aiWaiting: false,
   queuedAiFollowup: null as string | null,
+  selectedProvider: "gemini",
 
   // UI Tabs
   activeBottomTab: "terminal" as "terminal" | "plotter" | "registers" | "memory" | "emulation",
@@ -243,6 +246,7 @@ export const actions = {
         fileTree,
         fileContents,
         activeFile: files.length > 0 ? "/" + files[0].path : null,
+        openFiles: files.length > 0 ? ["/" + files[0].path] : [],
         // Clear all session-specific state so previous project data doesn't bleed over
         aiMessages: [],
         buildLogs: [],
@@ -259,13 +263,57 @@ export const actions = {
       
       // Also fetch RAG documents for this project
       await actions.fetchRagDocuments();
+      // Load git status
+      await actions.loadGitStatus();
     } catch (e) {
       console.error("Failed to load project files", e);
     }
   },
 
   setActiveFile: (path: string | null) => {
-    workspaceStore.update(s => ({ ...s, activeFile: path }));
+    workspaceStore.update(s => {
+      if (!path) return { ...s, activeFile: null };
+      const openFiles = s.openFiles.includes(path) ? s.openFiles : [...s.openFiles, path];
+      return { ...s, openFiles, activeFile: path };
+    });
+  },
+
+  closeFileTab: (path: string) => {
+    workspaceStore.update(s => {
+      const openFiles = s.openFiles.filter(f => f !== path);
+      let activeFile = s.activeFile;
+      if (activeFile === path) {
+        activeFile = openFiles.length > 0 ? openFiles[openFiles.length - 1] : null;
+      }
+      return { ...s, openFiles, activeFile };
+    });
+  },
+
+  loadGitStatus: async () => {
+    let projectId: string | null = null;
+    workspaceStore.subscribe(s => { projectId = s.activeProjectId; })();
+    if (!projectId) return;
+
+    try {
+      const status = await api.getGitStatus();
+      workspaceStore.update(s => ({ ...s, gitChanges: status }));
+    } catch (e) {
+      console.error("Failed to load git status:", e);
+    }
+  },
+
+  commitChanges: async (message: string) => {
+    let projectId: string | null = null;
+    workspaceStore.subscribe(s => { projectId = s.activeProjectId; })();
+    if (!projectId) return;
+
+    try {
+      await api.commitChanges(message);
+      await actions.loadGitStatus();
+    } catch (e) {
+      console.error("Failed to commit changes:", e);
+      alert("Failed to commit changes: " + e.message);
+    }
   },
   
   updateFileContent: (path: string, content: string) => {
@@ -287,6 +335,7 @@ export const actions = {
           // Remove leading slash if present
           const relPath = path.startsWith('/') ? path.substring(1) : path;
           await api.upsertFile(projectId!, relPath, content);
+          await actions.loadGitStatus();
         } catch (e) {
           console.error("Failed to save file to backend:", e);
         }
@@ -299,9 +348,11 @@ export const actions = {
     workspaceStore.update(s => {
       projectId = s.activeProjectId;
       if (s.fileContents[fullPath] !== undefined) return s; // already exists
+      const openFiles = s.openFiles.includes(fullPath) ? s.openFiles : [...s.openFiles, fullPath];
       return {
         ...s,
         fileContents: { ...s.fileContents, [fullPath]: "" },
+        openFiles,
         activeFile: fullPath
       };
     });
@@ -416,6 +467,9 @@ export const actions = {
   },
   setActiveSidebarTab: (tab: "explorer" | "search" | "git" | "debug" | "extensions" | "boards" | "rag") => {
     workspaceStore.update(s => ({ ...s, activeSidebarTab: tab }));
+    if (tab === "git") {
+      actions.loadGitStatus();
+    }
   },
   setSelectedBoard: (board: "STM32F401" | "ESP32-S3" | "RP2040") => {
     workspaceStore.update(s => ({ ...s, selectedBoard: board }));
@@ -657,14 +711,21 @@ export const actions = {
     // @ts-ignore - save debounce is stored on window by updateFileContent
     clearTimeout(window.__saveTimeout);
     const { fileContents, fileTree } = buildProjectFileState(files);
-    workspaceStore.update(s => ({
-      ...s,
-      fileContents,
-      fileTree,
-      activeFile: s.activeFile && fileContents[s.activeFile] !== undefined
+    workspaceStore.update(s => {
+      const activeFile = s.activeFile && fileContents[s.activeFile] !== undefined
         ? s.activeFile
-        : (fileContents["/src/main.c"] !== undefined ? "/src/main.c" : Object.keys(fileContents)[0] || s.activeFile),
-    }));
+        : (fileContents["/src/main.c"] !== undefined ? "/src/main.c" : Object.keys(fileContents)[0] || s.activeFile);
+      const openFiles = activeFile && !s.openFiles.includes(activeFile) ? [...s.openFiles, activeFile] : s.openFiles;
+      return {
+        ...s,
+        fileContents,
+        fileTree,
+        activeFile,
+        openFiles
+      };
+    });
+    // Load git status
+    actions.loadGitStatus();
   },
 
   clearQueuedAiFollowup: () => {
@@ -724,7 +785,7 @@ export const actions = {
       let currentPhase: string | undefined = undefined;
       let buildOutput = "";
 
-      let selectedProvider = "openrouter";
+      let selectedProvider = "gemini";
       workspaceStore.update(s => {
         history = s.aiMessages.map(m => ({
           role: m.sender === "ai" ? "assistant" : "user",
@@ -737,7 +798,7 @@ export const actions = {
         }
 
         // Read the currently selected LLM provider
-        selectedProvider = (s as any).selectedProvider || "openrouter";
+        selectedProvider = (s as any).selectedProvider || "gemini";
         buildOutput = s.buildLogs.join("\n").slice(-20000);
 
         return s;
@@ -971,15 +1032,13 @@ export const actions = {
 
   deleteActiveProject: async (id: string) => {
     try {
-      if (confirm(`Are you sure you want to delete the active project? This will permanently erase all project files.`)) {
-        await api.deleteProject(id);
-        await actions.loadProjects();
-        workspaceStore.update(s => ({
-          ...s,
-          activeProjectId: null,
-          showWelcomeScreen: true
-        }));
-      }
+      await api.deleteProject(id);
+      await actions.loadProjects();
+      workspaceStore.update(s => ({
+        ...s,
+        activeProjectId: null,
+        showWelcomeScreen: true
+      }));
     } catch (e) {
       console.error("Failed to delete project", e);
       alert("Failed to delete project");

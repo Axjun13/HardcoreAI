@@ -36,9 +36,9 @@ Start the backend and frontend dev servers together from the repo root:
 ```bash
 node scripts/dev.mjs
 ```
-Open **[http://127.0.0.1:62016/](http://127.0.0.1:62016/)** in your browser.
-The frontend runs on port `62016`; the backend runs on port `62018`; the
-emulator service runs on port `62019`.
+Open **[http://127.0.0.1:32016/](http://127.0.0.1:32016/)** in your browser.
+The frontend runs on port `32016`; the backend runs on port `32018`; the
+emulator service runs on port `32017`.
 
 ---
 
@@ -52,11 +52,11 @@ node scripts/dev.mjs
 
 Optional backend bind settings:
 ```bash
-BACKEND_HOST=127.0.0.1 BACKEND_PORT=62018 node scripts/dev.mjs
+BACKEND_HOST=127.0.0.1 BACKEND_PORT=32018 node scripts/dev.mjs
 ```
 On Windows PowerShell:
 ```powershell
-$env:BACKEND_HOST="127.0.0.1"; $env:BACKEND_PORT="62018"; node scripts/dev.mjs
+$env:BACKEND_HOST="127.0.0.1"; $env:BACKEND_PORT="32018"; node scripts/dev.mjs
 ```
 
 ### Build Single App
@@ -78,8 +78,8 @@ If `frontend/dist` is already built:
 node scripts/run-build.mjs --skip-build
 ```
 
-Open **[http://127.0.0.1:62018/](http://127.0.0.1:62018/)**.
-The emulator API is started automatically on `http://127.0.0.1:62019/`.
+Open **[http://127.0.0.1:32018/](http://127.0.0.1:32018/)**.
+The emulator API is started automatically on `http://127.0.0.1:62017/`.
 
 ### Release Package
 Create a release archive under `release/`:

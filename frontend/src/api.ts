@@ -1,8 +1,8 @@
 const DEFAULT_BACKEND_URL = import.meta.env.DEV
-  ? "http://127.0.0.1:62018"
+  ? "http://127.0.0.1:32018"
   : window.location.origin;
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || DEFAULT_BACKEND_URL;
-const EMULATOR_URL = import.meta.env.VITE_EMULATOR_URL || "http://127.0.0.1:62019";
+const EMULATOR_URL = import.meta.env.VITE_EMULATOR_URL || "http://127.0.0.1:32017";
 let activeProjectId: string | null = null; // Default to null so Landing Page shows
 
 async function fetchEmulator(path: string, init?: RequestInit) {
@@ -167,7 +167,7 @@ export const api = {
     return res.json();
   },
 
-  async askAgent(query: string, conversationHistory?: any[], phase?: string, provider: string = "openrouter", buildOutput: string = "") {
+  async askAgent(query: string, conversationHistory?: any[], phase?: string, provider: string = "gemini", buildOutput: string = "") {
     const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/agent/solve`, {
       method: "POST",
       headers: {
@@ -186,6 +186,29 @@ export const api = {
     return res.json();
   },
 
+  async getGitStatus() {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/git/status`, {
+      headers: {
+        "Authorization": "Bearer TEST_TOKEN"
+      }
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async commitChanges(message: string) {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/git/commit`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer TEST_TOKEN"
+      },
+      body: JSON.stringify({ message })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
   /**
    * Stream the agent run over SSE. Calls onEvent for each parsed event
    * ({type: "think"|"call"|"code"|"result"|"question"|"plan"|"note"|"final"|"done"|"error", ...}).
@@ -197,7 +220,7 @@ export const api = {
     onEvent: (event: any) => void,
     conversationHistory?: any[],
     phase?: string,
-    provider: string = "openrouter",
+    provider: string = "gemini",
     buildOutput: string = "",
     signal?: AbortSignal
   ) {

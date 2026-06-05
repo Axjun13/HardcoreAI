@@ -10,9 +10,9 @@ const frontendDir = resolve(repoRoot, "frontend");
 const isWindows = process.platform === "win32";
 
 const backendHost = process.env.BACKEND_HOST || "127.0.0.1";
-const backendPort = process.env.BACKEND_PORT || "62018";
+const backendPort = process.env.BACKEND_PORT || "32018";
 const emulatorHost = process.env.EMULATOR_HOST || "127.0.0.1";
-const emulatorPort = process.env.EMULATOR_PORT || "62019";
+const emulatorPort = process.env.EMULATOR_PORT || "32017";
 const npmCommand = isWindows ? "npm.cmd" : "npm";
 
 const children = new Set();
@@ -120,7 +120,7 @@ function startProcess(name, command, args, cwd, extraEnv = {}) {
     cwd,
     detached: !isWindows,
     env,
-    shell: false,
+    shell: isWindows,
     stdio: ["ignore", "pipe", "pipe"],
   });
 
@@ -201,14 +201,14 @@ Usage:
 
 Environment:
   BACKEND_HOST  Backend bind host, default 127.0.0.1
-  BACKEND_PORT  Backend bind port, default 62018
+  BACKEND_PORT  Backend bind port, default 32018
   EMULATOR_HOST Emulator bind host, default 127.0.0.1
-  EMULATOR_PORT Emulator bind port, default 62019
+  EMULATOR_PORT Emulator bind port, default 32017
 
 Services:
   backend   http://${backendHost}:${backendPort}
   emulator  http://${emulatorHost}:${emulatorPort}
-  frontend  http://127.0.0.1:62016`);
+  frontend  http://127.0.0.1:32016`);
 }
 
 if (process.argv.includes("--help") || process.argv.includes("-h")) {
@@ -222,7 +222,7 @@ const emulator = emulatorCommand();
 console.log("Starting HardcoreAI dev servers...");
 console.log(`backend   http://${backendHost}:${backendPort}`);
 console.log(`emulator  http://${emulatorHost}:${emulatorPort}`);
-console.log("frontend  http://127.0.0.1:62016");
+console.log("frontend  http://127.0.0.1:32016");
 console.log("Press Ctrl+C to stop all.");
 
 startProcess("backend", backend.command, backend.args, backendDir);

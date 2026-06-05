@@ -382,6 +382,115 @@ class CodingToolbox(Toolbox):
         self.files[path] = {"language": language, "content": content}
         return f"Successfully wrote {len(content)} bytes to {path}."
 
+    @tool
+    def list_files(self) -> str:
+        """List all files in the current project workspace."""
+        if not self.files:
+            return "The project workspace is empty."
+        lines = []
+        for path in sorted(self.files.keys()):
+            size = len(self.files[path].get("content", ""))
+            lang = self.files[path].get("language", "c")
+            lines.append(f"  - {path} ({size} bytes, language: {lang})")
+        return "Files in workspace:\n" + "\n".join(lines)
+
+    @tool
+    def view_file(self, path: str, start_line: int = 1, end_line: int = -1) -> str:
+        """View the content of a file in the workspace. Optionally specify start_line and end_line (1-indexed, inclusive) to read specific parts."""
+        if "/" not in path and "\\" not in path and (path.endswith(".c") or path.endswith(".h")):
+            path = "src/" + path
+            
+        file_meta = self.files.get(path)
+        if file_meta is None:
+            return f"ERROR: File '{path}' not found. Use list_files to see available files."
+            
+        content = file_meta.get("content", "")
+        lines = content.splitlines()
+        total_lines = len(lines)
+        
+        if end_line == -1 or end_line > total_lines:
+            end_line = total_lines
+            
+        if start_line < 1:
+            start_line = 1
+            
+        if start_line > total_lines:
+            return f"File '{path}' only has {total_lines} lines. Cannot read starting from line {start_line}."
+            
+        selected_lines = lines[start_line - 1 : end_line]
+        formatted = []
+        for idx, line in enumerate(selected_lines, start=start_line):
+            formatted.append(f"{idx:4d}: {line}")
+            
+        header = f"File: {path} (Showing lines {start_line} to {end_line} of {total_lines} total lines):\n"
+        return header + "\n".join(formatted)
+
+    @tool
+    def create_file(self, path: str, content: str = "") -> str:
+        """Create a new file in the workspace with optional initial content."""
+        if "/" not in path and "\\" not in path and (path.endswith(".c") or path.endswith(".h")):
+            path = "src/" + path
+            
+        if path in self.files:
+            return f"ERROR: File '{path}' already exists. Use write_file or file_edit to modify it."
+            
+        language = "markdown" if path.endswith(".md") else ("c" if (path.endswith(".c") or path.endswith(".h")) else "text")
+        self.files[path] = {"language": language, "content": content}
+        return f"Successfully created file '{path}' ({len(content)} bytes)."
+
+    @tool
+    def delete_file(self, path: str, confirmed: bool = False) -> str:
+        """Delete a file from the workspace. You MUST get user confirmation first. Calling this tool with confirmed=False will automatically prompt the user for approval; call it with confirmed=True only after the user explicitly approves it."""
+        if "/" not in path and "\\" not in path and (path.endswith(".c") or path.endswith(".h")):
+            path = "src/" + path
+            
+        if path not in self.files:
+            return f"ERROR: File '{path}' not found."
+            
+        if not confirmed:
+            raise AskUserException(
+                question=f"Are you sure you want to delete the file '{path}'? This action cannot be undone.",
+                options="Yes, No"
+            )
+            
+        del self.files[path]
+        return f"Successfully deleted file '{path}'."
+
+    @tool
+    def copy_file(self, src: str, dest: str) -> str:
+        """Copy a file from src to dest in the workspace."""
+        if "/" not in src and "\\" not in src and (src.endswith(".c") or src.endswith(".h")):
+            src = "src/" + src
+        if "/" not in dest and "\\" not in dest and (dest.endswith(".c") or dest.endswith(".h")):
+            dest = "src/" + dest
+            
+        if src not in self.files:
+            return f"ERROR: Source file '{src}' not found."
+            
+        self.files[dest] = {
+            "language": self.files[src].get("language", "c"),
+            "content": self.files[src].get("content", "")
+        }
+        return f"Successfully copied '{src}' to '{dest}'."
+
+    @tool
+    def move_file(self, src: str, dest: str) -> str:
+        """Move or rename a file from src to dest in the workspace."""
+        if "/" not in src and "\\" not in src and (src.endswith(".c") or src.endswith(".h")):
+            src = "src/" + src
+        if "/" not in dest and "\\" not in dest and (dest.endswith(".c") or dest.endswith(".h")):
+            dest = "src/" + dest
+            
+        if src not in self.files:
+            return f"ERROR: Source file '{src}' not found."
+            
+        self.files[dest] = {
+            "language": self.files[src].get("language", "c"),
+            "content": self.files[src].get("content", "")
+        }
+        del self.files[src]
+        return f"Successfully moved/renamed '{src}' to '{dest}'."
+
     @tool(wants_body=True)
     def file_edit(self, path: str, old: str = "", new: str = "") -> str:
         """Edit part of a file: keep one unchanged context line above and below the change.
@@ -417,21 +526,128 @@ class CodingToolbox(Toolbox):
             if parse_err is not None:
                 return f"ERROR: {parse_err}"
 
-        content, results = editmatch.apply_all(meta["content"], edits)
+        original_content = meta["content"]
+        content, results = editmatch.apply_all(original_content, edits)
         applied = [r for r in results if r.applied]
         failed = next((r for r in results if r.error is not None), None)
 
         if failed is not None:
-            # apply_all keeps earlier successes in `content`; persist them so
-            # the model sees partial progress, then report the failing site.
             if applied:
                 meta["content"] = content
             done = f"{len(applied)} edit(s) applied; " if applied else ""
             return f"ERROR: {done}edit #{len(applied) + 1} failed: {failed.error}"
 
         meta["content"] = content
+        
+        # Calculate unified diff
+        import difflib
+        diff_lines = list(difflib.unified_diff(
+            original_content.splitlines(),
+            content.splitlines(),
+            fromfile=f"a/{path}",
+            tofile=f"b/{path}",
+            lineterm=""
+        ))
+        diff_text = "\n".join(diff_lines)
+        
         spans = ", ".join(f"L{r.start_line}-{r.end_line}" for r in applied)
-        return f"Applied {len(applied)} edit(s) to {path} ({spans})."
+        return (
+            f"Applied {len(applied)} edit(s) to {path} ({spans}).\n\n"
+            f"=== Unified Diff ===\n"
+            f"{diff_text}\n"
+            f"===================="
+        )
+
+    @tool
+    def grep_search(self, query: str) -> str:
+        """Search for a regular expression or plain-text query across all files in the workspace. Returns matching lines with line numbers."""
+        import re
+        try:
+            pattern = re.compile(query, re.IGNORECASE)
+        except re.error as exc:
+            return f"ERROR: Invalid regex pattern: {exc}"
+            
+        matches = []
+        for path, file_meta in self.files.items():
+            content = file_meta.get("content", "")
+            lines = content.splitlines()
+            for line_idx, line in enumerate(lines, start=1):
+                if pattern.search(line):
+                    matches.append(f"  - {path}:{line_idx}: {line.strip()}")
+                    
+        if not matches:
+            return f"No matches found for query: '{query}'"
+            
+        return f"Found {len(matches)} match(es) for query '{query}':\n" + "\n".join(matches[:50])
+
+    @tool
+    def sed_replace(self, path: str, pattern: str, replacement: str) -> str:
+        """Perform a regex-based search and replace inside a specific file. Returns a unified diff of the change."""
+        import re
+        import difflib
+        
+        if "/" not in path and "\\" not in path and (path.endswith(".c") or path.endswith(".h")):
+            path = "src/" + path
+            
+        file_meta = self.files.get(path)
+        if file_meta is None:
+            return f"ERROR: File '{path}' not found."
+            
+        original_content = file_meta.get("content", "")
+        
+        try:
+            compiled_pattern = re.compile(pattern)
+        except re.error as exc:
+            return f"ERROR: Invalid regex pattern: {exc}"
+            
+        new_content, count = compiled_pattern.subn(replacement, original_content)
+        
+        if count == 0:
+            return f"No replacements made in '{path}' using pattern '{pattern}'."
+            
+        diff_lines = list(difflib.unified_diff(
+            original_content.splitlines(),
+            new_content.splitlines(),
+            fromfile=f"a/{path}",
+            tofile=f"b/{path}",
+            lineterm=""
+        ))
+        
+        file_meta["content"] = new_content
+        diff_text = "\n".join(diff_lines)
+        return (
+            f"Successfully made {count} replacement(s) in '{path}'.\n\n"
+            f"=== Unified Diff ===\n"
+            f"{diff_text}\n"
+            f"===================="
+        )
+
+    @tool
+    def git_log(self) -> str:
+        """Show the Git commit history of the workspace repository."""
+        if not self.project_id:
+            return "ERROR: Project ID is not set. Cannot access git repository."
+        from .git_manager import GitManager
+        git_mgr = GitManager(self.project_id)
+        return git_mgr.get_log()
+
+    @tool
+    def git_diff(self, commit_a: str, commit_b: str) -> str:
+        """Show the Git diff between two commits or revisions (e.g. HEAD~1, HEAD)."""
+        if not self.project_id:
+            return "ERROR: Project ID is not set. Cannot access git repository."
+        from .git_manager import GitManager
+        git_mgr = GitManager(self.project_id)
+        return git_mgr.get_diff(commit_a, commit_b)
+
+    @tool
+    def git_show(self, commit: str) -> str:
+        """Show the changes made in a specific Git commit."""
+        if not self.project_id:
+            return "ERROR: Project ID is not set. Cannot access git repository."
+        from .git_manager import GitManager
+        git_mgr = GitManager(self.project_id)
+        return git_mgr.get_show(commit)
 
     @tool
     def list_supported_boards(self) -> str:
@@ -499,7 +715,8 @@ class DebuggingToolbox(Toolbox):
     def __init__(self, *args, **kwargs):
         self.files = kwargs.pop("files", {})
         super().__init__(*args, **kwargs)
-        self.emulator_url = "http://127.0.0.1:62019"
+        import os
+        self.emulator_url = os.environ.get("EMULATOR_URL", "http://127.0.0.1:32017")
 
     @tool
     def build_and_run(self) -> str:

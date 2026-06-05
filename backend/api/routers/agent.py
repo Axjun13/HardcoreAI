@@ -118,6 +118,11 @@ async def agent_solve(project_id: str, payload: AgentRequest, user_id: str = Dep
         catalogue = catalogue_index(session)
         saved_state = read_workbench(session, project)
         files_dict = _files_as_dict(session, project)
+        
+        from agent.git_manager import GitManager
+        git_mgr = GitManager(project_id)
+        git_mgr.sync_db_to_disk(files_dict)
+        git_mgr.commit_changes("Initial workspace sync")
 
     prior_history = _strip_duplicate_turn(payload.conversation_history, payload.problem)
 
@@ -138,6 +143,8 @@ async def agent_solve(project_id: str, payload: AgentRequest, user_id: str = Dep
         raise HTTPException(status_code=502, detail=f"LLM error: {exc}")
 
     final_state, final_files = _persist_files(user_id, project_id, files_dict, new_files)
+    git_mgr.sync_db_to_disk(new_files)
+    git_mgr.commit_changes(f"Agent solve: {payload.problem[:60]}")
 
     # Empty placeholder traces for the wiring and debugging slots the schema requires.
     empty_wiring = AgentTrace(phase="wiring", final="")
@@ -190,6 +197,11 @@ async def agent_stream(project_id: str, payload: AgentRequest, user_id: str = De
         saved_state = read_workbench(session, project)
         files_dict = _files_as_dict(session, project)
         project_name = project.name
+        
+    from agent.git_manager import GitManager
+    git_mgr = GitManager(project_id)
+    git_mgr.sync_db_to_disk(files_dict)
+    git_mgr.commit_changes("Initial workspace sync")
 
     prior_history = _strip_duplicate_turn(payload.conversation_history, payload.problem)
 
@@ -217,6 +229,8 @@ async def agent_stream(project_id: str, payload: AgentRequest, user_id: str = De
             final_state, final_files = _persist_files(
                 user_id, project_id, files_dict, new_files
             )
+            git_mgr.sync_db_to_disk(new_files)
+            git_mgr.commit_changes(f"Agent solve: {payload.problem[:60]}")
             await queue.put({
                 "type": "done",
                 "status": getattr(agent_trace, "status", "completed"),

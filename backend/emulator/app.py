@@ -231,7 +231,7 @@ def main() -> None:
     import uvicorn
 
     host = os.environ.get("EMULATOR_HOST", "127.0.0.1")
-    port = int(os.environ.get("EMULATOR_PORT", "62019"))
+    port = int(os.environ.get("EMULATOR_PORT", "32017"))
     print(f"Server running on http://{host}:{port}")
     uvicorn.run(app, host=host, port=port, log_level="warning")
 
