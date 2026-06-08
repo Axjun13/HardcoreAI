@@ -16,11 +16,11 @@ backend/data/
 backend/bin/
 backend/projects.db
 backend/test_*.py
-
-# --- Emulator Service (Python) ---
-# PlatformIO build output for the bundled firmware; regenerated with
-# `pio run -d backend/emulator/Blinky`.
-backend/emulator/Blinky/.pio/
+# Vendored flash toolchain (OpenOCD) — fetched per-platform by scripts/fetch-tools.mjs.
+# Binaries are large and OS-specific; don't commit them, but keep the README.
+backend/vendor/**
+!backend/vendor/
+!backend/vendor/README.md
 
 # --- Contract test suite (repo-root tests/) ---
 .venv-tests/

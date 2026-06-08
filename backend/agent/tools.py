@@ -195,7 +195,7 @@ class Toolbox:
 
     @tool
     def read_build_output(self) -> str:
-        """Read the latest Build Output console text from the frontend."""
+        """Read the log of a PREVIOUS build (does NOT compile; use build() to compile)."""
         output = (self.build_output or "").strip()
         if not output:
             return "Build Output console is empty. Ask the user to build the project, or have them copy and paste the Build Output if this snapshot is unavailable."
@@ -203,6 +203,44 @@ class Toolbox:
             output = output[-12000:]
             return "(showing the last 12000 characters of Build Output)\n" + output
         return output
+
+    @tool
+    def build(self) -> str:
+        """Actually compile the firmware with PlatformIO (same as the Build button).
+
+        Use this whenever asked to build/compile/make. Stores the full compiler
+        output so a later read_build_output() returns it. Returns a short summary
+        (status + the tail of the log) for the model."""
+        if not self.project_id:
+            return "ERROR: No project is associated with this run; cannot build."
+        from services import hardware
+
+        result = hardware.build_project(self.project_id)
+        # Persist the real output so read_build_output() reflects this build.
+        self.build_output = result.output or ""
+        tail = (result.output or "").strip()
+        if len(tail) > 4000:
+            tail = "(last 4000 chars)\n" + tail[-4000:]
+        status = "SUCCESS" if result.success else f"FAILED (exit {result.returncode})"
+        fw = f"\nFirmware: {result.firmware_path}" if result.firmware_path else ""
+        return f"Build {status} in {result.duration_s}s.{fw}\n\n{tail}"
+
+    @tool
+    def flash(self) -> str:
+        """Flash the built firmware to a connected STM32 (Blue Pill) over ST-Link.
+
+        Builds first if needed. If no board is connected this returns a clear
+        'no device' message rather than failing."""
+        if not self.project_id:
+            return "ERROR: No project is associated with this run; cannot flash."
+        from services import hardware
+
+        result = hardware.flash_project(self.project_id)
+        if result.flashed:
+            return f"Flash SUCCESS.\n\n{(result.output or '').strip()[-2000:]}"
+        if result.reason == "no_device":
+            return f"No device connected — nothing was flashed. {result.output}".strip()
+        return f"Flash FAILED ({result.reason}, exit {result.returncode}).\n\n{(result.output or '').strip()[-2000:]}"
 
 
 # ---------------------------------------------------------------------------
@@ -700,79 +738,3 @@ CRITICAL: Always use HSI oscillator. HSE is not supported by the QEMU emulator."
 
         lines = [f"  {endpoint(w['from'])} <-> {endpoint(w['to'])}" for w in wires]
         return f"Netlist ({len(wires)} connections):\n" + "\n".join(lines)
-
-
-
-# ---------------------------------------------------------------------------
-# Phase 3 — DEBUGGING toolbox
-# ---------------------------------------------------------------------------
-
-import httpx
-
-class DebuggingToolbox(Toolbox):
-    """Run the Go emulator to build, flash, and debug the STM32 code."""
-
-    def __init__(self, *args, **kwargs):
-        self.files = kwargs.pop("files", {})
-        super().__init__(*args, **kwargs)
-        import os
-        self.emulator_url = os.environ.get("EMULATOR_URL", "http://127.0.0.1:32017")
-
-    @tool
-    def build_and_run(self) -> str:
-        """Build the firmware from the current code files and run it in the emulator."""
-        pio_files = [{"path": p, "content": f["content"]} for p, f in self.files.items()]
-        if not any(f["path"] == "platformio.ini" for f in pio_files):
-            pio_files.append({
-                "path": "platformio.ini",
-                "content": "[env:genericSTM32F405RG]\\nplatform = ststm32\\nboard = genericSTM32F405RG\\nframework = stm32cube\\n"
-            })
-            
-        try:
-            resp = httpx.post(f"{self.emulator_url}/platformio/build", json={
-                "projectPath": "./Blinky",
-                "files": pio_files
-            }, timeout=30.0)
-            if resp.status_code != 200:
-                return f"ERROR: Build failed:\\n{resp.text}"
-                
-            # Now run it
-            resp_run = httpx.get(f"{self.emulator_url}/qemu/run", timeout=10.0)
-            if resp_run.status_code != 200:
-                return f"ERROR: Run failed:\\n{resp_run.text}"
-            return "Firmware built and QEMU is running. You can now connect the debugger."
-        except Exception as e:
-            return f"ERROR: {e}"
-
-    @tool
-    def connect_debugger(self) -> str:
-        """Connect GDB to the running emulator."""
-        try:
-            resp = httpx.get(f"{self.emulator_url}/debug/connect", timeout=10.0)
-            if resp.status_code != 200:
-                return f"ERROR: Connect failed:\\n{resp.text}"
-            return resp.text
-        except Exception as e:
-            return f"ERROR: {e}"
-
-    @tool
-    def read_registers(self) -> str:
-        """Read CPU registers (PC, SP, R0-R12, etc.)."""
-        try:
-            resp = httpx.get(f"{self.emulator_url}/debug/registers", timeout=5.0)
-            if resp.status_code != 200:
-                return f"ERROR: Failed to read registers:\\n{resp.text}"
-            return resp.text
-        except Exception as e:
-            return f"ERROR: {e}"
-
-    @tool
-    def step_debugger(self) -> str:
-        """Step the CPU by one instruction."""
-        try:
-            resp = httpx.get(f"{self.emulator_url}/debug/step", timeout=5.0)
-            if resp.status_code != 200:
-                return f"ERROR: Step failed:\\n{resp.text}"
-            return resp.text
-        except Exception as e:
-            return f"ERROR: {e}"

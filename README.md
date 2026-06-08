@@ -37,8 +37,7 @@ Start the backend and frontend dev servers together from the repo root:
 node scripts/dev.mjs
 ```
 Open **[http://127.0.0.1:32016/](http://127.0.0.1:32016/)** in your browser.
-The frontend runs on port `32016`; the backend runs on port `32018`; the
-emulator service runs on port `32017`.
+The frontend runs on port `32016`; the backend runs on port `32018`.
 
 ---
 
@@ -67,8 +66,7 @@ node scripts/build.mjs
 FastAPI serves the built frontend from `frontend/dist`.
 
 ### Build And Run Single App
-Build the single app, then run FastAPI serving the built Svelte app plus the
-emulator service:
+Build the single app, then run FastAPI serving the built Svelte app:
 ```bash
 node scripts/run-build.mjs
 ```
@@ -79,7 +77,6 @@ node scripts/run-build.mjs --skip-build
 ```
 
 Open **[http://127.0.0.1:32018/](http://127.0.0.1:32018/)**.
-The emulator API is started automatically on `http://127.0.0.1:62017/`.
 
 ### Release Package
 Create a release archive under `release/`:

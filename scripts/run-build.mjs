@@ -9,8 +9,6 @@ const backendDir = resolve(repoRoot, "backend");
 const isWindows = process.platform === "win32";
 const backendHost = process.env.BACKEND_HOST || "127.0.0.1";
 const backendPort = process.env.BACKEND_PORT || "62018";
-const emulatorHost = process.env.EMULATOR_HOST || "127.0.0.1";
-const emulatorPort = process.env.EMULATOR_PORT || "62019";
 
 const children = new Set();
 let shuttingDown = false;
@@ -64,22 +62,6 @@ function backendCommand() {
       "--port",
       backendPort,
     ],
-  };
-}
-
-function emulatorCommand() {
-  const uvCommand = isWindows ? "uv.exe" : "uv";
-
-  if (commandExists(uvCommand)) {
-    return {
-      command: uvCommand,
-      args: ["run", "python", "-m", "emulator.app"],
-    };
-  }
-
-  return {
-    command: backendPython(),
-    args: ["-m", "emulator.app"],
   };
 }
 
@@ -215,9 +197,7 @@ Usage:
 
 Environment:
   BACKEND_HOST  Backend bind host, default 127.0.0.1
-  BACKEND_PORT  Backend bind port, default 62018
-  EMULATOR_HOST Emulator bind host, default 127.0.0.1
-  EMULATOR_PORT Emulator bind port, default 62019`);
+  BACKEND_PORT  Backend bind port, default 62018`);
   process.exit(0);
 }
 
@@ -226,17 +206,11 @@ if (!process.argv.includes("--skip-build")) {
 }
 
 const backend = backendCommand();
-const emulator = emulatorCommand();
 
 console.log(`\nServing single app at http://${backendHost}:${backendPort}`);
-console.log(`Emulator service at http://${emulatorHost}:${emulatorPort}`);
-console.log("Press Ctrl+C to stop both.");
+console.log("Press Ctrl+C to stop.");
 
 startProcess("backend", backend.command, backend.args, backendDir);
-startProcess("emulator", emulator.command, emulator.args, backendDir, {
-  EMULATOR_HOST: emulatorHost,
-  EMULATOR_PORT: emulatorPort,
-});
 
 process.on("SIGINT", () => stopAll(0));
 process.on("SIGTERM", () => stopAll(0));

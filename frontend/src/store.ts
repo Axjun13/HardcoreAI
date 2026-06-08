@@ -125,6 +125,8 @@ export const workspaceStore = writable({
   isCompiling: false,
   isFlashing: false,
   buildLogs: [] as string[],
+  // Live hardware connection status (polled from the backend)
+  deviceStatus: { connected: false, probe: null as string | null, target: null as string | null, detail: "" },
 
   // GDB Debugging
   isDebugging: false,
@@ -147,10 +149,11 @@ export const workspaceStore = writable({
   aiMessages: [] as ChatMessage[],
   aiWaiting: false,
   queuedAiFollowup: null as string | null,
-  selectedProvider: "gemini",
+  selectedProvider: "openrouter",
 
   // UI Tabs
-  activeBottomTab: "terminal" as "terminal" | "plotter" | "registers" | "memory" | "emulation",
+  activeBottomTab: "terminal" as "terminal" | "plotter" | "registers" | "memory",
+  terminalOpen: true,  // whether the bottom drawer (serial/build/etc.) is expanded
   showWelcomeScreen: true,
   activeSidebarTab: "explorer" as "explorer" | "search" | "git" | "debug" | "extensions" | "boards" | "rag",
   selectedBoard: "STM32F401" as "STM32F401" | "ESP32-S3" | "RP2040",
@@ -161,10 +164,6 @@ export const workspaceStore = writable({
   // Interactive Pin Configuration
   pins: initialPins as PinConfig[],
   
-  // Emulation State
-  emulationRunning: false,
-  emulationFrequency: "84 MHz" as "1 Hz" | "10 Hz" | "100 Hz" | "1 kHz" | "10 kHz" | "1 MHz" | "84 MHz",
-  emulationLogs: [] as string[],
   analogSensors: {
     temp: 24.5,
     voltage: 3.3,
@@ -210,7 +209,7 @@ export const actions = {
         ...s,
         fileTree,
         fileContents,
-        // Intentionally do NOT touch aiMessages, buildLogs, emulationLogs, serialLogs
+        // Intentionally do NOT touch aiMessages, buildLogs, serialLogs
       }));
     } catch (e) {
       console.error("Failed to refresh project files", e);
@@ -250,9 +249,7 @@ export const actions = {
         // Clear all session-specific state so previous project data doesn't bleed over
         aiMessages: [],
         buildLogs: [],
-        emulationLogs: [],
         serialLogs: [],
-        emulationRunning: false,
         isDebugging: false,
         debuggerActive: false,
         currentLine: null,
@@ -312,7 +309,7 @@ export const actions = {
       await actions.loadGitStatus();
     } catch (e) {
       console.error("Failed to commit changes:", e);
-      alert("Failed to commit changes: " + e.message);
+      alert("Failed to commit changes: " + (e instanceof Error ? e.message : String(e)));
     }
   },
   
@@ -398,6 +395,104 @@ export const actions = {
   clearBuildLogs: () => {
     workspaceStore.update(s => ({ ...s, buildLogs: [] }));
   },
+
+  // Real PlatformIO build — streams the compiler output live into the Build Output
+  // tab (auto-opening it), then feeds the result to the agent.
+  runBuild: async () => {
+    let projectId: string | null = null;
+    let busy = false;
+    workspaceStore.subscribe(s => { projectId = s.activeProjectId; busy = s.isCompiling; })();
+    if (!projectId) { actions.addBuildLog("No active project to build."); return; }
+    if (busy) return;
+
+    // Auto-open the bottom drawer on the BUILD OUTPUT tab so the user watches it run.
+    workspaceStore.update(s => ({ ...s, terminalOpen: true, activeBottomTab: "memory" }));
+    actions.setCompiling(true);
+    actions.clearBuildLogs();
+    actions.addBuildLog("Building firmware (PlatformIO)...");
+
+    let done: any = null;
+    try {
+      await api.streamBuild((event) => {
+        if (event.type === "status" || event.type === "line") {
+          actions.addBuildLog(event.text ?? "");
+        } else if (event.type === "done") {
+          done = event;
+        }
+      });
+    } catch (e) {
+      actions.addBuildLog("Build error: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      actions.setCompiling(false);
+    }
+
+    if (done) {
+      actions.addBuildLog(
+        done.success
+          ? `Build successful in ${done.duration_s}s.${done.firmware_path ? " -> " + done.firmware_path : ""}`
+          : `Build FAILED (exit ${done.returncode}).`
+      );
+      actions.notifyAgentOfBuild(done);
+    }
+  },
+
+  // After a build finishes, post a short outcome into the agent chat so it reacts
+  // (e.g. offers to fix on failure). The full build log flows to the agent via
+  // buildOutput on this message. sendAiMessage itself queues if an agent run is
+  // already in progress, so this never interrupts one.
+  notifyAgentOfBuild: (result: any) => {
+    const msg = result.success
+      ? "The firmware just built successfully. Briefly confirm and note anything worth checking."
+      : `The firmware build just FAILED (exit ${result.returncode}). Diagnose the error from the build output and propose a fix.`;
+    actions.sendAiMessage(msg);
+  },
+
+  // Flash the built firmware to a connected board — gated server-side on detection.
+  runFlash: async () => {
+    let projectId: string | null = null;
+    let busy = false;
+    workspaceStore.subscribe(s => { projectId = s.activeProjectId; busy = s.isFlashing; })();
+    if (!projectId) { actions.addBuildLog("No active project to flash."); return; }
+    if (busy) return;
+
+    actions.setFlashing(true);
+    actions.addBuildLog("Flashing firmware to target...");
+    try {
+      const res = await api.flashProject();
+      (res.output || "").split("\n").forEach((line: string) => { if (line.trim()) actions.addBuildLog(line); });
+      if (res.flashed) {
+        actions.addBuildLog("Flash successful. Target reset.");
+        actions.addSerialLog("[SYSTEM] Board reset. Flashed firmware execution initialized.");
+      } else if (res.reason === "no_device") {
+        actions.addBuildLog("No device connected — nothing was flashed.");
+      } else {
+        actions.addBuildLog(`Flash FAILED (${res.reason}, exit ${res.returncode}).`);
+      }
+    } catch (e) {
+      actions.addBuildLog("Flash error: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      actions.setFlashing(false);
+    }
+  },
+
+  // Poll whether an ST-Link + board is connected; drives the UI status chip.
+  pollDeviceStatus: async () => {
+    try {
+      const res = await api.getDeviceStatus();
+      workspaceStore.update(s => ({
+        ...s,
+        deviceStatus: {
+          connected: !!res.connected,
+          probe: res.probe ?? null,
+          target: res.target ?? null,
+          detail: res.detail ?? ""
+        }
+      }));
+    } catch (e) {
+      workspaceStore.update(s => ({ ...s, deviceStatus: { ...s.deviceStatus, connected: false } }));
+    }
+  },
+
   toggleBreakpoint: (line: number) => {
     workspaceStore.update(s => ({
       ...s,
@@ -414,13 +509,7 @@ export const actions = {
       currentLine: 20,
       activeBottomTab: "registers"
     }));
-    try {
-      await api.connectDebugger();
-      const regs = await api.getRegisters();
-      actions.addBuildLog(`[GDB] Debugger connected. Registers: \n${regs}`);
-    } catch (e: any) {
-      actions.addBuildLog(`[GDB] Failed to connect: ${e.message}`);
-    }
+    actions.addBuildLog('[GDB] Debugger UI requires backend GDB integration.');
   },
   stopDebugging: () => {
     workspaceStore.update(s => ({
@@ -441,8 +530,11 @@ export const actions = {
   addPlotPoint: (pt: PlotDataPoint) => {
     workspaceStore.update(s => ({ ...s, plotData: [...s.plotData, pt] }));
   },
-  setBottomTab: (tab: "terminal" | "plotter" | "registers" | "memory" | "emulation") => {
+  setBottomTab: (tab: "terminal" | "plotter" | "registers" | "memory") => {
     workspaceStore.update(s => ({ ...s, activeBottomTab: tab }));
+  },
+  setTerminalOpen: (open: boolean) => {
+    workspaceStore.update(s => ({ ...s, terminalOpen: open }));
   },
   triggerCrash: () => {
     actions.addBuildLog('Crash UI requires backend GDB integration to trigger manually.');
@@ -450,14 +542,8 @@ export const actions = {
   resolveCrash: () => {
     actions.addBuildLog('Crash UI requires backend GDB integration to resolve manually.');
   },
-  stepOver: async () => {
-    try {
-      await api.stepDebugger();
-      const regs = await api.getRegisters();
-      actions.addBuildLog(`[GDB] Stepped. Registers: \n${regs}`);
-    } catch (e: any) {
-      actions.addBuildLog(`[GDB] Step failed: ${e.message}`);
-    }
+  stepOver: () => {
+    actions.addBuildLog('[GDB] Step requires backend GDB integration.');
   },
   continueExecution: () => {
     workspaceStore.update(s => ({ ...s, currentLine: null }));
@@ -499,84 +585,6 @@ export const actions = {
     });
   },
   
-  // Emulation Actions
-  startEmulation: async () => {
-    let projectId: string | null = null;
-    workspaceStore.update(s => {
-      projectId = s.activeProjectId;
-      return {
-        ...s,
-        emulationRunning: true,
-        emulationLogs: [
-          ...s.emulationLogs,
-          `[EMU] [${new Date().toLocaleTimeString()}] Emulation processor core initialized. Running at ${s.emulationFrequency}`,
-          `[EMU] [${new Date().toLocaleTimeString()}] Starting pipeline execution...`
-        ]
-      };
-    });
-
-    if (!projectId) {
-      actions.addEmulationLog("Error: No active project to emulate.");
-      workspaceStore.update(s => ({ ...s, emulationRunning: false }));
-      return;
-    }
-
-    try {
-      actions.addEmulationLog("Building firmware for QEMU...");
-      const buildResultStr = await api.buildFirmware(projectId);
-      const buildResult = JSON.parse(buildResultStr);
-      
-      if (buildResult.output) {
-        // Split by newline and add each line to buildLogs
-        buildResult.output.split('\\n').forEach((line: string) => {
-          if (line.trim()) actions.addBuildLog(line);
-        });
-      }
-      
-      if (!buildResult.success) {
-        throw new Error(buildResult.error || "Compilation failed");
-      }
-      
-      actions.addEmulationLog("Firmware build complete. Starting emulator...");
-
-      await api.runEmulation();
-      
-      const es = api.streamEmulationLogs((msg) => {
-        actions.addSerialLog(msg);
-      });
-      
-      // Store event source if needed to close it later
-      (window as any).__emulationStream = es;
-
-    } catch (e: any) {
-      actions.addEmulationLog(`Error starting emulator: ${e.message}`);
-      workspaceStore.update(s => ({ ...s, emulationRunning: false }));
-    }
-  },
-  stopEmulation: () => {
-    if ((window as any).__emulationStream) {
-      (window as any).__emulationStream.close();
-      (window as any).__emulationStream = null;
-    }
-    workspaceStore.update(s => ({
-      ...s,
-      emulationRunning: false,
-      emulationLogs: [
-        ...s.emulationLogs,
-        `[EMU] [${new Date().toLocaleTimeString()}] Emulation processor core halted. Register context preserved.`
-      ]
-    }));
-  },
-  changeEmulationFrequency: (freq: "1 Hz" | "10 Hz" | "100 Hz" | "1 kHz" | "10 kHz" | "1 MHz" | "84 MHz") => {
-    workspaceStore.update(s => ({
-      ...s,
-      emulationFrequency: freq,
-      emulationLogs: [
-        ...s.emulationLogs,
-        `[EMU] [${new Date().toLocaleTimeString()}] Frequency scaled to ${freq}. Core clock refitted.`
-      ]
-    }));
-  },
   updateAnalogSensor: (sensor: "temp" | "voltage" | "current", val: number) => {
     workspaceStore.update(s => ({
       ...s,
@@ -586,13 +594,6 @@ export const actions = {
       }
     }));
   },
-  addEmulationLog: (log: string) => {
-    workspaceStore.update(s => ({
-      ...s,
-      emulationLogs: [...s.emulationLogs, `[EMU] [${new Date().toLocaleTimeString()}] ${log}`]
-    }));
-  },
-
   // RAG Document Actions
   fetchRagDocuments: async () => {
     try {
@@ -785,7 +786,7 @@ export const actions = {
       let currentPhase: string | undefined = undefined;
       let buildOutput = "";
 
-      let selectedProvider = "gemini";
+      let selectedProvider = "openrouter";
       workspaceStore.update(s => {
         history = s.aiMessages.map(m => ({
           role: m.sender === "ai" ? "assistant" : "user",
@@ -798,7 +799,7 @@ export const actions = {
         }
 
         // Read the currently selected LLM provider
-        selectedProvider = (s as any).selectedProvider || "gemini";
+        selectedProvider = (s as any).selectedProvider || "openrouter";
         buildOutput = s.buildLogs.join("\n").slice(-20000);
 
         return s;
@@ -891,6 +892,15 @@ export const actions = {
               m.thinkingCollapsed = true;  // auto-collapse the think block
               (m.steps as AgentStep[]).push({ kind: "call", name: ev.name, args: ev.args });
             });
+            // When the agent runs a build/flash, surface it in the BUILD OUTPUT
+            // panel just like the manual button does.
+            if (ev.name === "build" || ev.name === "flash") {
+              workspaceStore.update(s => ({ ...s, terminalOpen: true, activeBottomTab: "memory" }));
+              actions.clearBuildLogs();
+              actions.addBuildLog(ev.name === "build"
+                ? "Agent is building firmware (PlatformIO)..."
+                : "Agent is flashing firmware to target...");
+            }
             break;
           case "code":
             patchAiMsg(m => {
@@ -901,6 +911,10 @@ export const actions = {
             patchAiMsg(m => {
               (m.steps as AgentStep[]).push({ kind: "result", name: ev.name, result: ev.result });
             });
+            // Mirror the agent's build/flash output into the BUILD OUTPUT panel.
+            if (ev.name === "build" || ev.name === "flash") {
+              (ev.result || "").split("\n").forEach((line: string) => actions.addBuildLog(line));
+            }
             break;
           case "note":
             patchAiMsg(m => {

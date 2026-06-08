@@ -1,20 +1,8 @@
 const DEFAULT_BACKEND_URL = import.meta.env.DEV
-  ? "http://127.0.0.1:32018"
+  ? "http://127.0.0.1:62018"
   : window.location.origin;
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || DEFAULT_BACKEND_URL;
-const EMULATOR_URL = import.meta.env.VITE_EMULATOR_URL || "http://127.0.0.1:32017";
 let activeProjectId: string | null = null; // Default to null so Landing Page shows
-
-async function fetchEmulator(path: string, init?: RequestInit) {
-  try {
-    return await fetch(`${EMULATOR_URL}${path}`, init);
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    throw new Error(
-      `Could not reach emulator service at ${EMULATOR_URL}. Start it with node scripts/dev.mjs or set VITE_EMULATOR_URL. ${detail}`
-    );
-  }
-}
 
 export const api = {
   setActiveProject(id: string) {
@@ -167,7 +155,7 @@ export const api = {
     return res.json();
   },
 
-  async askAgent(query: string, conversationHistory?: any[], phase?: string, provider: string = "gemini", buildOutput: string = "") {
+  async askAgent(query: string, conversationHistory?: any[], phase?: string, provider: string = "openrouter", buildOutput: string = "") {
     const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/agent/solve`, {
       method: "POST",
       headers: {
@@ -209,6 +197,74 @@ export const api = {
     return res.json();
   },
 
+  // --- Hardware: build / flash / device detection ---
+
+  async getDeviceStatus() {
+    const res = await fetch(`${BACKEND_URL}/api/device/status`, {
+      headers: { "Authorization": "Bearer TEST_TOKEN" }
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async buildProject() {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/build`, {
+      method: "POST",
+      headers: { "Authorization": "Bearer TEST_TOKEN" }
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  /**
+   * Stream a real PlatformIO build over SSE. Calls onEvent for each frame:
+   *   {type:"status"|"line", text} during the build, then
+   *   {type:"done", success, returncode, firmware_path, duration_s, output}.
+   * Resolves when the stream closes.
+   */
+  async streamBuild(onEvent: (event: any) => void, signal?: AbortSignal) {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/build/stream`, {
+      method: "POST",
+      headers: { "Authorization": "Bearer TEST_TOKEN" },
+      signal
+    });
+    if (!res.ok || !res.body) throw new Error(await res.text());
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      let sep: number;
+      while ((sep = buffer.indexOf("\n\n")) !== -1) {
+        const frame = buffer.slice(0, sep);
+        buffer = buffer.slice(sep + 2);
+        const line = frame.split("\n").find(l => l.startsWith("data:"));
+        if (!line) continue;
+        const json = line.slice(5).trim();
+        if (!json) continue;
+        try {
+          onEvent(JSON.parse(json));
+        } catch (e) {
+          console.warn("Failed to parse build SSE frame", json, e);
+        }
+      }
+    }
+  },
+
+  async flashProject() {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/flash`, {
+      method: "POST",
+      headers: { "Authorization": "Bearer TEST_TOKEN" }
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
   /**
    * Stream the agent run over SSE. Calls onEvent for each parsed event
    * ({type: "think"|"call"|"code"|"result"|"question"|"plan"|"note"|"final"|"done"|"error", ...}).
@@ -220,7 +276,7 @@ export const api = {
     onEvent: (event: any) => void,
     conversationHistory?: any[],
     phase?: string,
-    provider: string = "gemini",
+    provider: string = "openrouter",
     buildOutput: string = "",
     signal?: AbortSignal
   ) {
@@ -266,64 +322,5 @@ export const api = {
         }
       }
     }
-  },
-
-  // --- Emulator Service (Go) ---
-  
-  async buildFirmware(projectId: string) {
-    const files = await this.getProjectFiles(projectId);
-
-    // Only sync source files and platformio.ini — never sync README, docs, etc.
-    // Sending all project files would overwrite Blinky's own project files (e.g. README.md).
-    const pioFiles = files
-      .filter((f: any) => f.path.startsWith("src/") || f.path === "platformio.ini")
-      .map((f: any) => ({ path: f.path, content: f.content }));
-
-    if (!pioFiles.find((f: any) => f.path === "platformio.ini")) {
-      pioFiles.push({
-        path: "platformio.ini",
-        content: `[env:genericSTM32F405RG]\nplatform = ststm32\nboard = genericSTM32F405RG\nframework = stm32cube\n`
-      });
-    }
-
-    const res = await fetchEmulator("/platformio/build", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ projectPath: "./Blinky", files: pioFiles })
-    });
-    if (!res.ok) throw new Error(await res.text());
-    return res.text();
-  },
-
-  async runEmulation() {
-    const res = await fetchEmulator("/qemu/run", { method: "GET" });
-    if (!res.ok) throw new Error(await res.text());
-    return res.text();
-  },
-
-  streamEmulationLogs(onMessage: (msg: string) => void): EventSource {
-    const es = new EventSource(`${EMULATOR_URL}/qemu/stream`);
-    es.onmessage = (event) => {
-      onMessage(event.data);
-    };
-    return es;
-  },
-
-  async connectDebugger() {
-    const res = await fetchEmulator("/debug/connect", { method: "GET" });
-    if (!res.ok) throw new Error(await res.text());
-    return res.text();
-  },
-
-  async getRegisters() {
-    const res = await fetchEmulator("/debug/registers", { method: "GET" });
-    if (!res.ok) throw new Error(await res.text());
-    return res.text();
-  },
-
-  async stepDebugger() {
-    const res = await fetchEmulator("/debug/step", { method: "GET" });
-    if (!res.ok) throw new Error(await res.text());
-    return res.text();
   }
 };

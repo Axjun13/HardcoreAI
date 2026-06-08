@@ -38,7 +38,7 @@ const backendDirs = [
   "agent",
   "llm",
   "rag",
-  "emulator",
+  "vendor",
 ];
 const excludedNames = new Set([
   ".env",
@@ -90,7 +90,11 @@ function copyReleaseFiles() {
   }
 
   for (const dir of backendDirs) {
-    copyDirectory(resolve(repoRoot, "backend", dir), resolve(stageDir, "backend", dir));
+    const src = resolve(repoRoot, "backend", dir);
+    // vendor/ (bundled flash binaries) is optional — fetched per-platform and may
+    // be absent in a source checkout. Skip silently rather than failing the build.
+    if (!existsSync(src)) continue;
+    copyDirectory(src, resolve(stageDir, "backend", dir));
   }
 
   copyDirectory(

@@ -194,7 +194,7 @@
 
     const pinName = editingPin?.pin || "";
     editingPin = null;
-    actions.addEmulationLog(`Reconfigured microcontroller PIN: ${pinName} -> ${pinSignal} (${pinMode})`);
+    actions.addBuildLog(`Reconfigured microcontroller PIN: ${pinName} -> ${pinSignal} (${pinMode})`);
   }
 
   // Get color for pin state

@@ -62,7 +62,7 @@
       ...s,
       ragDocuments: s.ragDocuments.filter(d => d.id !== id)
     }));
-    actions.addEmulationLog(`Purged RAG contextual document: ${name}`);
+    actions.addBuildLog(`Purged RAG contextual document: ${name}`);
   }
 </script>
 

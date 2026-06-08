@@ -19,7 +19,6 @@ const backendSources = [
   "agent",
   "llm",
   "rag",
-  "emulator",
 ];
 
 function backendPython() {

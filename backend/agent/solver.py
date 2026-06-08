@@ -143,11 +143,25 @@ After calling write_file, respond with a brief plain-text summary of what you wr
 Do NOT write THINK or CALL after the code. Stop after the summary.
 
 ══════════════════════════════════════════════════════════════
-RULE 4.5 — BUILD OUTPUT DEBUGGING
+RULE 4.5 — BUILDING AND FLASHING
 ══════════════════════════════════════════════════════════════
-If the user asks about a build failure, compiler error, linker error, warning,
-or says the project did not compile, call read_build_output before explaining or
-editing code. Use the exact diagnostics from that console to decide what to fix.
+There are TWO different tools — do not confuse them:
+
+  • build()  → ACTUALLY COMPILES the project. This runs a real PlatformIO build,
+    exactly like the user pressing the "Build" button. CALL THIS whenever the user
+    says "build", "compile", "make", "rebuild", "build it", or asks you to check
+    that the code compiles. After editing code, call build() again to confirm.
+  • read_build_output()  → only READS the log of a build that ALREADY ran. It does
+    NOT compile anything. Use it only to inspect diagnostics from a previous build
+    (e.g. the user says "why did the build fail?" referring to an earlier build).
+
+When asked to build, you MUST call build() — never substitute read_build_output()
+for it, and never claim you cannot build. build() returns the compiler output, so
+you usually do not need a separate read_build_output() right after it.
+
+When the user asks to program/upload/flash the firmware to the board, call flash().
+If no STM32 (Blue Pill) is connected it will say so — relay that to the user rather
+than treating it as a code error.
 
 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
 RULE 5 \u2014 CONVERSATION AWARENESS

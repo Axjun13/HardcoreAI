@@ -1,136 +1,33 @@
-"""Shared fixtures for the Go-service contract tests.
+"""Shared fixtures for the service contract tests.
 
-These fixtures build the current implementation of each service and boot it so the
-tests can drive it as a black box. The tests assert on the *contract* (HTTP shape,
-status codes, CLI stdout markers, exit codes) — not internal behavior — so the same
-suite can later run against the Python reimplementation unchanged.
+These fixtures build the current implementation of each service and drive it as a
+black box. The tests assert on the *contract* (output shape, status codes,
+markers) — not internal behavior — so the same suite can run against alternate
+reimplementations unchanged.
 """
 
 from __future__ import annotations
 
-import os
-import shutil
-import socket
-import subprocess
-import time
 from pathlib import Path
 
-import httpx
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BACKEND_DIR = REPO_ROOT / "backend"
 
-# The emulator service is now Python-native (backend/emulator), with its
-# firmware bundled alongside it so the service is self-contained.
-FIRMWARE_ELF = BACKEND_DIR / "emulator/Blinky/.pio/build/genericSTM32F405RG/firmware.elf"
-
-# Test ports kept distinct from the production 62019 so a running dev server
-# does not collide with the suite.
-EMULATOR_TEST_PORT = 62029
-
-
-def _free_port_or(default: int) -> int:
-    """Return `default` if it is free, otherwise an ephemeral free port."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        try:
-            sock.bind(("127.0.0.1", default))
-            return default
-        except OSError:
-            sock.bind(("127.0.0.1", 0))
-            return sock.getsockname()[1]
-
-
-def _have(tool: str) -> bool:
-    return shutil.which(tool) is not None
-
-
-def _kill_qemu() -> None:
-    """Best-effort cleanup of QEMU processes the emulator may have spawned."""
-    for name in ("qemu-system-arm",):
-        subprocess.run(["killall", name], capture_output=True)
-
-
-# ---------------------------------------------------------------------------
-# Capability flags — used by tests to skip gracefully on a partial toolchain.
-# ---------------------------------------------------------------------------
-
-HAS_QEMU = _have("qemu-system-arm")
-HAS_ARM_GDB = _have("arm-none-eabi-gdb")
-HAS_PIO = _have("pio") or (Path.home() / ".platformio/penv/bin/pio").exists()
-HAS_FIRMWARE = FIRMWARE_ELF.exists()
-
-
-# ---------------------------------------------------------------------------
-# Emulator service fixture
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture(scope="session")
-def emulator() -> str:
-    """Boot the Python FastAPI emulator service and yield its base URL.
-
-    Run with the backend venv so fastapi/uvicorn/pygdbmi resolve, and with
-    import root = backend/ so `emulator.app` is importable. The service resolves
-    its bundled firmware relative to its own package, so CWD is irrelevant.
-    """
-    py = BACKEND_DIR / ".venv/bin/python"
-    if not py.exists():
-        pytest.skip("backend venv not found (backend/.venv)")
-    port = _free_port_or(EMULATOR_TEST_PORT)
-    env = {**os.environ, "EMULATOR_HOST": "127.0.0.1", "EMULATOR_PORT": str(port)}
-    proc = subprocess.Popen(
-        [str(py), "-m", "emulator.app"],
-        cwd=BACKEND_DIR,
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
-    base_url = f"http://127.0.0.1:{port}"
-
-    # Wait for the server to accept connections.
-    deadline = time.time() + 10
-    while time.time() < deadline:
-        try:
-            httpx.get(f"{base_url}/health", timeout=1.0)
-            break
-        except httpx.HTTPError:
-            time.sleep(0.1)
-    else:
-        proc.terminate()
-        out = proc.stdout.read() if proc.stdout else ""
-        pytest.fail(f"emulator did not come up on {base_url}\n{out}")
-
-    yield base_url
-
-    proc.terminate()
-    try:
-        proc.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-    _kill_qemu()
-
-
-@pytest.fixture
-def client(emulator) -> httpx.Client:
-    with httpx.Client(base_url=emulator, timeout=30.0) as c:
-        yield c
-
 
 # ---------------------------------------------------------------------------
 # RAG fixtures (Python-native engine: LlamaIndex + Chroma + fastembed)
 #
-# The RAG service is no longer a CLI; it's an in-process Python engine consumed
-# directly by the backend. These fixtures import RAGService from backend/rag and
-# drive it as a black box. The contract under test is unchanged: query() output
-# must contain the "=== LLM-READY PROMPT CONTEXT WINDOW ===" marker and a
-# non-empty context block, ingest() must populate a persistent store, and a query
-# against an uninitialised store must fail gracefully.
+# The RAG service is an in-process Python engine consumed directly by the
+# backend. These fixtures import RAGService from backend/rag and drive it as a
+# black box. The contract under test: query() output must contain the
+# "=== LLM-READY PROMPT CONTEXT WINDOW ===" marker and a non-empty context
+# block, ingest() must populate a persistent store, and a query against an
+# uninitialised store must fail gracefully.
 # ---------------------------------------------------------------------------
 
-BACKEND_DIR = REPO_ROOT / "backend"
-# Bundled corpus now lives in the backend so it survives Go-tree deletion.
+# Bundled corpus lives in the backend so it survives Go-tree deletion.
 RAG_CORPUS_PDF = BACKEND_DIR / "rag" / "corpus" / "rm0090.pdf"
 
 

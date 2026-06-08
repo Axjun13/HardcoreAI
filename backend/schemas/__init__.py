@@ -150,3 +150,38 @@ class ConversationSave(BaseModel):
 class ConversationRead(BaseModel):
     history: list[dict[str, Any]] = Field(default_factory=list)
     updated_at: datetime | None = None
+
+
+# ---------------------------------------------------------------------------
+# Hardware — build / flash / device detection
+# ---------------------------------------------------------------------------
+
+
+class DeviceStatus(BaseModel):
+    """Whether a programmer/board (ST-Link + STM32) is physically connected."""
+
+    connected: bool = False
+    probe: str | None = None  # e.g. "ST-Link V2"
+    target: str | None = None  # e.g. "STM32F103 (Blue Pill)"
+    detail: str = ""  # human-readable status or error
+
+
+class BuildResult(BaseModel):
+    """Outcome of a real PlatformIO build."""
+
+    success: bool
+    returncode: int
+    output: str  # combined stdout+stderr from `pio run`
+    firmware_path: str | None = None  # path to the produced .elf/.bin, if any
+    duration_s: float = 0.0
+
+
+class FlashResult(BaseModel):
+    """Outcome of a flash attempt. `flashed` is False with reason='no_device'
+    when nothing is connected — this is a normal (HTTP 200) result, not an error."""
+
+    flashed: bool
+    reason: str = ""  # "" on success, else "no_device" | "build_failed" | "flash_failed"
+    returncode: int = 0
+    output: str = ""
+    device: DeviceStatus | None = None

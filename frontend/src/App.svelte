@@ -4,7 +4,6 @@
   import { workspaceStore, actions, type FileItem } from "./store";
   import * as monaco from "monaco-editor";
   import EmbeddedConfigurator from "./components/EmbeddedConfigurator.svelte";
-  import EmulationPanel from "./components/EmulationPanel.svelte";
   import RagUploadPanel from "./components/RagUploadPanel.svelte";
 
   import {
@@ -42,7 +41,6 @@
   let selectedPeripheral = "Core Registers";
   let aiOpen = true;
   let showConfigurator = false;
-  let terminalOpen = true;
   let buildOutputCopied = false;
   const agentWorkingPhrases = [
     "Thinking through firmware state",
@@ -158,6 +156,13 @@
     }, 2200);
 
     return () => window.clearInterval(phraseTimer);
+  });
+
+  // Poll whether an ST-Link + STM32 board is connected, for the status chip.
+  onMount(() => {
+    actions.pollDeviceStatus();
+    const deviceTimer = window.setInterval(() => actions.pollDeviceStatus(), 5000);
+    return () => window.clearInterval(deviceTimer);
   });
 
   // Synchronize Monaco editor contents with active file changes
@@ -323,61 +328,13 @@
     ctx.fillText(`${minTemp.toFixed(1)}°C`, 5, height - paddingBottom - 4);
   }
 
-  // Compiler / Flash handlers
+  // Compiler / Flash handlers — real PlatformIO build + ST-Link flash via backend.
   function handleBuild() {
-    if ($workspaceStore.isCompiling) return;
-    actions.setCompiling(true);
-    actions.clearBuildLogs();
-    actions.addBuildLog("HARDCOREAI Build Engine v1.0.0");
-    actions.addBuildLog("Scanning active target configurations...");
-    actions.addBuildLog(
-      `Found toolchain compiler: ${$workspaceStore.toolchainPath}`,
-    );
-    actions.addBuildLog(
-      `Target architecture: ${$workspaceStore.selectedBoard === "STM32F401" ? "Cortex-M4" : "Xtensa LX7"}`,
-    );
-
-    setTimeout(() => {
-      actions.addBuildLog("Compiling Core/Src/main.c...");
-      actions.addBuildLog("Compiling Core/Src/stm32f4xx_it.c...");
-    }, 400);
-
-    setTimeout(() => {
-      actions.addBuildLog("Linking build/hardcoreai_app.elf...");
-      actions.addBuildLog("──────────────────────────────────────────");
-      actions.addBuildLog("Static Memory Utilization statistics:");
-      actions.addBuildLog("  FLASH:  26.4 KB / 256.0 KB (10.3%)");
-      actions.addBuildLog("  SRAM:   12.1 KB /  64.0 KB (18.9%)");
-      actions.addBuildLog("──────────────────────────────────────────");
-      actions.addBuildLog(
-        "Build Successful. Object binary generated: build/hardcoreai_app.bin",
-      );
-      actions.setCompiling(false);
-    }, 1500);
+    actions.runBuild();
   }
 
   function handleFlash() {
-    if ($workspaceStore.isFlashing) return;
-    actions.setFlashing(true);
-    actions.addBuildLog("Launching flashing target engine...");
-    actions.addBuildLog(
-      `Flashing target via probe: ${$workspaceStore.selectedProbe}`,
-    );
-
-    setTimeout(() => {
-      actions.addBuildLog("Connection verified. Halting target core...");
-      actions.addBuildLog("Erasing sectors... OK");
-      actions.addBuildLog("Writing binary image to flash block 0x08000000...");
-    }, 400);
-
-    setTimeout(() => {
-      actions.addBuildLog("Verifying integrity checksum... OK");
-      actions.addBuildLog("Resetting target CPU core. Start execution...");
-      actions.setFlashing(false);
-      actions.addSerialLog(
-        "[SYSTEM] Board reset. Flashed firmware execution initialized.",
-      );
-    }, 1200);
+    actions.runFlash();
   }
 
   function handleDebugToggle() {
@@ -1196,22 +1153,27 @@
             {/each}
           </div>
 
+          <!-- Live hardware connection status -->
           <div class="explorer-sub-section">
-            <div class="explorer-sub-header">EMULATED HARDWARE STATUS</div>
+            <div class="explorer-sub-header">HARDWARE STATUS</div>
             <div
               class="workspace-item-row"
               style="display: flex; align-items: center; justify-content: space-between; font-size: 0.65rem;"
+              title={$workspaceStore.deviceStatus.detail}
             >
-              <span>Virtual MCU Core:</span>
+              <span>{$workspaceStore.deviceStatus.target || "STM32 Target"}:</span>
               <span
-                style="color: {$workspaceStore.emulationRunning
+                style="color: {$workspaceStore.deviceStatus.connected
                   ? 'var(--accent-success)'
                   : 'var(--text-dark)'}; font-weight: bold;"
               >
-                {$workspaceStore.emulationRunning ? "ACTIVE" : "HALTED"}
+                {$workspaceStore.deviceStatus.connected
+                  ? `CONNECTED (${$workspaceStore.deviceStatus.probe || "ST-Link"})`
+                  : "NO DEVICE"}
               </span>
             </div>
           </div>
+
         </div>
       {/if}
 
@@ -1512,7 +1474,7 @@
                   <Settings size={24} style="color: var(--accent-orange);" />
                   <span>Configure Target Hardware</span>
                 </button>
-                <button class="action-card" onclick={() => (terminalOpen = true)}>
+                <button class="action-card" onclick={() => actions.setTerminalOpen(true)}>
                   <MonitorPlay size={24} style="color: var(--accent-green);" />
                   <span>Open Terminal &rarr;</span>
                 </button>
@@ -1559,7 +1521,7 @@
 
       <!-- Bottom Drawer Resizer Handle (inline flex child, sits between editor and terminal) -->
       <!-- svelte-ignore a11y-no-static-element-interactions -->
-      {#if terminalOpen}
+      {#if $workspaceStore.terminalOpen}
         <div
           class="resize-handle horizontal-handle"
           onmousedown={() => { isDraggingBottom = true; document.body.classList.add('dragging-row'); }}
@@ -1567,7 +1529,7 @@
       {/if}
 
       <!-- Bottom Drawer Frame -->
-      {#if terminalOpen}
+      {#if $workspaceStore.terminalOpen}
         <footer
           class="helix-bottom-drawer"
           style="height: {bottomDrawerHeight}px;"
@@ -1600,14 +1562,6 @@
                 <span>SFR REGISTERS</span>
               </button>
               <button
-                class="drawer-tab {$workspaceStore.activeBottomTab === 'emulation'
-                  ? 'active'
-                  : ''}"
-                onclick={() => actions.setBottomTab("emulation")}
-              >
-                <span>HARDWARE EMULATION</span>
-              </button>
-              <button
                 class="drawer-tab {$workspaceStore.activeBottomTab === 'memory'
                   ? 'active'
                   : ''}"
@@ -1633,7 +1587,7 @@
                   {/if}
                 </button>
               {/if}
-              <button class="close-ai-btn" type="button" onclick={() => (terminalOpen = false)} title="Minimize Terminal">
+              <button class="close-ai-btn" type="button" onclick={() => actions.setTerminalOpen(false)} title="Minimize Terminal">
                 <X size={13} />
               </button>
             </div>
@@ -1732,10 +1686,6 @@
             </div>
           {/if}
 
-          {#if $workspaceStore.activeBottomTab === "emulation"}
-            <EmulationPanel />
-          {/if}
-
           {#if $workspaceStore.activeBottomTab === "memory"}
             <div class="serial-panel">
               <div class="terminal-scroll" style="font-family: var(--font-mono);">
@@ -1760,10 +1710,10 @@
       {/if}
 
       <!-- Terminal Toggle Pill -->
-      {#if !terminalOpen}
+      {#if !$workspaceStore.terminalOpen}
         <!-- svelte-ignore a11y-click-events-have-key-events -->
         <!-- svelte-ignore a11y-no-static-element-interactions -->
-        <div class="terminal-toggle-pill" onclick={() => (terminalOpen = true)}>
+        <div class="terminal-toggle-pill" onclick={() => actions.setTerminalOpen(true)}>
           <Sliders size={12} />
           <span>TERMINAL</span>
         </div>
