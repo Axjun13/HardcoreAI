@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import select
 
 from core.config import now_utc
@@ -67,3 +67,34 @@ def upsert_file(project_id: str, file_path: str, payload: CodeFileUpsert, user_i
             path=code_file.path, language=code_file.language,
             content=code_file.content, updated_at=code_file.updated_at,
         )
+
+
+@router.delete("/api/projects/{project_id}/files/{file_path:path}")
+def delete_file(project_id: str, file_path: str, user_id: str = Depends(get_current_user_id)) -> dict:
+    """Delete a code file. Used when the user approves an agent's file deletion."""
+    with db_session(user_id) as session:
+        project = get_project_or_404(session, project_id, user_id)
+        code_file = session.exec(
+            select(CodeFileRow).where(
+                CodeFileRow.project_id == project.id, CodeFileRow.path == file_path
+            )
+        ).first()
+        if not code_file:
+            raise HTTPException(status_code=404, detail=f"No file '{file_path}'.")
+        session.delete(code_file)
+        project.updated_at = now_utc()
+        session.add(project)
+        session.commit()
+
+        try:
+            from agent.git_manager import GitManager
+            git_mgr = GitManager(project_id)
+            rows = session.exec(
+                select(CodeFileRow).where(CodeFileRow.project_id == project.id)
+            ).all()
+            files_dict = {r.path: {"language": r.language, "content": r.content} for r in rows}
+            git_mgr.sync_db_to_disk(files_dict)
+        except Exception as e:
+            print(f"ERROR: Failed to sync deletion to git: {e}")
+
+        return {"deleted": file_path}

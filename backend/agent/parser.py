@@ -424,13 +424,27 @@ async def run_phase(
             continue
 
         if parsed is None:
-            # Fallback for models that output bare code blocks in the coding phase
+            # A bare code block with no explicit CALL is NOT a file write. Earlier
+            # this silently wrote any ```fence``` containing "include"/"stm32" into
+            # src/main.c, which let ordinary explanatory prose overwrite the file.
+            # Instead, nudge the model to use a real tool call and keep the file
+            # untouched. The model's prose is still shown as the final answer.
             if trace.phase == "coding":
                 import re
-                code_match = re.search(r"```[a-zA-Z]*\n(.*?)```", raw, flags=re.DOTALL)
-                if code_match and ("include" in raw.lower() or "stm32" in raw.lower()):
-                    parsed = ("", "write_file", {"path": "src/main.c"}, code_match.group(0))
-            
+                if re.search(r"```[a-zA-Z]*\n.*?```", raw, flags=re.DOTALL):
+                    trace.log_think_call(step, "", "parse_error", {}, "ERROR: A code block alone does not write a file.")
+                    await emit({"type": "error", "step": step, "message": "Code block ignored — no write_file call."})
+                    messages.append({"role": "assistant", "content": raw})
+                    messages.append({"role": "user", "content": (
+                        "TOOL RESULT: I did not save that code. A bare ``` code block is never written to a file. "
+                        "To create or replace a file you MUST emit an explicit tool call, e.g.:\n"
+                        "THINK: writing the firmware\n"
+                        'CALL write_file("src/main.c")\n'
+                        "```c\n...code...\n```\n"
+                        "Re-send your code that way if you intended to save it."
+                    )})
+                    continue
+
             if parsed is None and trace.phase == "wiring":
                 if "```python" in raw.lower() or "```c" in raw.lower():
                     trace.log_think_call(step, "", "parse_error", {}, "ERROR: Code blocks are not allowed in the wiring phase.")
@@ -485,17 +499,24 @@ async def run_phase(
 
         trace.log_think_call(step, thought, name, kwargs, result_str)
         await emit({"type": "result", "step": step, "name": name, "result": result_str})
-        if not result_str.startswith("ERROR:") and name in ("write_file", "file_edit"):
-            path = kwargs.get("path", "src/main.c")
-            if "/" not in path and "\\" not in path and (path.endswith(".c") or path.endswith(".h")):
-                path = "src/" + path
-            meta = toolbox.files.get(path)
-            if meta is not None:
+        # A successful file mutation is a *proposal*, not a committed change: the
+        # frontend shows a diff with Allow/Reject and only persists on approval.
+        # We carry the pre-edit baseline so the UI can render an accurate diff and
+        # so a Reject can restore it.
+        if not result_str.startswith("ERROR:") and name in (
+            "write_file", "file_edit", "sed_replace", "create_file", "delete_file",
+            "copy_file", "move_file",
+        ):
+            for path in toolbox.drain_pending_changes():
+                meta = toolbox.files.get(path)
+                baseline = toolbox.baseline.get(path)
                 await emit({
-                    "type": "code",
+                    "type": "proposal",
                     "step": step,
                     "path": path,
-                    "code": meta.get("content", _strip_code_fence(body)),
+                    "code": (meta or {}).get("content", ""),
+                    "old": (baseline or {}).get("content", ""),
+                    "deleted": meta is None,
                 })
 
         # Feed the model its own emission plus the tool result, then loop.

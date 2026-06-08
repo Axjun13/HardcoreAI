@@ -16,13 +16,27 @@ export interface RegisterItem {
 }
 
 export interface AgentStep {
-  kind: "think" | "call" | "code" | "result" | "note" | "error";
+  kind: "think" | "call" | "code" | "result" | "note" | "error" | "proposal";
   text?: string;            // think / note / error text
   name?: string;            // tool name for call / result
   args?: Record<string, any>; // call args
-  path?: string;            // code card target file
-  code?: string;            // code card body
+  path?: string;            // code card / proposal target file
+  code?: string;            // code card body / proposed new content
   result?: string;          // tool result text
+  old?: string;             // proposal: previous file content (for diff)
+  deleted?: boolean;        // proposal: file was deleted
+  decision?: "pending" | "allowed" | "rejected"; // proposal approval state
+}
+
+// A staged file change awaiting the user's Allow/Reject in the chat.
+export interface FileProposal {
+  path: string;
+  language: string;
+  old: string;              // baseline content ("" if newly created)
+  code: string;             // proposed new content ("" if deleted)
+  deleted?: boolean;
+  created?: boolean;
+  decision: "pending" | "allowed" | "rejected";
 }
 
 export interface ChatMessage {
@@ -43,6 +57,7 @@ export interface ChatMessage {
   thinkingDone?: boolean;    // true once the run produced a non-think event
   thinkingCollapsed?: boolean; // user/auto collapse state for the think block
   streaming?: boolean;       // true while the SSE run is in flight
+  proposals?: FileProposal[]; // staged file changes awaiting Allow/Reject
 }
 
 export interface PlotDataPoint {
@@ -729,6 +744,81 @@ export const actions = {
     actions.loadGitStatus();
   },
 
+  // --- Agent file proposals: stage-then-approve -----------------------------
+  // The agent's writes/edits arrive as proposals (diff cards). Nothing touches
+  // the editor or DB until the user clicks Allow here.
+
+  _setProposalDecision: (msgId: string, path: string, decision: "allowed" | "rejected") => {
+    workspaceStore.update(s => {
+      const aiMessages = s.aiMessages.map(m => {
+        if (m.id !== msgId) return m;
+        const proposals = (m.proposals || []).map(p =>
+          p.path === path ? { ...p, decision } : p
+        );
+        const steps = (m.steps || []).map(st =>
+          st.kind === "proposal" && st.path === path ? { ...st, decision } : st
+        );
+        return { ...m, proposals, steps };
+      });
+      const pid = s.activeProjectId;
+      if (pid) api.saveConversationHistory(pid, aiMessages).catch(console.error);
+      return { ...s, aiMessages };
+    });
+  },
+
+  approveProposal: async (msgId: string, path: string) => {
+    let proposal: FileProposal | undefined;
+    let projectId: string | null = null;
+    workspaceStore.update(s => {
+      projectId = s.activeProjectId;
+      const m = s.aiMessages.find(x => x.id === msgId);
+      proposal = m?.proposals?.find(p => p.path === path);
+      return s;
+    });
+    if (!proposal || !projectId) return;
+    try {
+      // Cancel any pending editor-save debounce so it can't write stale,
+      // pre-approval content back over the file we just persisted.
+      // @ts-ignore - debounce handle is parked on window by updateFileContent
+      clearTimeout(window.__saveTimeout);
+      if (proposal.deleted) {
+        await api.deleteFile(projectId, proposal.path);
+      } else {
+        await api.upsertFile(projectId, proposal.path, proposal.code, proposal.language || "c");
+      }
+      actions._setProposalDecision(msgId, path, "allowed");
+      // Reflect the approved change in the editor immediately.
+      await actions.refreshProjectFiles(projectId);
+      const key = "/" + proposal.path;
+      if (!proposal.deleted) {
+        workspaceStore.update(s => ({
+          ...s,
+          activeFile: key,
+          openFiles: s.openFiles.includes(key) ? s.openFiles : [...s.openFiles, key],
+        }));
+      }
+      actions.loadGitStatus();
+    } catch (e) {
+      console.error("Failed to apply proposal", e);
+    }
+  },
+
+  rejectProposal: (msgId: string, path: string) => {
+    actions._setProposalDecision(msgId, path, "rejected");
+  },
+
+  approveAllProposals: async (msgId: string) => {
+    let pending: string[] = [];
+    workspaceStore.update(s => {
+      const m = s.aiMessages.find(x => x.id === msgId);
+      pending = (m?.proposals || []).filter(p => p.decision === "pending").map(p => p.path);
+      return s;
+    });
+    for (const path of pending) {
+      await actions.approveProposal(msgId, path);
+    }
+  },
+
   clearQueuedAiFollowup: () => {
     workspaceStore.update(s => ({ ...s, queuedAiFollowup: null }));
   },
@@ -903,8 +993,29 @@ export const actions = {
             }
             break;
           case "code":
+            // Legacy event kept for back-compat; treated as an informational card.
             patchAiMsg(m => {
               (m.steps as AgentStep[]).push({ kind: "code", path: ev.path, code: ev.code });
+            });
+            break;
+          case "proposal":
+            // A staged file change. Render a diff card with Allow/Reject; do NOT
+            // touch the editor/DB until the user approves.
+            patchAiMsg(m => {
+              (m.steps as AgentStep[]).push({
+                kind: "proposal", path: ev.path, code: ev.code, old: ev.old,
+                deleted: ev.deleted, decision: "pending",
+              });
+              const list = (m.proposals ||= []);
+              const existing = list.find(p => p.path === ev.path);
+              const prop: FileProposal = {
+                path: ev.path, language: ev.deleted ? "c" : "c",
+                old: ev.old || "", code: ev.code || "",
+                deleted: ev.deleted, created: !ev.old,
+                decision: "pending",
+              };
+              if (existing) Object.assign(existing, prop);
+              else list.push(prop);
             });
             break;
           case "result":
@@ -962,19 +1073,31 @@ export const actions = {
                 if (ev.status === "waiting_for_approval") { m.plan = ev.final; m.text = "Do you approve this plan?"; }
               }
             });
-            if (ev.files) {
-              actions.applyAgentFiles(ev.files);
+            // `proposals` is the authoritative final diff set computed on the
+            // backend. Reconcile against the live-streamed proposals so the
+            // message ends with exactly the changes the user can approve.
+            if (Array.isArray(ev.proposals)) {
+              patchAiMsg(m => {
+                const list = (m.proposals ||= []);
+                for (const p of ev.proposals) {
+                  const existing = list.find(x => x.path === p.path);
+                  const merged: FileProposal = {
+                    path: p.path, language: p.language || "c",
+                    old: p.old || "", code: p.code || "",
+                    deleted: p.deleted, created: p.created,
+                    decision: existing?.decision || "pending",
+                  };
+                  if (existing) Object.assign(existing, merged);
+                  else list.push(merged);
+                }
+              });
             }
             break;
         }
       }, history, currentPhase, selectedProvider, buildOutput);
 
-      // Stream closed. Refresh files so the editor shows anything the agent wrote.
-      let currentActiveProjectId: string | null = null;
-      workspaceStore.update(s => { currentActiveProjectId = s.activeProjectId; return s; });
-      if (currentActiveProjectId) {
-        await actions.refreshProjectFiles(currentActiveProjectId);
-      }
+      // Stream closed. Nothing is auto-applied: the agent's file changes are
+      // staged as proposals and only persisted when the user clicks Allow.
 
       // Finalize: ensure streaming flag is cleared and persist history.
       let queuedFollowup: string | null = null;

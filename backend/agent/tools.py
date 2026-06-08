@@ -20,6 +20,30 @@ from typing import Any
 from . import editmatch
 from .parser import ToolSpec, tool
 
+def _looks_like_c(text: str) -> bool:
+    """Heuristic: does this body look like C source rather than English prose?
+
+    Used by write_file to reject the failure mode where the model's explanatory
+    answer (or a half-finished thought) gets saved as code and clobbers main.c.
+    We require at least one structural C signal AND a low ratio of prose-like
+    sentences. Deliberately lenient so genuine code is never rejected.
+    """
+    t = text.strip()
+    if not t:
+        return False
+    # Strong, unambiguous C signals — any one is enough.
+    strong = ("#include", "int main", "void ", "HAL_", "__HAL_", "uint8_t",
+              "uint16_t", "uint32_t", "while (", "while(", "GPIO_", "typedef",
+              "#define", "return ", "static ")
+    has_strong = any(s in t for s in strong)
+    # Structural punctuation density: real C is full of ; { } ( ).
+    braces = t.count("{") + t.count("}")
+    semis = t.count(";")
+    # A page of prose has almost none of these.
+    structural = braces >= 1 or semis >= 2
+    return has_strong and structural
+
+
 class AskUserException(Exception):
     """Raised when the agent wants to ask the user a question."""
     def __init__(self, question: str, options: list[str] = None):
@@ -70,6 +94,32 @@ class Toolbox:
         self.user_id = user_id
         self.project_id = project_id
         self.build_output = build_output or ""
+        # Immutable snapshot of the files as they were when the run started. Used
+        # to (a) render an accurate before/after diff for each proposal and (b)
+        # let the agent loop detect which files a tool actually changed.
+        import copy as _copy
+        self.baseline = _copy.deepcopy(self.files)
+        # Last content we surfaced as a proposal per path, so a multi-step run
+        # only re-emits a file when it actually changed again since last emit.
+        self._last_emitted: dict[str, str | None] = {
+            p: m.get("content") for p, m in self.baseline.items()
+        }
+
+    def drain_pending_changes(self) -> list[str]:
+        """Return paths whose content changed since they were last surfaced.
+
+        A path counts when it is new, deleted, or its content differs from what
+        we last emitted (baseline initially). The diff the UI renders always uses
+        the original baseline, so it shows the full cumulative change."""
+        changed: list[str] = []
+        all_paths = set(self.files) | set(self._last_emitted)
+        for path in sorted(all_paths):
+            cur = self.files.get(path)
+            cur_content = cur.get("content") if cur else None
+            if cur_content != self._last_emitted.get(path):
+                changed.append(path)
+                self._last_emitted[path] = cur_content
+        return changed
 
     # -- registry --------------------------------------------------------
 
@@ -391,7 +441,7 @@ class CodingToolbox(Toolbox):
         if "/" not in path and "\\" not in path and (path.endswith(".c") or path.endswith(".h")):
             path = "src/" + path
         content = self.call_body.strip()
-        
+
         if content.startswith("```"):
             lines = content.split("\n")
             if len(lines) > 1:
@@ -406,9 +456,39 @@ class CodingToolbox(Toolbox):
                 if closing_idx != -1:
                     lines = lines[:closing_idx]
                 content = "\n".join(lines).strip()
-                
-        language = "markdown" if path.endswith(".md") else "c"
+
+        is_code = path.endswith(".c") or path.endswith(".h")
         existing = self.files.get(path)
+
+        # Guard 1: never write an empty body — that would silently blank a file.
+        if not content:
+            return (
+                f"ERROR: refused to write empty content to {path}. "
+                "Put the full file body in a ``` fenced block after the CALL line."
+            )
+
+        # Guard 2: a C/H write must actually look like C, not explanatory prose.
+        # This is the core fix for 'random agent text overwrote main.c'.
+        if is_code and not _looks_like_c(content):
+            return (
+                f"ERROR: that body does not look like C source, so I did not write {path}. "
+                "If you meant to explain something, just say it in plain text (no tool call). "
+                "To save code, put real C inside a ```c fence after CALL write_file."
+            )
+
+        # Guard 3: don't let a full rewrite quietly shrink an existing file to a
+        # stub. A 95%+ size drop on a non-trivial file is almost always the model
+        # truncating; force it through file_edit instead.
+        if is_code and existing:
+            old = existing.get("content", "")
+            if len(old) > 400 and len(content) < len(old) * 0.5:
+                return (
+                    f"ERROR: refused to shrink {path} from {len(old)} to {len(content)} bytes via write_file. "
+                    "A full rewrite must contain the COMPLETE file. To change part of it, use file_edit, "
+                    "or re-send the entire file (every function, every include) with write_file."
+                )
+
+        language = "markdown" if path.endswith(".md") else "c"
         if existing is not None:
             language = existing.get("language", language)
             

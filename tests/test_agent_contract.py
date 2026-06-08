@@ -135,19 +135,22 @@ def test_streaming_emits_ordered_events():
 
     types = [e["type"] for e in events]
     # The write_file turn must surface, in order, the reasoning, the call, the
-    # generated code card, the tool result, and a terminal final.
+    # tool result, the staged file proposal, and a terminal final. The file
+    # change is a *proposal* (Allow/Reject in the UI), not an auto-applied write.
     assert "think" in types
     assert "call" in types
-    assert "code" in types
+    assert "proposal" in types
     assert "result" in types
     assert types[-1] == "final"
-    assert types.index("think") < types.index("call") < types.index("code")
+    assert types.index("think") < types.index("call") < types.index("proposal")
 
-    # The code event carries the target path and the fenced source, fence-stripped.
-    code_ev = next(e for e in events if e["type"] == "code")
-    assert code_ev["path"] == "src/main.c"
-    assert "USART2" in code_ev["code"]
-    assert not code_ev["code"].startswith("```")
+    # The proposal event carries the target path and the fenced source,
+    # fence-stripped, plus the pre-edit baseline for the diff.
+    prop_ev = next(e for e in events if e["type"] == "proposal")
+    assert prop_ev["path"] == "src/main.c"
+    assert "USART2" in prop_ev["code"]
+    assert not prop_ev["code"].startswith("```")
+    assert "old" in prop_ev  # baseline for the diff (empty string for a new file)
 
 
 def test_ask_user_streams_question_event():

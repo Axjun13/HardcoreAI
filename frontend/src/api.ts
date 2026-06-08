@@ -108,6 +108,15 @@ export const api = {
     return res.json();
   },
 
+  async deleteFile(id: string, path: string) {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${id}/files/${path}`, {
+      method: "DELETE",
+      headers: { "Authorization": "Bearer TEST_TOKEN" }
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
   // --- Backend (Python FastAPI) ---
   
   async uploadRagDocument(file: File) {

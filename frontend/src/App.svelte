@@ -411,6 +411,28 @@
     });
   }
 
+  // Line-level diff for proposal cards (old vs proposed content). A small LCS
+  // so unchanged lines are shown as context and only real changes are +/-.
+  function computeProposalDiff(oldText: string, newText: string): Array<{ text: string, type: string }> {
+    const a = (oldText || "").split("\n");
+    const b = (newText || "").split("\n");
+    const n = a.length, m = b.length;
+    const lcs: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+    for (let i = n - 1; i >= 0; i--)
+      for (let j = m - 1; j >= 0; j--)
+        lcs[i][j] = a[i] === b[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+    const out: Array<{ text: string, type: string }> = [];
+    let i = 0, j = 0;
+    while (i < n && j < m) {
+      if (a[i] === b[j]) { out.push({ text: "  " + a[i], type: "normal" }); i++; j++; }
+      else if (lcs[i + 1][j] >= lcs[i][j + 1]) { out.push({ text: "- " + a[i], type: "del" }); i++; }
+      else { out.push({ text: "+ " + b[j], type: "add" }); j++; }
+    }
+    while (i < n) { out.push({ text: "- " + a[i], type: "del" }); i++; }
+    while (j < m) { out.push({ text: "+ " + b[j], type: "add" }); j++; }
+    return out;
+  }
+
   function renderMarkdown(markdown: string) {
     const lines = markdown.replace(/\r\n/g, "\n").split("\n");
     const html: string[] = [];
@@ -1800,6 +1822,22 @@
                           </div>
                           <pre class="agent-code-body"><code>{step.code}</code></pre>
                         </div>
+                      {:else if step.kind === 'proposal'}
+                        <div class="agent-proposal-card" class:allowed={step.decision === 'allowed'} class:rejected={step.decision === 'rejected'}>
+                          <div class="agent-proposal-head">
+                            <span class="agent-proposal-file">{step.deleted ? '🗑 ' : ''}{step.path}</span>
+                            <span class="agent-proposal-badge {step.decision}">
+                              {step.decision === 'allowed' ? '✓ Applied' : step.decision === 'rejected' ? '✕ Rejected' : 'Proposed change'}
+                            </span>
+                          </div>
+                          <pre class="agent-diff-body"><code>{#each computeProposalDiff(step.old || '', step.deleted ? '' : (step.code || '')) as line}<span class="diff-line {line.type}">{line.text}</span>{"\n"}{/each}</code></pre>
+                          {#if (step.decision || 'pending') === 'pending'}
+                            <div class="agent-proposal-actions">
+                              <button class="proposal-btn allow" onclick={() => actions.approveProposal(msg.id, step.path || '')}>Allow</button>
+                              <button class="proposal-btn reject" onclick={() => actions.rejectProposal(msg.id, step.path || '')}>Reject</button>
+                            </div>
+                          {/if}
+                        </div>
                       {:else if step.kind === 'result'}
                         {#if step.result && step.result.includes('=== Unified Diff ===')}
                           <div class="agent-result-line">↳ Code edits applied:</div>
@@ -2899,4 +2937,70 @@
   .diff-line.normal {
     color: #d4d4d8;
   }
+
+  /* Agent file-change proposal card (Allow / Reject) */
+  .agent-proposal-card {
+    background: #0f1419;
+    border: 1px solid rgba(96, 165, 250, 0.35);
+    border-radius: 8px;
+    margin: 10px 0;
+    overflow: hidden;
+    max-width: 100%;
+  }
+  .agent-proposal-card.allowed { border-color: rgba(16, 185, 129, 0.45); }
+  .agent-proposal-card.rejected { border-color: rgba(239, 68, 68, 0.35); opacity: 0.65; }
+  .agent-proposal-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 7px 10px;
+    background: rgba(255, 255, 255, 0.03);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  .agent-proposal-file {
+    font-family: var(--font-mono, monospace);
+    font-size: 0.74rem;
+    color: #e4e4e7;
+    font-weight: 600;
+  }
+  .agent-proposal-badge {
+    font-size: 0.66rem;
+    padding: 2px 7px;
+    border-radius: 10px;
+    background: rgba(96, 165, 250, 0.15);
+    color: #93c5fd;
+    white-space: nowrap;
+  }
+  .agent-proposal-badge.allowed { background: rgba(16, 185, 129, 0.18); color: #34d399; }
+  .agent-proposal-badge.rejected { background: rgba(239, 68, 68, 0.18); color: #f87171; }
+  .agent-proposal-actions {
+    display: flex;
+    gap: 8px;
+    padding: 8px 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.02);
+  }
+  .proposal-btn {
+    flex: 1;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 0.74rem;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: background 0.12s, border-color 0.12s;
+  }
+  .proposal-btn.allow {
+    background: rgba(16, 185, 129, 0.18);
+    color: #34d399;
+    border-color: rgba(16, 185, 129, 0.4);
+  }
+  .proposal-btn.allow:hover { background: rgba(16, 185, 129, 0.3); }
+  .proposal-btn.reject {
+    background: rgba(239, 68, 68, 0.12);
+    color: #f87171;
+    border-color: rgba(239, 68, 68, 0.35);
+  }
+  .proposal-btn.reject:hover { background: rgba(239, 68, 68, 0.22); }
 </style>

@@ -65,6 +65,35 @@ def _strip_duplicate_turn(history: list[dict] | None, problem: str) -> list[dict
     return hist or None
 
 
+def _compute_proposals(
+    files_dict: dict[str, dict[str, str]],
+    new_files: dict[str, dict[str, str]],
+) -> list[dict[str, Any]]:
+    """Diff the agent's in-memory files against the saved baseline.
+
+    Returns one proposal per changed/created/deleted file. Nothing is written to
+    the DB here — the frontend renders these as diff cards and only persists the
+    ones the user approves (via the files PUT endpoint).
+    """
+    proposals: list[dict[str, Any]] = []
+    for path in sorted(set(files_dict) | set(new_files)):
+        old = files_dict.get(path)
+        new = new_files.get(path)
+        old_content = old.get("content") if old else None
+        new_content = new.get("content") if new else None
+        if old_content == new_content:
+            continue
+        proposals.append({
+            "path": path,
+            "language": (new or old or {}).get("language", "c"),
+            "old": old_content or "",
+            "code": new_content or "",
+            "deleted": new is None,
+            "created": old is None,
+        })
+    return proposals
+
+
 def _persist_files(
     user_id: str,
     project_id: str,
@@ -211,7 +240,10 @@ async def agent_stream(project_id: str, payload: AgentRequest, user_id: str = De
         await queue.put(event)
 
     async def run() -> None:
-        """Drive the agent, then persist + enqueue the terminal `done` event."""
+        """Drive the agent, then enqueue the terminal `done` event with proposals.
+
+        Nothing is persisted here: the agent's file changes are staged as
+        proposals the user approves in the chat (via the files PUT endpoint)."""
         try:
             agent_trace, new_files = await run_agent_phase(
                 provider=payload.provider,
@@ -226,21 +258,18 @@ async def agent_stream(project_id: str, payload: AgentRequest, user_id: str = De
                 build_output=payload.build_output,
                 on_event=on_event,
             )
-            final_state, final_files = _persist_files(
-                user_id, project_id, files_dict, new_files
-            )
-            git_mgr.sync_db_to_disk(new_files)
-            git_mgr.commit_changes(f"Agent solve: {payload.problem[:60]}")
+            # Stage, don't commit: the agent's file changes are surfaced as
+            # proposals for the user to Allow/Reject in the chat. We persist
+            # nothing here — approval goes through the files PUT endpoint, and the
+            # workbench is read back unchanged for the panel to refresh against.
+            proposals = _compute_proposals(files_dict, new_files)
             await queue.put({
                 "type": "done",
                 "status": getattr(agent_trace, "status", "completed"),
                 "final": agent_trace.final,
                 "question": getattr(agent_trace, "question", ""),
                 "options": getattr(agent_trace, "options", []),
-                "files": [
-                    {"path": f.path, "language": f.language, "content": f.content}
-                    for f in final_files
-                ],
+                "proposals": proposals,
             })
         except llm.LLMError as exc:
             await queue.put({"type": "error", "fatal": True, "message": f"LLM error: {exc}"})
