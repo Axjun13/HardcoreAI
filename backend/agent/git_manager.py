@@ -66,9 +66,16 @@ class GitManager:
         # Walk local disk to see what files exist currently
         disk_files = set()
         for root, dirs, filenames in os.walk(self.workspace_dir):
-            if ".git" in dirs:
-                dirs.remove(".git")
+            # Ignore git and build directories
+            for ignored in [".git", ".pio", ".vscode"]:
+                if ignored in dirs:
+                    dirs.remove(ignored)
+                    
             for f in filenames:
+                # Ignore platformio config files
+                if f in ["platformio.ini", ".gitignore"]:
+                    continue
+                    
                 full_path = Path(root) / f
                 rel_path = full_path.relative_to(self.workspace_dir)
                 disk_files.add(rel_path.as_posix())
