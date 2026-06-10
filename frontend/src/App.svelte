@@ -5,6 +5,7 @@
   import * as monaco from "monaco-editor";
   import EmbeddedConfigurator from "./components/EmbeddedConfigurator.svelte";
   import RagUploadPanel from "./components/RagUploadPanel.svelte";
+  import LibraryManager from "./components/LibraryManager.svelte";
 
   import {
     Play,
@@ -34,6 +35,7 @@
     MonitorPlay,
     Copy,
     Check,
+    Package,
   } from "lucide-svelte";
 
   let aiInput = "";
@@ -974,6 +976,17 @@
       >
         <Settings size={18} />
       </button>
+      <!-- svelte-ignore a11y-click-events-have-key-events -->
+      <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+      <button
+        class="activity-item {$workspaceStore.activeSidebarTab === 'libraries'
+          ? 'active'
+          : ''}"
+        onclick={() => actions.setActiveSidebarTab("libraries")}
+        title="Library Manager"
+      >
+        <Package size={18} />
+      </button>
     </nav>
 
     <!-- Sidebar Panel Column -->
@@ -1421,6 +1434,10 @@
             </div>
           </div>
         </div>
+      {/if}
+
+      {#if $workspaceStore.activeSidebarTab === "libraries"}
+        <LibraryManager />
       {/if}
     </aside>
 

@@ -331,5 +331,53 @@ export const api = {
         }
       }
     }
-  }
+  },
+
+  // --- Library Manager ---
+
+  async getAvailableLibraries(search: string = "", category: string = "") {
+    const params = new URLSearchParams();
+    if (search) params.set("search", search);
+    if (category) params.set("category", category);
+    const res = await fetch(`${BACKEND_URL}/api/libraries?${params}`, {
+      headers: { "Authorization": "Bearer TEST_TOKEN" }
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async getLibraryCategories() {
+    const res = await fetch(`${BACKEND_URL}/api/libraries/categories`, {
+      headers: { "Authorization": "Bearer TEST_TOKEN" }
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async getInstalledLibraries(projectId: string) {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/libraries`, {
+      headers: { "Authorization": "Bearer TEST_TOKEN" }
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async installLibrary(projectId: string, libraryId?: string, gitUrl?: string) {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/libraries/install`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer TEST_TOKEN" },
+      body: JSON.stringify({ library_id: libraryId ?? null, git_url: gitUrl ?? null })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async uninstallLibrary(projectId: string, libraryId: string) {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/libraries/${encodeURIComponent(libraryId)}`, {
+      method: "DELETE",
+      headers: { "Authorization": "Bearer TEST_TOKEN" }
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
 };

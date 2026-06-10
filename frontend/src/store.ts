@@ -170,7 +170,7 @@ export const workspaceStore = writable({
   activeBottomTab: "terminal" as "terminal" | "plotter" | "registers" | "memory",
   terminalOpen: true,  // whether the bottom drawer (serial/build/etc.) is expanded
   showWelcomeScreen: true,
-  activeSidebarTab: "explorer" as "explorer" | "search" | "git" | "debug" | "extensions" | "boards" | "rag",
+  activeSidebarTab: "explorer" as "explorer" | "search" | "git" | "debug" | "extensions" | "boards" | "rag" | "libraries",
   selectedBoard: "STM32F401" as "STM32F401" | "ESP32-S3" | "RP2040",
   selectedProbe: "ST-Link V2" as "ST-Link V2" | "J-Link" | "CMSIS-DAP",
   toolchainPath: "/usr/bin/arm-none-eabi-gcc",
@@ -190,6 +190,17 @@ export const workspaceStore = writable({
   ragUploadProgress: null as string | null,
   semanticQuery: "",
   semanticResults: [] as { file: string; match: string; score: number }[],
+
+  // Library Manager State
+  libraryManagerTab: "discover" as "discover" | "installed" | "updates",
+  availableLibraries: [] as any[],
+  installedLibraries: [] as any[],
+  libraryCategories: [] as string[],
+  librarySearchQuery: "",
+  librarySelectedCategory: "",
+  libraryInstallStatus: {} as Record<string, "idle" | "confirming" | "installing" | "installed" | "error">,
+  libraryInstallError: {} as Record<string, string>,
+  librariesLoading: false,
 });
 
 // Helper Actions for Store
@@ -566,10 +577,17 @@ export const actions = {
   setShowWelcomeScreen: (val: boolean) => {
     workspaceStore.update(s => ({ ...s, showWelcomeScreen: val }));
   },
-  setActiveSidebarTab: (tab: "explorer" | "search" | "git" | "debug" | "extensions" | "boards" | "rag") => {
+  setActiveSidebarTab: (tab: "explorer" | "search" | "git" | "debug" | "extensions" | "boards" | "rag" | "libraries") => {
     workspaceStore.update(s => ({ ...s, activeSidebarTab: tab }));
     if (tab === "git") {
       actions.loadGitStatus();
+    }
+    if (tab === "libraries") {
+      actions.fetchAvailableLibraries();
+      actions.fetchLibraryCategories();
+      let pid: string | null = null;
+      workspaceStore.subscribe(s => { pid = s.activeProjectId; })();
+      if (pid) actions.fetchInstalledLibraries(pid);
     }
   },
   setSelectedBoard: (board: "STM32F401" | "ESP32-S3" | "RP2040") => {
@@ -1180,5 +1198,117 @@ export const actions = {
       console.error("Failed to delete project", e);
       alert("Failed to delete project");
     }
-  }
+  },
+
+  // ── Library Manager Actions ──
+
+  fetchAvailableLibraries: async () => {
+    let query = "";
+    let category = "";
+    workspaceStore.subscribe(s => {
+      query = s.librarySearchQuery;
+      category = s.librarySelectedCategory;
+    })();
+    workspaceStore.update(s => ({ ...s, librariesLoading: true }));
+    try {
+      const libs = await api.getAvailableLibraries(query, category);
+      workspaceStore.update(s => ({ ...s, availableLibraries: libs, librariesLoading: false }));
+    } catch (e) {
+      console.error("Failed to fetch libraries", e);
+      workspaceStore.update(s => ({ ...s, librariesLoading: false }));
+    }
+  },
+
+  fetchLibraryCategories: async () => {
+    try {
+      const cats = await api.getLibraryCategories();
+      workspaceStore.update(s => ({ ...s, libraryCategories: cats }));
+    } catch (e) {
+      console.error("Failed to fetch library categories", e);
+    }
+  },
+
+  fetchInstalledLibraries: async (projectId: string) => {
+    try {
+      const libs = await api.getInstalledLibraries(projectId);
+      workspaceStore.update(s => ({ ...s, installedLibraries: libs }));
+    } catch (e) {
+      console.error("Failed to fetch installed libraries", e);
+    }
+  },
+
+  setLibraryManagerTab: (tab: "discover" | "installed" | "updates") => {
+    workspaceStore.update(s => ({ ...s, libraryManagerTab: tab }));
+    if (tab === "installed") {
+      let pid: string | null = null;
+      workspaceStore.subscribe(s => { pid = s.activeProjectId; })();
+      if (pid) actions.fetchInstalledLibraries(pid);
+    }
+  },
+
+  setLibrarySearch: (query: string) => {
+    workspaceStore.update(s => ({ ...s, librarySearchQuery: query }));
+  },
+
+  setLibraryCategory: (category: string) => {
+    workspaceStore.update(s => ({ ...s, librarySelectedCategory: category }));
+  },
+
+  confirmInstallLibrary: (libraryId: string) => {
+    workspaceStore.update(s => ({
+      ...s,
+      libraryInstallStatus: { ...s.libraryInstallStatus, [libraryId]: "confirming" }
+    }));
+  },
+
+  cancelInstallLibrary: (libraryId: string) => {
+    workspaceStore.update(s => ({
+      ...s,
+      libraryInstallStatus: { ...s.libraryInstallStatus, [libraryId]: "idle" }
+    }));
+  },
+
+  installLibrary: async (libraryId: string) => {
+    let projectId: string | null = null;
+    workspaceStore.subscribe(s => { projectId = s.activeProjectId; })();
+    if (!projectId) {
+      alert("No active project. Open a project first.");
+      return;
+    }
+    workspaceStore.update(s => ({
+      ...s,
+      libraryInstallStatus: { ...s.libraryInstallStatus, [libraryId]: "installing" }
+    }));
+    try {
+      await api.installLibrary(projectId, libraryId);
+      workspaceStore.update(s => ({
+        ...s,
+        libraryInstallStatus: { ...s.libraryInstallStatus, [libraryId]: "installed" }
+      }));
+      // Refresh installed list
+      await actions.fetchInstalledLibraries(projectId);
+    } catch (e: any) {
+      workspaceStore.update(s => ({
+        ...s,
+        libraryInstallStatus: { ...s.libraryInstallStatus, [libraryId]: "error" },
+        libraryInstallError: { ...s.libraryInstallError, [libraryId]: e.message || "Install failed" }
+      }));
+    }
+  },
+
+  uninstallLibrary: async (libraryId: string) => {
+    let projectId: string | null = null;
+    workspaceStore.subscribe(s => { projectId = s.activeProjectId; })();
+    if (!projectId) return;
+    try {
+      await api.uninstallLibrary(projectId, libraryId);
+      workspaceStore.update(s => ({
+        ...s,
+        libraryInstallStatus: { ...s.libraryInstallStatus, [libraryId]: "idle" },
+        installedLibraries: s.installedLibraries.filter((l: any) => l.id !== libraryId)
+      }));
+    } catch (e: any) {
+      alert("Failed to uninstall: " + e.message);
+    }
+  },
 };
