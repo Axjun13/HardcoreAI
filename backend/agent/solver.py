@@ -14,6 +14,7 @@ from functools import partial
 import llm
 from .parser import AgentTrace, run_phase
 from .tools import CodingToolbox
+from services.library_service import list_installed
 
 # ---------------------------------------------------------------------------
 # System prompt — STM32 conversational copilot
@@ -190,17 +191,28 @@ When the user asks to program/upload/flash the firmware to the board, call flash
 If no STM32 (Blue Pill) is connected it will say so — relay that to the user rather
 than treating it as a code error.
 
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
-RULE 5 \u2014 CONVERSATION AWARENESS
-\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+══════════════════════════════════════════════════════════════
+RULE 5 — CONVERSATION AWARENESS
+══════════════════════════════════════════════════════════════
 Read the conversation history carefully before every response.
 If the board, pin, baud rate, or any parameter was already established earlier in the
 conversation, do NOT ask for it again. Use it directly to write the code.
+
+══════════════════════════════════════════════════════════════
+RULE 6 — INSTALLED LIBRARIES
+══════════════════════════════════════════════════════════════
+You are aware of the libraries installed in the current project (provided in the user prompt).
+- You DO NOT have the ability to install or uninstall libraries.
+- If a user asks to install a library, instruct them to use the "Library Manager" (the package icon in the left activity bar).
+- When writing code, you MAY use the headers of the libraries that are listed as installed.
 """
 
 _AGENT_USER = """\
 CURRENT PROJECT CODE (src/main.c):
 {current_code}
+
+INSTALLED LIBRARIES:
+{installed_libraries}
 
 REFERENCE MANUALS AVAILABLE: {has_docs}
 
@@ -279,6 +291,12 @@ async def run_agent_phase(
 
     system = _AGENT_SYSTEM.format(tools=_tool_block(toolbox))
 
+    installed_libs = list_installed(project_id)
+    if installed_libs:
+        lib_list_str = "\n".join(f"- {lib['name']} ({lib.get('description', 'No description')})" for lib in installed_libs)
+    else:
+        lib_list_str = "(None installed)"
+
     if messages:
         # Subsequent turn: the prior history has all the context.
         # Explicitly tell the model to check if it has everything and generate code.
@@ -295,6 +313,7 @@ async def run_agent_phase(
         # First turn: send the full structured context so the agent has everything it needs.
         user_prompt = _AGENT_USER.format(
             current_code=current_code,
+            installed_libraries=lib_list_str,
             has_docs=has_docs,
             build_output_status=build_output_status,
             problem=problem or "(no request provided)",
