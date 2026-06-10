@@ -224,6 +224,8 @@ export const workspaceStore = writable({
   semanticResults: [] as { file: string; match: string; score: number }[],
 });
 
+let agentAbortController: AbortController | null = null;
+
 // Helper Actions for Store
 export const actions = {
   loadProjects: async () => {
@@ -571,6 +573,10 @@ export const actions = {
   toggleSerialConnection: () => {
     workspaceStore.update(s => ({ ...s, serialConnected: !s.serialConnected }));
   },
+  setBaudRate: (baud: number) => {
+    workspaceStore.update(s => ({ ...s, baudRate: baud }));
+    actions.addSerialLog(`[SYSTEM] Baud rate changed to ${baud} bps.`);
+  },
   addSerialLog: (log: string) => {
     workspaceStore.update(s => ({ ...s, serialLogs: [...s.serialLogs, log] }));
   },
@@ -855,6 +861,22 @@ export const actions = {
     workspaceStore.update(s => ({ ...s, queuedAiFollowup: null }));
   },
 
+  cancelAiMessage: () => {
+    if (agentAbortController) {
+      agentAbortController.abort();
+      agentAbortController = null;
+    }
+    workspaceStore.update(s => {
+      const msgs = s.aiMessages.map(m => {
+        if (m.streaming) {
+          return { ...m, streaming: false, text: m.text || "Generation cancelled by user." };
+        }
+        return m;
+      });
+      return { ...s, aiMessages: msgs, aiWaiting: false };
+    });
+  },
+
   sendAiMessage: async (text: string) => {
     const cleanText = text.trim();
     if (!cleanText) return;
@@ -998,6 +1020,7 @@ export const actions = {
       };
 
       let sawAnyEvent = false;
+      agentAbortController = new AbortController();
       await api.streamAgent(cleanText, (ev: any) => {
         sawAnyEvent = true;
         switch (ev.type) {
@@ -1126,13 +1149,14 @@ export const actions = {
             }
             break;
         }
-      }, history, currentPhase, selectedProvider, buildOutput);
+      }, history, currentPhase, selectedProvider, buildOutput, agentAbortController.signal);
 
       // Stream closed. Nothing is auto-applied: the agent's file changes are
       // staged as proposals and only persisted when the user clicks Allow.
 
       // Finalize: ensure streaming flag is cleared and persist history.
       let queuedFollowup: string | null = null;
+      agentAbortController = null;
       workspaceStore.update(s => {
         const msgs = s.aiMessages.map(m => {
           if (m.id !== aiMsgId) return m;
@@ -1150,6 +1174,9 @@ export const actions = {
         window.setTimeout(() => actions.sendAiMessage(queuedFollowup!), 0);
       }
     } catch (e: any) {
+      if (e.name === 'AbortError') {
+        return;
+      }
       workspaceStore.update(s => {
         const errorMsg: ChatMessage = {
           id: Math.random().toString(),

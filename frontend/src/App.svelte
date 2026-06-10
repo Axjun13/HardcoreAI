@@ -27,6 +27,7 @@
     MoreHorizontal,
     Plus,
     Moon,
+    Sun,
     Cpu,
     Database,
     Sliders,
@@ -82,6 +83,39 @@
   let isDraggingLeft = false;
   let isDraggingRight = false;
   let isDraggingBottom = false;
+
+  let recentProjectsExpanded = false;
+  let isLightTheme = typeof localStorage !== 'undefined' && localStorage.getItem("theme") === "light";
+  let currentLine = 12;
+  let currentColumn = 25;
+
+  function toggleTheme() {
+    isLightTheme = !isLightTheme;
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem("theme", isLightTheme ? "light" : "dark");
+    }
+    if (isLightTheme) {
+      document.body.classList.add("light-theme");
+    } else {
+      document.body.classList.remove("light-theme");
+    }
+    if (monacoEditor) {
+      monaco.editor.setTheme(isLightTheme ? "vs" : "vs-dark");
+    }
+  }
+
+  function handleKeyDown(e: KeyboardEvent) {
+    if (e.ctrlKey && e.key === 'o') {
+      e.preventDefault();
+      actions.setShowWelcomeScreen(true);
+    }
+  }
+
+  onMount(() => {
+    if (isLightTheme) {
+      document.body.classList.add("light-theme");
+    }
+  });
 
   // DOM Elements
   let canvasEl: HTMLCanvasElement;
@@ -220,7 +254,7 @@
     monacoEditor = monaco.editor.create(node, {
       value: $workspaceStore.fileContents[$workspaceStore.activeFile || ""] || "",
       language: "c",
-      theme: "vs-dark",
+      theme: isLightTheme ? "vs" : "vs-dark",
       automaticLayout: true,
       fontFamily: "JetBrains Mono",
       fontSize: 13,
@@ -233,9 +267,15 @@
       }
     });
 
+    const cursorDisposable = monacoEditor.onDidChangeCursorPosition((e) => {
+      currentLine = e.position.lineNumber;
+      currentColumn = e.position.column;
+    });
+
     return {
       destroy() {
         disposable.dispose();
+        cursorDisposable.dispose();
         if (monacoEditor) {
           monacoEditor.dispose();
           monacoEditor = null;
@@ -565,20 +605,14 @@
   $: activeProject = $workspaceStore.projectsList.find(p => p.id === $workspaceStore.activeProjectId);
 </script>
 
-<svelte:window onmousemove={handleMouseMove} onmouseup={handleMouseUp} />
-<div class="helix-app">
+<svelte:window onmousemove={handleMouseMove} onmouseup={handleMouseUp} onkeydown={handleKeyDown} />
+<div class="helix-app {isLightTheme ? 'light-theme' : ''}">
   <!-- 1. Header Command Bar -->
   <header class="helix-header">
     <div class="logo-section">
       <div class="logo-text">HARDCORE<span>AI</span></div>
-      <!-- svelte-ignore a11y-click-events-have-key-events -->
-      <!-- svelte-ignore a11y-no-static-element-interactions -->
-      <div
-        class="target-dropdown-pill"
-        onclick={() => { showConfigurator = true; aiOpen = true; }}
-      >
+      <div class="target-tag-pill">
         <span>Target: {$workspaceStore.selectedBoard}RETx</span>
-        <ChevronDown size={11} class="target-dropdown-arrow" />
       </div>
     </div>
 
@@ -626,15 +660,6 @@
             : "Debug"}</span
         >
       </button>
-
-      <div class="divider-line"></div>
-
-      <div class="capsule-more-options">
-        <MoreHorizontal
-          size={13}
-          style="color: var(--text-muted); cursor: pointer; padding: 0 4px;"
-        />
-      </div>
     </div>
 
     <!-- Connectivity Status & Controls -->
@@ -727,7 +752,15 @@
           class="control-icon-btn"
           onclick={() => { showConfigurator = true; aiOpen = true; }}
         />
-        <Moon size={14} class="control-icon-btn" />
+        <!-- svelte-ignore a11y-click-events-have-key-events -->
+        <!-- svelte-ignore a11y-no-static-element-interactions -->
+        <div class="control-icon-btn" onclick={toggleTheme} title="Toggle light/dark theme">
+          {#if isLightTheme}
+            <Sun size={14} />
+          {:else}
+            <Moon size={14} />
+          {/if}
+        </div>
         <!-- svelte-ignore a11y-click-events-have-key-events -->
         <!-- svelte-ignore a11y-no-static-element-interactions -->
         <div
@@ -1156,6 +1189,72 @@
             </div>
           </div>
 
+          <!-- QUICK ACCESS section -->
+          <div class="explorer-sub-section">
+            <div class="explorer-sub-header">QUICK ACCESS</div>
+            
+            <button type="button" class="quick-access-item" onclick={() => {
+              inputPromptModal = {
+                show: true,
+                title: "Create New Project",
+                placeholder: "e.g. Blinky Project",
+                value: "",
+                actionType: "project"
+              };
+            }}>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <Plus size={13} style="color: var(--accent-violet);" />
+                <span>New Project</span>
+              </div>
+            </button>
+
+            <button type="button" class="quick-access-item" onclick={() => actions.setShowWelcomeScreen(true)}>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <FolderOpen size={13} style="color: var(--accent-violet);" />
+                <span>Open Folder...</span>
+              </div>
+              <span class="shortcut-tag">Ctrl+O</span>
+            </button>
+
+            <button type="button" class="quick-access-item" onclick={() => actions.setShowWelcomeScreen(true)}>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <Blocks size={13} style="color: var(--accent-violet);" />
+                <span>Open Workspace...</span>
+              </div>
+              <span class="shortcut-tag">Ctrl+K Ctrl+O</span>
+            </button>
+
+            <button type="button" class="quick-access-item" onclick={() => recentProjectsExpanded = !recentProjectsExpanded}>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <Sliders size={13} style="color: var(--accent-violet);" />
+                <span>Recent Projects</span>
+              </div>
+              <span class="shortcut-tag">{recentProjectsExpanded ? '▼' : '▶'}</span>
+            </button>
+
+            {#if recentProjectsExpanded}
+              <div class="recent-projects-list" style="padding-left: 16px; display: flex; flex-direction: column; gap: 4px; margin-top: 4px;">
+                {#each $workspaceStore.projectsList as project}
+                  <button
+                    type="button"
+                    class="quick-access-item"
+                    style="padding: 4px 8px; font-size: 0.7rem; justify-content: flex-start; gap: 6px;"
+                    onclick={async () => {
+                      await actions.loadProject(project.id);
+                      recentProjectsExpanded = false;
+                    }}
+                  >
+                    <Cpu size={11} style="color: var(--text-dark);" />
+                    <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{project.name}</span>
+                  </button>
+                {/each}
+                {#if $workspaceStore.projectsList.length === 0}
+                  <div style="font-size: 0.65rem; color: var(--text-dark); padding: 4px 8px; font-style: italic;">No recent projects</div>
+                {/if}
+              </div>
+            {/if}
+          </div>
+
           <!-- RAG Context indicator shortcut inside explorer -->
           <div class="explorer-sub-section">
             <div class="explorer-sub-header">RAG DATABASES CONTEXT</div>
@@ -1468,6 +1567,14 @@
         <div class="monaco-editor-wrapper">
           {#if $workspaceStore.activeFile}
             <div class="monaco-container" use:initMonaco></div>
+            <div class="editor-bottom-bar">
+              <span>Ln {currentLine}, Col {currentColumn}</span>
+              <span>Spaces: 4</span>
+              <span>UTF-8</span>
+              <span>LF</span>
+              <span>C</span>
+              <span>{$workspaceStore.selectedBoard}RETx</span>
+            </div>
           {:else}
             <div class="empty-editor-state">
               <h2 style="color: var(--text-muted); font-weight: 500; font-size: 1.1rem; letter-spacing: 0.5px; margin-bottom: 2rem;">
@@ -1606,6 +1713,22 @@
                   bind:value={serialInput}
                 />
                 <button type="submit">SEND</button>
+                <select
+                  class="baud-rate-select"
+                  value={$workspaceStore.baudRate}
+                  onchange={(e) => actions.setBaudRate(Number(e.currentTarget.value))}
+                  style="background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-active); font-size: 0.72rem; padding: 4px 8px; border-radius: var(--radius-sm); outline: none; margin-left: 8px; cursor: pointer; transition: border-color 0.15s ease;"
+                >
+                  <option value={9600}>9600 baud</option>
+                  <option value={19200}>19200 baud</option>
+                  <option value={38400}>38400 baud</option>
+                  <option value={57600}>57600 baud</option>
+                  <option value={74880}>74880 baud</option>
+                  <option value={115200}>115200 baud</option>
+                  <option value={230400}>230400 baud</option>
+                  <option value={460800}>460800 baud</option>
+                  <option value={921600}>921600 baud</option>
+                </select>
               </form>
             </div>
           {/if}
@@ -1770,7 +1893,35 @@
 
       <!-- Chat messages view -->
       <div class="ai-copilot-chat-content">
-        {#each $workspaceStore.aiMessages as msg}
+        {#if !$workspaceStore.aiMessages.some(m => m.sender === 'user')}
+          <div class="copilot-welcome-container">
+            <div class="copilot-welcome-title">Hello! I'm HardcoreAI Copilot</div>
+            <div class="copilot-welcome-subtitle">Ask me anything about your embedded project.</div>
+            
+            <div class="copilot-welcome-grid">
+              <button type="button" class="copilot-shortcut-card" onclick={() => actions.sendAiMessage("Explain the code in the active file.")}>
+                <FileCode size={14} class="shortcut-card-icon" />
+                <span>Explain this code</span>
+              </button>
+              
+              <button type="button" class="copilot-shortcut-card" onclick={() => actions.sendAiMessage("Fix any errors in the current code.")}>
+                <AlertTriangle size={14} class="shortcut-card-icon" />
+                <span>Fix errors</span>
+              </button>
+              
+              <button type="button" class="copilot-shortcut-card" onclick={() => actions.sendAiMessage("Help me debug this issue in the project.")}>
+                <Bug size={14} class="shortcut-card-icon" />
+                <span>Debug this issue</span>
+              </button>
+              
+              <button type="button" class="copilot-shortcut-card" onclick={() => actions.sendAiMessage("Optimize the performance of this code.")}>
+                <Cpu size={14} class="shortcut-card-icon" />
+                <span>Optimize this code</span>
+              </button>
+            </div>
+          </div>
+        {:else}
+          {#each $workspaceStore.aiMessages as msg}
           <div class="chat-row {msg.sender}">
             {#if msg.sender === 'ai'}
               <div class="chat-avatar ai-avatar"><Sparkles size={9} /></div>
@@ -2095,6 +2246,7 @@
             </div>
           </div>
         {/each}
+        {/if}
 
         {#if $workspaceStore.aiWaiting}
           <div class="chat-row ai">
@@ -2115,6 +2267,19 @@
 
       <!-- Input Box -->
       <div class="chat-input-zone">
+        {#if activeAgentStreaming}
+          <div class="chat-stop-generating-row" style="display: flex; justify-content: center; margin-bottom: 8px;">
+            <button
+              type="button"
+              class="stop-generating-btn"
+              onclick={() => actions.cancelAiMessage()}
+              style="display: flex; align-items: center; gap: 6px; padding: 6px 12px; font-size: 0.72rem; font-weight: 600; border-radius: var(--radius-sm); border: 1px solid var(--border-color); background: var(--bg-tertiary); color: var(--text-active); cursor: pointer; transition: all 0.2s;"
+            >
+              <div style="width: 8px; height: 8px; background: var(--accent-error); border-radius: 1px;"></div>
+              <span>Stop Generating</span>
+            </button>
+          </div>
+        {/if}
         {#if queuedAiFollowup}
           <div class="chat-followup-queued">
             <span class="chat-followup-dot"></span>
@@ -2198,7 +2363,7 @@
         </button>
         <button class="status-bar-item" type="button" onclick={() => { actions.setTerminalOpen(true); actions.setBottomTab("registers"); }} title="Open register view">
           <Database size={13} />
-          <span>Ln {$workspaceStore.currentLine ?? 12}, Col 25</span>
+          <span>Ln {currentLine}, Col {currentColumn}</span>
         </button>
         <span class="status-bar-item text-only">Spaces: 4</span>
         <span class="status-bar-item text-only">UTF-8</span>
@@ -2282,6 +2447,8 @@
         <div class="delete-modal-title">
           {#if inputPromptModal.actionType === 'file'}
             <Plus size={15} style="color: var(--accent-violet);" />
+          {:else if inputPromptModal.actionType === 'project'}
+            <Cpu size={14} style="color: var(--accent-violet);" />
           {:else}
             <FolderOpen size={14} style="color: var(--accent-violet);" />
           {/if}
@@ -2310,6 +2477,18 @@
                   inputPromptModal.show = false;
                   if (inputPromptModal.actionType === "file") {
                     actions.createFile(val);
+                  } else if (inputPromptModal.actionType === "project") {
+                    (async () => {
+                      try {
+                        const project = await api.createProject(val, "Created from IDE");
+                        await actions.loadProject(project.id);
+                        await actions.loadProjects();
+                        actions.setActiveSidebarTab("explorer");
+                        actions.addBuildLog("Created new embedded project template successfully.");
+                      } catch (e: any) {
+                        actions.addBuildLog("Failed to create project: " + e.message);
+                      }
+                    })();
                   } else {
                     actions.createFolder(val);
                   }
@@ -2336,6 +2515,18 @@
               inputPromptModal.show = false;
               if (inputPromptModal.actionType === "file") {
                 actions.createFile(val);
+              } else if (inputPromptModal.actionType === "project") {
+                (async () => {
+                  try {
+                    const project = await api.createProject(val, "Created from IDE");
+                    await actions.loadProject(project.id);
+                    await actions.loadProjects();
+                    actions.setActiveSidebarTab("explorer");
+                    actions.addBuildLog("Created new embedded project template successfully.");
+                  } catch (e: any) {
+                    actions.addBuildLog("Failed to create project: " + e.message);
+                  }
+                })();
               } else {
                 actions.createFolder(val);
               }
