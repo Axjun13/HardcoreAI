@@ -24,8 +24,6 @@
     Folder,
     Settings,
     X,
-    ChevronDown,
-    MoreHorizontal,
     Plus,
     Moon,
     Sun,
@@ -70,7 +68,7 @@
     title: "",
     placeholder: "",
     value: "",
-    actionType: "file" as "file" | "folder"
+    actionType: "file" as "file" | "folder" | "project"
   };
 
   let gitCommitMessage = "";
@@ -869,9 +867,10 @@
             <div class="recent-list">
               {#each $workspaceStore.projectsList as project}
                 <div style="display: flex; align-items: center; justify-content: space-between; padding-right: 12px; gap: 8px; border: 1px solid rgba(255,255,255,0.05); border-radius: 6px; margin-bottom: 8px; background: rgba(0,0,0,0.2);">
-                  <div
+                  <button
+                    type="button"
                     class="recent-item"
-                    style="flex: 1; border: none; margin-bottom: 0; background: transparent;"
+                    style="flex: 1; border: none; margin-bottom: 0; background: transparent; text-align: left; cursor: pointer;"
                     onclick={async () => {
                       await actions.loadProject(project.id);
                       actions.setSelectedBoard("STM32F401");
@@ -881,7 +880,7 @@
                   >
                     <div class="recent-name">{project.name}</div>
                     <div class="recent-path">Project ID: {project.id} | {new Date(project.created_at).toLocaleDateString()}</div>
-                  </div>
+                  </button>
                   <button 
                     class="control-icon-btn close-btn-highlight" 
                     title="Delete Project"
