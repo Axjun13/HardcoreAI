@@ -89,7 +89,39 @@ export interface RagDocument {
 
 
 // Pin configuration data
-const initialPins: PinConfig[] = [];
+const stm32F401Pins = [
+  "VBAT", "PC13", "PC14", "PC15", "PH0", "PH1", "NRST", "PC0",
+  "PC1", "PC2", "PC3", "VSSA", "VDDA", "PA0", "PA1", "PA2",
+  "PA3", "VSS", "VDD", "PA4", "PA5", "PA6", "PA7", "PC4",
+  "PC5", "PB0", "PB1", "PB2", "PB10", "PB11", "VSS", "VDD",
+  "PB12", "PB13", "PB14", "PB15", "PC6", "PC7", "PC8", "PC9",
+  "PA8", "PA9", "PA10", "PA11", "PA12", "PA13", "VCAP", "VSS",
+  "VDD", "PA14", "PA15", "PC10", "PC11", "PC12", "PD2", "PB3",
+  "PB4", "PB5", "PB6", "PB7", "BOOT0", "PB8", "PB9", "VSS",
+];
+
+const initialPins: PinConfig[] = stm32F401Pins.map((pin, index) => {
+  const defaults: Partial<PinConfig> = {};
+  if (pin === "PA5") Object.assign(defaults, { signal: "GPIO_Output", mode: "Output Push Pull", label: "LED", enabled: true });
+  if (pin === "PA2") Object.assign(defaults, { signal: "USART2_TX", mode: "Alternate Function", label: "UART TX", af: "AF7", enabled: true });
+  if (pin === "PA3") Object.assign(defaults, { signal: "USART2_RX", mode: "Alternate Function", label: "UART RX", af: "AF7", enabled: true });
+  if (pin === "PB6") Object.assign(defaults, { signal: "I2C1_SCL", mode: "Alternate Function", label: "I2C SCL", af: "AF4", enabled: true });
+  if (pin === "PB7") Object.assign(defaults, { signal: "I2C1_SDA", mode: "Alternate Function", label: "I2C SDA", af: "AF4", enabled: true });
+
+  const isPower = ["VSS", "VDD", "VBAT", "VDDA", "VSSA", "VCAP"].includes(pin);
+  const isSystem = ["NRST", "BOOT0", "PH0", "PH1"].includes(pin);
+
+  return {
+    pin,
+    signal: defaults.signal ?? (isPower ? pin : isSystem ? "System" : "Unassigned"),
+    mode: defaults.mode ?? (isPower ? "Power" : isSystem ? "System" : "Input Floating"),
+    speed: defaults.speed ?? "Low",
+    pull: defaults.pull ?? "No pull-up/down",
+    label: defaults.label ?? `Pin ${index + 1}`,
+    af: defaults.af ?? "-",
+    enabled: defaults.enabled ?? (isPower || isSystem),
+  };
+});
 
 // RAG Documents initial mock list
 const initialRagDocs: RagDocument[] = [];

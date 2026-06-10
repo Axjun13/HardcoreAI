@@ -652,16 +652,23 @@ input, button, select, textarea {
   flex-direction: column;
   border-bottom: 1px solid var(--border-color);
   overflow: hidden;
+  min-height: 0;
 }
 
 .embedded-configurator-pane {
-  flex: 42;
-  min-height: 220px;
+  flex: 1 1 50%;
+  min-height: 260px;
+  background-color: var(--bg-secondary);
 }
 
 .ai-copilot-pane {
-  flex: 35;
-  min-height: 180px;
+  flex: 1 1 50%;
+  min-height: 220px;
+  border-bottom: none;
+}
+
+.ai-copilot-pane.expanded {
+  flex-basis: 100%;
 }
 
 .debug-variables-pane {
@@ -1858,35 +1865,78 @@ input, button, select, textarea {
 
 /* Custom Status Bar */
 .hardcoreai-status-bar {
-  height: 24px; /* Spacious compact status bar */
-  background-color: #050508;
+  height: 28px;
+  flex-shrink: 0;
+  background:
+    linear-gradient(180deg, rgba(17, 14, 26, 0.98), rgba(7, 7, 12, 0.98));
   border-top: 1px solid var(--border-color);
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0 14px;
-  font-size: 0.7rem;
+  padding: 0 14px 0 10px;
+  font-size: 0.68rem;
   color: var(--text-muted);
+  box-shadow: 0 -10px 24px rgba(0, 0, 0, 0.32);
 }
 
 .status-bar-left, .status-bar-right {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 4px;
+  min-width: 0;
 }
 
 .status-bar-item {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
+  gap: 7px;
+  height: 100%;
+  min-height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.05);
+  background: transparent;
+  color: inherit;
+  font: inherit;
   cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.12s ease, background-color 0.12s ease;
 }
 
 .status-bar-item:hover {
   color: var(--text-active);
+  background-color: rgba(139, 92, 246, 0.12);
+}
+
+.status-bar-item.text-only {
+  cursor: default;
+  color: var(--text-muted);
+}
+
+.status-bar-item.text-only:hover {
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.status-bar-item.icon-only {
+  width: 30px;
+  padding: 0;
 }
 
 .branch-name {
+  color: var(--text-active);
+}
+
+.active-branch {
+  margin-left: -10px;
+  border-left: 0;
+  background: rgba(139, 92, 246, 0.18);
+  color: var(--accent-violet-hover);
+}
+
+.probe-status.connected,
+.ready-status {
   color: var(--text-active);
 }
 
@@ -2285,6 +2335,47 @@ input, button, select, textarea {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
+}
+
+.right-ai-panel .embedded-configurator-pane .ec-root {
+  background-color: var(--bg-secondary);
+}
+
+.right-ai-panel .embedded-configurator-pane .ec-header {
+  height: 34px;
+  padding: 0 10px;
+}
+
+.right-ai-panel .embedded-configurator-pane .ec-header-title {
+  font-size: 0.68rem;
+}
+
+.right-ai-panel .embedded-configurator-pane .ec-board-chip {
+  display: none;
+}
+
+.right-ai-panel .embedded-configurator-pane .ec-tab-bar {
+  overflow-x: auto;
+}
+
+.right-ai-panel .embedded-configurator-pane .ec-tab {
+  flex: 1;
+  min-width: max-content;
+  padding: 0 10px;
+  font-size: 0.64rem;
+}
+
+.right-ai-panel .embedded-configurator-pane .ec-config-tab {
+  grid-template-columns: 132px minmax(0, 1fr);
+}
+
+.right-ai-panel .embedded-configurator-pane .ec-pinout-tab {
+  overflow-y: auto;
+}
+
+.right-ai-panel .embedded-configurator-pane .ec-detail-col,
+.right-ai-panel .embedded-configurator-pane .ec-cat-col {
+  min-width: 0;
 }
 
 /* Sidebar panel shared input/select theming */

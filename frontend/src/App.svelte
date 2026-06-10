@@ -40,7 +40,7 @@
   let serialInput = "";
   let selectedPeripheral = "Core Registers";
   let aiOpen = true;
-  let showConfigurator = false;
+  let showConfigurator = true;
   let buildOutputCopied = false;
   const agentWorkingPhrases = [
     "Thinking through firmware state",
@@ -76,7 +76,7 @@
 
   // Panel sizing
   let sidebarWidth = 260;
-  let rightSidebarWidth = 380;
+  let rightSidebarWidth = 420;
   let bottomDrawerHeight = 220;
 
   let isDraggingLeft = false;
@@ -100,8 +100,8 @@
     }
     if (isDraggingRight) {
       rightSidebarWidth = Math.max(
-        280,
-        Math.min(600, window.innerWidth - e.clientX),
+        360,
+        Math.min(680, window.innerWidth - e.clientX),
       );
       await tick();
       window.requestAnimationFrame(() => {
@@ -575,7 +575,7 @@
       <!-- svelte-ignore a11y-no-static-element-interactions -->
       <div
         class="target-dropdown-pill"
-        onclick={() => (showConfigurator = !showConfigurator)}
+        onclick={() => { showConfigurator = true; aiOpen = true; }}
       >
         <span>Target: {$workspaceStore.selectedBoard}RETx</span>
         <ChevronDown size={11} class="target-dropdown-arrow" />
@@ -725,7 +725,7 @@
         <Settings
           size={14}
           class="control-icon-btn"
-          onclick={() => (showConfigurator = !showConfigurator)}
+          onclick={() => { showConfigurator = true; aiOpen = true; }}
         />
         <Moon size={14} class="control-icon-btn" />
         <!-- svelte-ignore a11y-click-events-have-key-events -->
@@ -1102,7 +1102,7 @@
                 <!-- svelte-ignore a11y-no-static-element-interactions -->
                 <div
                   class="file-item folder"
-                  onclick={() => (showConfigurator = !showConfigurator)}
+                  onclick={() => { showConfigurator = true; aiOpen = true; }}
                 >
                   <Blocks size={14} style="color: var(--accent-violet);" />
                   <span>Embedded Configurator</span>
@@ -1462,24 +1462,10 @@
               >×</span>
             </div>
           {/each}
-          <button
-            class="configurator-toggle-tab"
-            onclick={() => (showConfigurator = !showConfigurator)}
-          >
-            <Sliders size={11} style="color: var(--text-muted);" />
-            <span
-              >{showConfigurator
-                ? "Switch to Editor"
-                : "Embedded Configurator"}</span
-            >
-          </button>
         </div>
 
         <!-- Active Editor Display -->
-        <div
-          class="monaco-editor-wrapper"
-          class:hidden={showConfigurator}
-        >
+        <div class="monaco-editor-wrapper">
           {#if $workspaceStore.activeFile}
             <div class="monaco-container" use:initMonaco></div>
           {:else}
@@ -1492,7 +1478,7 @@
                   <Folder size={24} style="color: var(--accent-blue);" />
                   <span>Open Project Folder</span>
                 </button>
-                <button class="action-card" onclick={() => (showConfigurator = true)}>
+                <button class="action-card" onclick={() => { showConfigurator = true; aiOpen = true; }}>
                   <Settings size={24} style="color: var(--accent-orange);" />
                   <span>Configure Target Hardware</span>
                 </button>
@@ -1525,20 +1511,6 @@
           {/if}
         </div>
 
-        <!-- Configurator view -->
-        {#if showConfigurator}
-          <div
-            class="configurator-container-inner"
-            style="height: 100%; width: 100%;"
-          >
-            <EmbeddedConfigurator
-              selectedBoard={$workspaceStore.selectedBoard}
-              onClose={() => (showConfigurator = false)}
-              isDetached={false}
-              onDetach={() => (showConfigurator = false)}
-            />
-          </div>
-        {/if}
       </section>
 
       <!-- Bottom Drawer Resizer Handle (inline flex child, sits between editor and terminal) -->
@@ -1757,6 +1729,18 @@
       class="split-sidebar-right right-ai-panel"
       style="width: {rightSidebarWidth}px; display: {aiOpen ? 'flex' : 'none'};"
     >
+      {#if showConfigurator}
+        <section class="sidebar-right-pane embedded-configurator-pane">
+          <EmbeddedConfigurator
+            selectedBoard={$workspaceStore.selectedBoard}
+            onClose={() => (showConfigurator = false)}
+            isDetached={false}
+            onDetach={() => (showConfigurator = false)}
+          />
+        </section>
+      {/if}
+
+      <section class="sidebar-right-pane ai-copilot-pane" class:expanded={!showConfigurator}>
       <!-- Chat Header -->
       <div class="ai-chat-header">
         <div class="ai-chat-header-info">
@@ -2154,6 +2138,7 @@
         </form>
         <div class="chat-input-hint">{activeAgentStreaming ? "Agent running · next prompt will send as a follow-up" : "Press Enter to send"}</div>
       </div>
+      </section>
     </aside>
 
     <!-- AI Panel Collapsed Sidebar Strip -->
@@ -2167,6 +2152,67 @@
       </div>
     {/if}
     </div>
+
+    <footer class="hardcoreai-status-bar">
+      <div class="status-bar-left">
+        <button class="status-bar-item branch-status active-branch" type="button" onclick={() => actions.setActiveSidebarTab("git")} title="Open source control">
+          <GitBranch size={13} />
+          <span class="branch-name">main*</span>
+        </button>
+        <button class="status-bar-item" type="button" onclick={() => actions.setActiveSidebarTab("debug")} title="Open diagnostics">
+          <Bug size={13} />
+          <span>0</span>
+        </button>
+        <button class="status-bar-item" type="button" onclick={() => actions.setActiveSidebarTab("debug")} title="Warnings">
+          <AlertTriangle size={13} />
+          <span>0</span>
+        </button>
+        <button
+          class="status-bar-item probe-status {$workspaceStore.serialConnected ? 'connected' : ''}"
+          type="button"
+          onclick={() => actions.toggleSerialConnection()}
+          title="Toggle ST-Link probe connection"
+        >
+          <span class="ready-dot-glow"></span>
+          <span>{$workspaceStore.selectedProbe} (SWD)</span>
+        </button>
+        <button class="status-bar-item" type="button" onclick={() => { showConfigurator = true; aiOpen = true; }} title="Open target configurator">
+          <Cpu size={13} />
+          <span>{$workspaceStore.selectedBoard}RETx</span>
+        </button>
+        <button
+          class="status-bar-item"
+          type="button"
+          onclick={() => { actions.setTerminalOpen(true); actions.setBottomTab("terminal"); }}
+          title="Open serial terminal"
+        >
+          <MonitorPlay size={13} />
+          <span>COM4: {$workspaceStore.baudRate}</span>
+        </button>
+      </div>
+
+      <div class="status-bar-right">
+        <button class="status-bar-item" type="button" onclick={() => actions.setTerminalOpen(!$workspaceStore.terminalOpen)} title="Toggle bottom panel">
+          <Sliders size={13} />
+          <span>{$workspaceStore.terminalOpen ? "Panel" : "Panel Hidden"}</span>
+        </button>
+        <button class="status-bar-item" type="button" onclick={() => { actions.setTerminalOpen(true); actions.setBottomTab("registers"); }} title="Open register view">
+          <Database size={13} />
+          <span>Ln {$workspaceStore.currentLine ?? 12}, Col 25</span>
+        </button>
+        <span class="status-bar-item text-only">Spaces: 4</span>
+        <span class="status-bar-item text-only">UTF-8</span>
+        <span class="status-bar-item text-only">LF</span>
+        <span class="status-bar-item text-only">C</span>
+        <button class="status-bar-item ready-status" type="button" onclick={() => actions.pollDeviceStatus()} title="Refresh device status">
+          <span class="ready-dot-glow"></span>
+          <span>{$workspaceStore.deviceStatus.connected ? "Ready" : "No Device"}</span>
+        </button>
+        <button class="status-bar-item icon-only" type="button" onclick={() => actions.setActiveSidebarTab("boards")} title="Board settings">
+          <Settings size={13} />
+        </button>
+      </div>
+    </footer>
   {/if}
 </div>
 

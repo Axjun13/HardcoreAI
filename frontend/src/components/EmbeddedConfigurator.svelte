@@ -220,6 +220,7 @@
     name: selectedPeripheral.toUpperCase(),
     enabled: false,
   };
+  $: chipPins = $workspaceStore.pins.slice(0, 64);
 
   function makeFieldId(label: string, suffix = "field") {
     return `ec-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${suffix}`;
@@ -272,59 +273,59 @@
           <div class="ec-chip">
             <div class="ec-chip-notch"></div>
             
-            <!-- Top Pins (Simulated) -->
+            <!-- Top pins -->
             <div class="ec-chip-pins ec-pins-top">
-              {#each $workspaceStore.pins.slice(0, 4) as pin}
-                <!-- svelte-ignore a11y-click-events-have-key-events -->
-                <!-- svelte-ignore a11y-no-static-element-interactions -->
-                <div 
-                  class="ec-pin {pin.enabled ? 'active-pin' : ''}" 
-                  style="background-color: {getPinColor(pin)}"
+              {#each chipPins.slice(0, 16) as pin}
+                <button
+                  type="button"
+                  class="ec-pin ec-pin-metal {pin.enabled ? 'active-pin' : ''}"
+                  style="--pin-color: {getPinColor(pin)}"
                   onclick={() => openPinEditor(pin)}
+                  aria-label="Configure {pin.pin}"
                   title="{pin.pin}: {pin.signal} ({pin.label})"
-                ></div>
+                ></button>
               {/each}
             </div>
             
-            <!-- Bottom Pins -->
+            <!-- Bottom pins -->
             <div class="ec-chip-pins ec-pins-bottom">
-              {#each $workspaceStore.pins.slice(4, 8) as pin}
-                <!-- svelte-ignore a11y-click-events-have-key-events -->
-                <!-- svelte-ignore a11y-no-static-element-interactions -->
-                <div 
-                  class="ec-pin {pin.enabled ? 'active-pin' : ''}" 
-                  style="background-color: {getPinColor(pin)}"
+              {#each chipPins.slice(32, 48) as pin}
+                <button
+                  type="button"
+                  class="ec-pin ec-pin-metal {pin.enabled ? 'active-pin' : ''}"
+                  style="--pin-color: {getPinColor(pin)}"
                   onclick={() => openPinEditor(pin)}
+                  aria-label="Configure {pin.pin}"
                   title="{pin.pin}: {pin.signal} ({pin.label})"
-                ></div>
+                ></button>
               {/each}
             </div>
 
-            <!-- Left Pins -->
+            <!-- Left pins -->
             <div class="ec-chip-pins ec-pins-left">
-              {#each $workspaceStore.pins.slice(8, 10) as pin}
-                <!-- svelte-ignore a11y-click-events-have-key-events -->
-                <!-- svelte-ignore a11y-no-static-element-interactions -->
-                <div 
-                  class="ec-pin ec-pin-h {pin.enabled ? 'active-pin' : ''}" 
-                  style="background-color: {getPinColor(pin)}"
+              {#each chipPins.slice(48, 64) as pin}
+                <button
+                  type="button"
+                  class="ec-pin ec-pin-metal ec-pin-h {pin.enabled ? 'active-pin' : ''}"
+                  style="--pin-color: {getPinColor(pin)}"
                   onclick={() => openPinEditor(pin)}
+                  aria-label="Configure {pin.pin}"
                   title="{pin.pin}: {pin.signal} ({pin.label})"
-                ></div>
+                ></button>
               {/each}
             </div>
 
-            <!-- Right Pins -->
+            <!-- Right pins -->
             <div class="ec-chip-pins ec-pins-right">
-              {#each $workspaceStore.pins.slice(10, 12) as pin}
-                <!-- svelte-ignore a11y-click-events-have-key-events -->
-                <!-- svelte-ignore a11y-no-static-element-interactions -->
-                <div 
-                  class="ec-pin ec-pin-h {pin.enabled ? 'active-pin' : ''}" 
-                  style="background-color: {getPinColor(pin)}"
+              {#each chipPins.slice(16, 32) as pin}
+                <button
+                  type="button"
+                  class="ec-pin ec-pin-metal ec-pin-h {pin.enabled ? 'active-pin' : ''}"
+                  style="--pin-color: {getPinColor(pin)}"
                   onclick={() => openPinEditor(pin)}
+                  aria-label="Configure {pin.pin}"
                   title="{pin.pin}: {pin.signal} ({pin.label})"
-                ></div>
+                ></button>
               {/each}
             </div>
 
@@ -479,6 +480,54 @@
           <div class="ec-chip-wrapper mini-chip">
             <div class="ec-chip">
               <div class="ec-chip-notch"></div>
+              <div class="ec-chip-pins ec-pins-top">
+                {#each chipPins.slice(0, 16) as pin}
+                  <button
+                    type="button"
+                    class="ec-pin ec-pin-metal {pin.enabled ? 'active-pin' : ''}"
+                    style="--pin-color: {getPinColor(pin)}"
+                    onclick={() => openPinEditor(pin)}
+                    aria-label="Configure {pin.pin}"
+                    title="{pin.pin}: {pin.signal} ({pin.label})"
+                  ></button>
+                {/each}
+              </div>
+              <div class="ec-chip-pins ec-pins-bottom">
+                {#each chipPins.slice(32, 48) as pin}
+                  <button
+                    type="button"
+                    class="ec-pin ec-pin-metal {pin.enabled ? 'active-pin' : ''}"
+                    style="--pin-color: {getPinColor(pin)}"
+                    onclick={() => openPinEditor(pin)}
+                    aria-label="Configure {pin.pin}"
+                    title="{pin.pin}: {pin.signal} ({pin.label})"
+                  ></button>
+                {/each}
+              </div>
+              <div class="ec-chip-pins ec-pins-left">
+                {#each chipPins.slice(48, 64) as pin}
+                  <button
+                    type="button"
+                    class="ec-pin ec-pin-metal ec-pin-h {pin.enabled ? 'active-pin' : ''}"
+                    style="--pin-color: {getPinColor(pin)}"
+                    onclick={() => openPinEditor(pin)}
+                    aria-label="Configure {pin.pin}"
+                    title="{pin.pin}: {pin.signal} ({pin.label})"
+                  ></button>
+                {/each}
+              </div>
+              <div class="ec-chip-pins ec-pins-right">
+                {#each chipPins.slice(16, 32) as pin}
+                  <button
+                    type="button"
+                    class="ec-pin ec-pin-metal ec-pin-h {pin.enabled ? 'active-pin' : ''}"
+                    style="--pin-color: {getPinColor(pin)}"
+                    onclick={() => openPinEditor(pin)}
+                    aria-label="Configure {pin.pin}"
+                    title="{pin.pin}: {pin.signal} ({pin.label})"
+                  ></button>
+                {/each}
+              </div>
               <div class="ec-chip-body">
                 <div class="ec-model" style="font-size: 8px;">{selectedBoard}</div>
               </div>
