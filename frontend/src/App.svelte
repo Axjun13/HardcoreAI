@@ -41,7 +41,12 @@
   let serialInput = "";
   let selectedPeripheral = "Core Registers";
   let aiOpen = true;
+
   let showConfigurator = true;
+  let showCopilot = true;
+
+  let rightPaneSplit = 55;
+
   let buildOutputCopied = false;
   const agentWorkingPhrases = [
     "Thinking through firmware state",
@@ -51,7 +56,9 @@
   ];
   let agentWorkingPhraseIndex = 0;
   $: agentWorkingPhrase = agentWorkingPhrases[agentWorkingPhraseIndex];
-  $: activeAgentStreaming = $workspaceStore.aiMessages.some((m) => m.sender === "ai" && m.streaming);
+  $: activeAgentStreaming = $workspaceStore.aiMessages.some(
+    (m) => m.sender === "ai" && m.streaming,
+  );
   $: queuedAiFollowup = $workspaceStore.queuedAiFollowup;
 
   // Delete confirmation modal state
@@ -59,7 +66,7 @@
     show: false,
     projectId: "",
     projectName: "",
-    isActiveProject: false
+    isActiveProject: false,
   };
 
   // Input prompt modal state (New File/Folder)
@@ -68,7 +75,7 @@
     title: "",
     placeholder: "",
     value: "",
-    actionType: "file" as "file" | "folder" | "project"
+    actionType: "file" as "file" | "folder" | "project",
   };
 
   let gitCommitMessage = "";
@@ -85,13 +92,43 @@
   let isDraggingBottom = false;
 
   let recentProjectsExpanded = false;
-  let isLightTheme = typeof localStorage !== 'undefined' && localStorage.getItem("theme") === "light";
+  let isLightTheme =
+    typeof localStorage !== "undefined" &&
+    localStorage.getItem("theme") === "light";
   let currentLine = 12;
   let currentColumn = 25;
 
+  function startRightResize(e: MouseEvent) {
+    e.preventDefault();
+
+    const startY = e.clientY;
+    const startSplit = rightPaneSplit;
+
+    function move(ev: MouseEvent) {
+      const container = document.querySelector(".split-sidebar-right");
+
+      if (!container) return;
+
+      const delta = ev.clientY - startY;
+
+      rightPaneSplit = Math.max(
+        20,
+        Math.min(80, startSplit + (delta / container.clientHeight) * 100),
+      );
+    }
+
+    function up() {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+    }
+
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  }
+
   function toggleTheme() {
     isLightTheme = !isLightTheme;
-    if (typeof localStorage !== 'undefined') {
+    if (typeof localStorage !== "undefined") {
       localStorage.setItem("theme", isLightTheme ? "light" : "dark");
     }
     if (isLightTheme) {
@@ -105,7 +142,7 @@
   }
 
   function handleKeyDown(e: KeyboardEvent) {
-    if (e.ctrlKey && e.key === 'o') {
+    if (e.ctrlKey && e.key === "o") {
       e.preventDefault();
       actions.setShowWelcomeScreen(true);
     }
@@ -169,7 +206,7 @@
     isDraggingLeft = false;
     isDraggingRight = false;
     isDraggingBottom = false;
-    document.body.classList.remove('dragging-row', 'dragging-col');
+    document.body.classList.remove("dragging-row", "dragging-col");
     resetEditorScroll();
   }
 
@@ -186,7 +223,8 @@
 
   onMount(() => {
     const phraseTimer = window.setInterval(() => {
-      agentWorkingPhraseIndex = (agentWorkingPhraseIndex + 1) % agentWorkingPhrases.length;
+      agentWorkingPhraseIndex =
+        (agentWorkingPhraseIndex + 1) % agentWorkingPhrases.length;
     }, 2200);
 
     return () => window.clearInterval(phraseTimer);
@@ -195,7 +233,10 @@
   // Poll whether an ST-Link + STM32 board is connected, for the status chip.
   onMount(() => {
     actions.pollDeviceStatus();
-    const deviceTimer = window.setInterval(() => actions.pollDeviceStatus(), 5000);
+    const deviceTimer = window.setInterval(
+      () => actions.pollDeviceStatus(),
+      5000,
+    );
     return () => window.clearInterval(deviceTimer);
   });
 
@@ -252,18 +293,22 @@
 
   function initMonaco(node: HTMLElement) {
     monacoEditor = monaco.editor.create(node, {
-      value: $workspaceStore.fileContents[$workspaceStore.activeFile || ""] || "",
+      value:
+        $workspaceStore.fileContents[$workspaceStore.activeFile || ""] || "",
       language: "c",
       theme: isLightTheme ? "vs" : "vs-dark",
       automaticLayout: true,
       fontFamily: "JetBrains Mono",
       fontSize: 13,
-      minimap: { enabled: false }
+      minimap: { enabled: false },
     });
 
     const disposable = monacoEditor.onDidChangeModelContent(() => {
       if ($workspaceStore.activeFile && monacoEditor) {
-        actions.updateFileContent($workspaceStore.activeFile, monacoEditor.getValue());
+        actions.updateFileContent(
+          $workspaceStore.activeFile,
+          monacoEditor.getValue(),
+        );
       }
     });
 
@@ -280,7 +325,7 @@
           monacoEditor.dispose();
           monacoEditor = null;
         }
-      }
+      },
     };
   }
 
@@ -339,7 +384,9 @@
     ctx.beginPath();
 
     $workspaceStore.plotData.forEach((pt, index) => {
-      const x = paddingLeft + (index / ($workspaceStore.plotData.length - 1)) * graphWidth;
+      const x =
+        paddingLeft +
+        (index / ($workspaceStore.plotData.length - 1)) * graphWidth;
       const y =
         height -
         paddingBottom -
@@ -427,16 +474,22 @@
       .replace(/_([^_\n]+)_/g, "<em>$1</em>");
   }
 
-  function parseDiff(resultText: string): Array<{ text: string, type: string }> {
+  function parseDiff(
+    resultText: string,
+  ): Array<{ text: string; type: string }> {
     const idx = resultText.indexOf("=== Unified Diff ===");
     if (idx === -1) return [];
-    
-    let diffContent = resultText.substring(idx + "=== Unified Diff ===".length).trim();
+
+    let diffContent = resultText
+      .substring(idx + "=== Unified Diff ===".length)
+      .trim();
     if (diffContent.endsWith("============")) {
-      diffContent = diffContent.substring(0, diffContent.length - "============".length).trim();
+      diffContent = diffContent
+        .substring(0, diffContent.length - "============".length)
+        .trim();
     }
-    
-    return diffContent.split("\n").map(line => {
+
+    return diffContent.split("\n").map((line) => {
       let type = "normal";
       if (line.startsWith("+") && !line.startsWith("+++")) {
         type = "add";
@@ -453,23 +506,47 @@
 
   // Line-level diff for proposal cards (old vs proposed content). A small LCS
   // so unchanged lines are shown as context and only real changes are +/-.
-  function computeProposalDiff(oldText: string, newText: string): Array<{ text: string, type: string }> {
+  function computeProposalDiff(
+    oldText: string,
+    newText: string,
+  ): Array<{ text: string; type: string }> {
     const a = (oldText || "").split("\n");
     const b = (newText || "").split("\n");
-    const n = a.length, m = b.length;
-    const lcs: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+    const n = a.length,
+      m = b.length;
+    const lcs: number[][] = Array.from({ length: n + 1 }, () =>
+      new Array(m + 1).fill(0),
+    );
     for (let i = n - 1; i >= 0; i--)
       for (let j = m - 1; j >= 0; j--)
-        lcs[i][j] = a[i] === b[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
-    const out: Array<{ text: string, type: string }> = [];
-    let i = 0, j = 0;
+        lcs[i][j] =
+          a[i] === b[j]
+            ? lcs[i + 1][j + 1] + 1
+            : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+    const out: Array<{ text: string; type: string }> = [];
+    let i = 0,
+      j = 0;
     while (i < n && j < m) {
-      if (a[i] === b[j]) { out.push({ text: "  " + a[i], type: "normal" }); i++; j++; }
-      else if (lcs[i + 1][j] >= lcs[i][j + 1]) { out.push({ text: "- " + a[i], type: "del" }); i++; }
-      else { out.push({ text: "+ " + b[j], type: "add" }); j++; }
+      if (a[i] === b[j]) {
+        out.push({ text: "  " + a[i], type: "normal" });
+        i++;
+        j++;
+      } else if (lcs[i + 1][j] >= lcs[i][j + 1]) {
+        out.push({ text: "- " + a[i], type: "del" });
+        i++;
+      } else {
+        out.push({ text: "+ " + b[j], type: "add" });
+        j++;
+      }
     }
-    while (i < n) { out.push({ text: "- " + a[i], type: "del" }); i++; }
-    while (j < m) { out.push({ text: "+ " + b[j], type: "add" }); j++; }
+    while (i < n) {
+      out.push({ text: "- " + a[i], type: "del" });
+      i++;
+    }
+    while (j < m) {
+      out.push({ text: "+ " + b[j], type: "add" });
+      j++;
+    }
     return out;
   }
 
@@ -507,7 +584,9 @@
       if (fence) {
         if (inCode) {
           const lang = codeLang ? `<span>${escapeHtml(codeLang)}</span>` : "";
-          html.push(`<pre class="chat-code-block markdown-code">${lang}<code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
+          html.push(
+            `<pre class="chat-code-block markdown-code">${lang}<code>${escapeHtml(codeLines.join("\n"))}</code></pre>`,
+          );
           inCode = false;
           codeLang = "";
           codeLines = [];
@@ -560,7 +639,9 @@
 
     if (inCode) {
       const lang = codeLang ? `<span>${escapeHtml(codeLang)}</span>` : "";
-      html.push(`<pre class="chat-code-block markdown-code">${lang}<code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
+      html.push(
+        `<pre class="chat-code-block markdown-code">${lang}<code>${escapeHtml(codeLines.join("\n"))}</code></pre>`,
+      );
     }
     closeParagraph();
     closeList();
@@ -592,7 +673,7 @@
   let chatDropdownSelections: Record<string, string> = {};
   let chatOtherText: Record<string, string> = {};
   let chatOtherOpen: Record<string, boolean> = {};
-  
+
   // Project Renaming State
   let editingProjectNameId: string | null = null;
   let renamingName = "";
@@ -602,10 +683,16 @@
     node.select();
   }
 
-  $: activeProject = $workspaceStore.projectsList.find(p => p.id === $workspaceStore.activeProjectId);
+  $: activeProject = $workspaceStore.projectsList.find(
+    (p) => p.id === $workspaceStore.activeProjectId,
+  );
 </script>
 
-<svelte:window onmousemove={handleMouseMove} onmouseup={handleMouseUp} onkeydown={handleKeyDown} />
+<svelte:window
+  onmousemove={handleMouseMove}
+  onmouseup={handleMouseUp}
+  onkeydown={handleKeyDown}
+/>
 <div class="helix-app {isLightTheme ? 'light-theme' : ''}">
   <!-- 1. Header Command Bar -->
   <header class="helix-header">
@@ -750,11 +837,18 @@
         <Settings
           size={14}
           class="control-icon-btn"
-          onclick={() => { showConfigurator = true; aiOpen = true; }}
+          onclick={() => {
+            showConfigurator = true;
+            aiOpen = true;
+          }}
         />
         <!-- svelte-ignore a11y-click-events-have-key-events -->
         <!-- svelte-ignore a11y-no-static-element-interactions -->
-        <div class="control-icon-btn" onclick={toggleTheme} title="Toggle light/dark theme">
+        <div
+          class="control-icon-btn"
+          onclick={toggleTheme}
+          title="Toggle light/dark theme"
+        >
           {#if isLightTheme}
             <Sun size={14} />
           {:else}
@@ -795,15 +889,23 @@
                   style="border-color: rgba(6, 182, 212, 0.5); background: rgba(6, 182, 212, 0.05);"
                   onclick={() => actions.setShowWelcomeScreen(false)}
                 >
-                  <MonitorPlay size={16} class="welcome-action-icon" style="color: var(--accent-cyan);" />
-                  <span style="color: var(--accent-cyan); font-weight: 500;">Return to Active Workspace &rarr;</span>
+                  <MonitorPlay
+                    size={16}
+                    class="welcome-action-icon"
+                    style="color: var(--accent-cyan);"
+                  />
+                  <span style="color: var(--accent-cyan); font-weight: 500;"
+                    >Return to Active Workspace &rarr;</span
+                  >
                 </button>
               {/if}
               <button
                 class="welcome-action-btn"
                 onclick={async () => {
                   if ($workspaceStore.projectsList.length > 0) {
-                    await actions.loadProject($workspaceStore.projectsList[0].id);
+                    await actions.loadProject(
+                      $workspaceStore.projectsList[0].id,
+                    );
                     actions.setShowWelcomeScreen(false);
                     actions.setActiveSidebarTab("explorer");
                   } else {
@@ -818,7 +920,9 @@
                 class="welcome-action-btn"
                 onclick={async () => {
                   if ($workspaceStore.projectsList.length > 0) {
-                    await actions.loadProject($workspaceStore.projectsList[0].id);
+                    await actions.loadProject(
+                      $workspaceStore.projectsList[0].id,
+                    );
                     actions.setShowWelcomeScreen(false);
                     actions.setActiveSidebarTab("boards");
                   } else {
@@ -829,11 +933,14 @@
                 <Settings size={16} class="welcome-action-icon" />
                 <span>Configure Target Hardware...</span>
               </button>
-              <div class="create-project-row" style="display: flex; gap: 8px; margin-top: 8px;">
-                <input 
-                  type="text" 
-                  id="newProjectName" 
-                  placeholder="New Project Name..." 
+              <div
+                class="create-project-row"
+                style="display: flex; gap: 8px; margin-top: 8px;"
+              >
+                <input
+                  type="text"
+                  id="newProjectName"
+                  placeholder="New Project Name..."
                   class="welcome-input"
                   style="flex: 1; padding: 12px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: white; font-family: inherit;"
                 />
@@ -841,17 +948,30 @@
                   class="welcome-action-btn"
                   style="width: auto; padding: 0 20px; margin: 0;"
                   onclick={async () => {
-                    const inputEl = document.getElementById("newProjectName") as HTMLInputElement;
-                    const projectName = inputEl?.value?.trim() || "My Embedded Project";
+                    const inputEl = document.getElementById(
+                      "newProjectName",
+                    ) as HTMLInputElement;
+                    const projectName =
+                      inputEl?.value?.trim() || "My Embedded Project";
                     try {
-                      const project = await api.createProject(projectName, "Created from IDE");
+                      const folderPath = await api.pickFolder();
+                      if (!folderPath) return; // user cancelled
+                      const project = await api.createProject(
+                        projectName,
+                        "Created from IDE",
+                        folderPath,
+                      );
                       await actions.loadProject(project.id);
                       await actions.loadProjects(); // Refresh the list
                       actions.setActiveSidebarTab("explorer");
                       actions.setShowWelcomeScreen(false);
-                      actions.addBuildLog("Created new embedded project template successfully.");
+                      actions.addBuildLog(
+                        "Created new embedded project template successfully.",
+                      );
                     } catch (e: any) {
-                      actions.addBuildLog("Failed to create project: " + e.message);
+                      actions.addBuildLog(
+                        "Failed to create project: " + e.message,
+                      );
                     }
                   }}
                 >
@@ -866,7 +986,9 @@
             <h3 class="welcome-section-title">Recent Workspaces</h3>
             <div class="recent-list">
               {#each $workspaceStore.projectsList as project}
-                <div style="display: flex; align-items: center; justify-content: space-between; padding-right: 12px; gap: 8px; border: 1px solid rgba(255,255,255,0.05); border-radius: 6px; margin-bottom: 8px; background: rgba(0,0,0,0.2);">
+                <div
+                  style="display: flex; align-items: center; justify-content: space-between; padding-right: 12px; gap: 8px; border: 1px solid rgba(255,255,255,0.05); border-radius: 6px; margin-bottom: 8px; background: rgba(0,0,0,0.2);"
+                >
                   <button
                     type="button"
                     class="recent-item"
@@ -879,10 +1001,14 @@
                     }}
                   >
                     <div class="recent-name">{project.name}</div>
-                    <div class="recent-path">Project ID: {project.id} | {new Date(project.created_at).toLocaleDateString()}</div>
+                    <div class="recent-path">
+                      Project ID: {project.id} | {new Date(
+                        project.created_at,
+                      ).toLocaleDateString()}
+                    </div>
                   </button>
-                  <button 
-                    class="control-icon-btn close-btn-highlight" 
+                  <button
+                    class="control-icon-btn close-btn-highlight"
                     title="Delete Project"
                     style="padding: 6px; border-radius: 4px;"
                     onclick={(e) => {
@@ -891,7 +1017,7 @@
                         show: true,
                         projectId: project.id,
                         projectName: project.name,
-                        isActiveProject: false
+                        isActiveProject: false,
                       };
                     }}
                   >
@@ -902,7 +1028,9 @@
               {#if $workspaceStore.projectsList.length === 0}
                 <div class="recent-item" style="opacity: 0.5;">
                   <div class="recent-name">No projects found</div>
-                  <div class="recent-path">Create a new template to get started</div>
+                  <div class="recent-path">
+                    Create a new template to get started
+                  </div>
                 </div>
               {/if}
             </div>
@@ -921,7 +1049,10 @@
                 if ($workspaceStore.projectsList.length > 0) {
                   await actions.loadProject($workspaceStore.projectsList[0].id);
                 } else {
-                  await api.createProject("My Embedded Project", "Created from IDE");
+                  await api.createProject(
+                    "My Embedded Project",
+                    "Created from IDE",
+                  );
                   await actions.loadProjects();
                   const newProj = $workspaceStore.projectsList[0];
                   if (newProj) await actions.loadProject(newProj.id);
@@ -930,7 +1061,11 @@
               actions.setShowWelcomeScreen(false);
             }}
           >
-            <span>{$workspaceStore.activeProjectId ? 'Return to Workspace' : 'Open Workspace'}</span>
+            <span
+              >{$workspaceStore.activeProjectId
+                ? "Return to Workspace"
+                : "Open Workspace"}</span
+            >
             <ArrowRight size={14} />
           </button>
         </div>
@@ -938,408 +1073,495 @@
     </div>
   {:else}
     <!-- 2. Main Workspace Layout -->
-    <div class="helix-main-workspace {$workspaceStore.isDebugging ? 'debug-active' : ''} {aiOpen ? 'ai-open' : ''}">
-
+    <div
+      class="helix-main-workspace {$workspaceStore.isDebugging
+        ? 'debug-active'
+        : ''} {aiOpen ? 'ai-open' : ''}"
+    >
       <!-- Leftmost Activity Bar -->
       <nav class="activity-bar">
-      <!-- svelte-ignore a11y-click-events-have-key-events -->
-      <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
-      <button
-        class="activity-item {$workspaceStore.activeSidebarTab === 'explorer'
-          ? 'active'
-          : ''}"
-        onclick={() => actions.setActiveSidebarTab("explorer")}
-        title="Explorer"
-      >
-        <Folder size={18} />
-      </button>
-      <!-- svelte-ignore a11y-click-events-have-key-events -->
-      <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
-      <button
-        class="activity-item {$workspaceStore.activeSidebarTab === 'search'
-          ? 'active'
-          : ''}"
-        onclick={() => actions.setActiveSidebarTab("search")}
-        title="Search"
-      >
-        <Search size={18} />
-      </button>
-      <!-- svelte-ignore a11y-click-events-have-key-events -->
-      <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
-      <button
-        class="activity-item {$workspaceStore.activeSidebarTab === 'git'
-          ? 'active'
-          : ''}"
-        onclick={() => actions.setActiveSidebarTab("git")}
-        title="Source Control"
-      >
-        <GitBranch size={18} />
-      </button>
-      <!-- svelte-ignore a11y-click-events-have-key-events -->
-      <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
-      <button
-        class="activity-item {$workspaceStore.activeSidebarTab === 'debug'
-          ? 'active'
-          : ''}"
-        onclick={() => actions.setActiveSidebarTab("debug")}
-        title="Run & Debug"
-      >
-        <Bug size={18} />
-      </button>
-      <!-- svelte-ignore a11y-click-events-have-key-events -->
-      <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
-      <button
-        class="activity-item {$workspaceStore.activeSidebarTab === 'rag'
-          ? 'active'
-          : ''}"
-        onclick={() => actions.setActiveSidebarTab("rag")}
-        title="RAG Knowledge Docs"
-      >
-        <Database size={18} />
-      </button>
-      <!-- svelte-ignore a11y-click-events-have-key-events -->
-      <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
-      <button
-        class="activity-item {$workspaceStore.activeSidebarTab === 'boards'
-          ? 'active'
-          : ''}"
-        onclick={() => actions.setActiveSidebarTab("boards")}
-        title="Target Config"
-      >
-        <Settings size={18} />
-      </button>
-      <!-- svelte-ignore a11y-click-events-have-key-events -->
-      <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
-      <button
-        class="activity-item {$workspaceStore.activeSidebarTab === 'libraries'
-          ? 'active'
-          : ''}"
-        onclick={() => actions.setActiveSidebarTab("libraries")}
-        title="Library Manager"
-      >
-        <Package size={18} />
-      </button>
-    </nav>
+        <!-- svelte-ignore a11y-click-events-have-key-events -->
+        <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+        <button
+          class="activity-item {$workspaceStore.activeSidebarTab === 'explorer'
+            ? 'active'
+            : ''}"
+          onclick={() => actions.setActiveSidebarTab("explorer")}
+          title="Explorer"
+        >
+          <Folder size={18} />
+        </button>
+        <!-- svelte-ignore a11y-click-events-have-key-events -->
+        <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+        <button
+          class="activity-item {$workspaceStore.activeSidebarTab === 'search'
+            ? 'active'
+            : ''}"
+          onclick={() => actions.setActiveSidebarTab("search")}
+          title="Search"
+        >
+          <Search size={18} />
+        </button>
+        <!-- svelte-ignore a11y-click-events-have-key-events -->
+        <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+        <button
+          class="activity-item {$workspaceStore.activeSidebarTab === 'git'
+            ? 'active'
+            : ''}"
+          onclick={() => actions.setActiveSidebarTab("git")}
+          title="Source Control"
+        >
+          <GitBranch size={18} />
+        </button>
+        <!-- svelte-ignore a11y-click-events-have-key-events -->
+        <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+        <button
+          class="activity-item {$workspaceStore.activeSidebarTab === 'debug'
+            ? 'active'
+            : ''}"
+          onclick={() => actions.setActiveSidebarTab("debug")}
+          title="Run & Debug"
+        >
+          <Bug size={18} />
+        </button>
+        <!-- svelte-ignore a11y-click-events-have-key-events -->
+        <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+        <button
+          class="activity-item {$workspaceStore.activeSidebarTab === 'rag'
+            ? 'active'
+            : ''}"
+          onclick={() => actions.setActiveSidebarTab("rag")}
+          title="RAG Knowledge Docs"
+        >
+          <Database size={18} />
+        </button>
+        <!-- svelte-ignore a11y-click-events-have-key-events -->
+        <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+        <button
+          class="activity-item {$workspaceStore.activeSidebarTab === 'boards'
+            ? 'active'
+            : ''}"
+          onclick={() => actions.setActiveSidebarTab("boards")}
+          title="Target Config"
+        >
+          <Settings size={18} />
+        </button>
+        <!-- svelte-ignore a11y-click-events-have-key-events -->
+        <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+        <button
+          class="activity-item {$workspaceStore.activeSidebarTab === 'libraries'
+            ? 'active'
+            : ''}"
+          onclick={() => actions.setActiveSidebarTab("libraries")}
+          title="Library Manager"
+        >
+          <Package size={18} />
+        </button>
+      </nav>
 
-    <!-- Sidebar Panel Column -->
-    <aside class="workspace-panel sidebar-panel" style="width: {sidebarWidth}px;">
-      {#if $workspaceStore.activeSidebarTab === "explorer"}
-        <div class="panel-header" style="height: auto; padding: 10px 14px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; border-bottom: 1px solid var(--border-color);">
-          {#if $workspaceStore.activeProjectId && activeProject}
-            <div class="active-project-manager" style="display: flex; align-items: center; justify-content: space-between; width: 100%; border-bottom: 1px solid var(--border-color); padding-bottom: 8px; margin-bottom: 4px;">
-              {#if editingProjectNameId === $workspaceStore.activeProjectId}
-                <input 
-                  type="text" 
-                  class="project-rename-input"
-                  bind:value={renamingName}
-                  onkeydown={async (e) => {
-                    if (e.key === "Enter") {
+      <!-- Sidebar Panel Column -->
+      <aside
+        class="workspace-panel sidebar-panel"
+        style="width: {sidebarWidth}px;"
+      >
+        {#if $workspaceStore.activeSidebarTab === "explorer"}
+          <div
+            class="panel-header"
+            style="height: auto; padding: 10px 14px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; border-bottom: 1px solid var(--border-color);"
+          >
+            {#if $workspaceStore.activeProjectId && activeProject}
+              <div
+                class="active-project-manager"
+                style="display: flex; align-items: center; justify-content: space-between; width: 100%; border-bottom: 1px solid var(--border-color); padding-bottom: 8px; margin-bottom: 4px;"
+              >
+                {#if editingProjectNameId === $workspaceStore.activeProjectId}
+                  <input
+                    type="text"
+                    class="project-rename-input"
+                    bind:value={renamingName}
+                    onkeydown={async (e) => {
+                      if (e.key === "Enter") {
+                        const val = renamingName.trim();
+                        if (val) {
+                          await actions.renameProject(
+                            $workspaceStore.activeProjectId!,
+                            val,
+                          );
+                        }
+                        editingProjectNameId = null;
+                      } else if (e.key === "Escape") {
+                        editingProjectNameId = null;
+                      }
+                    }}
+                    onblur={async () => {
                       const val = renamingName.trim();
                       if (val) {
-                        await actions.renameProject($workspaceStore.activeProjectId!, val);
+                        await actions.renameProject(
+                          $workspaceStore.activeProjectId!,
+                          val,
+                        );
                       }
                       editingProjectNameId = null;
-                    } else if (e.key === "Escape") {
-                      editingProjectNameId = null;
-                    }
-                  }}
-                  onblur={async () => {
-                    const val = renamingName.trim();
-                    if (val) {
-                      await actions.renameProject($workspaceStore.activeProjectId!, val);
-                    }
-                    editingProjectNameId = null;
-                  }}
-                  use:focusElement
-                />
-              {:else}
-                <!-- svelte-ignore a11y-click-events-have-key-events -->
-                <!-- svelte-ignore a11y-no-static-element-interactions -->
-                <div 
-                  class="project-title-clickable" 
-                  title="Click to rename project"
-                  onclick={() => {
-                    editingProjectNameId = $workspaceStore.activeProjectId;
-                    renamingName = activeProject.name;
-                  }}
-                  style="font-size: 0.72rem; font-weight: 700; color: var(--text-active); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 130px; cursor: pointer; display: flex; align-items: center; gap: 6px;"
-                >
-                  <Cpu size={12} style="color: var(--accent-violet);" />
-                  <span>{activeProject.name}</span>
+                    }}
+                    use:focusElement
+                  />
+                {:else}
+                  <!-- svelte-ignore a11y-click-events-have-key-events -->
+                  <!-- svelte-ignore a11y-no-static-element-interactions -->
+                  <div
+                    class="project-title-clickable"
+                    title="Click to rename project"
+                    onclick={() => {
+                      editingProjectNameId = $workspaceStore.activeProjectId;
+                      renamingName = activeProject.name;
+                    }}
+                    style="font-size: 0.72rem; font-weight: 700; color: var(--text-active); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 130px; cursor: pointer; display: flex; align-items: center; gap: 6px;"
+                  >
+                    <Cpu size={12} style="color: var(--accent-violet);" />
+                    <span>{activeProject.name}</span>
+                  </div>
+                {/if}
+
+                <div style="display: flex; align-items: center; gap: 4px;">
+                  <button
+                    class="project-control-btn"
+                    title="Rename Project"
+                    onclick={() => {
+                      editingProjectNameId = $workspaceStore.activeProjectId;
+                      renamingName = activeProject.name;
+                    }}
+                  >
+                    <Sliders size={12} />
+                  </button>
+                  <button
+                    class="project-control-btn delete-hover"
+                    title="Delete Project"
+                    onclick={() => {
+                      deleteConfirmModal = {
+                        show: true,
+                        projectId: $workspaceStore.activeProjectId!,
+                        projectName: activeProject.name,
+                        isActiveProject: true,
+                      };
+                    }}
+                  >
+                    <Trash2 size={12} />
+                  </button>
                 </div>
-              {/if}
-              
-              <div style="display: flex; align-items: center; gap: 4px;">
-                <button 
-                  class="project-control-btn" 
-                  title="Rename Project"
+              </div>
+            {/if}
+            <div
+              style="display: flex; align-items: center; justify-content: space-between; width: 100%;"
+            >
+              <div class="panel-title">PROJECT EXPLORER</div>
+              <div class="pane-header-actions" style="display: flex; gap: 6px;">
+                <button
+                  type="button"
+                  class="close-ai-btn"
+                  title="New File"
                   onclick={() => {
-                    editingProjectNameId = $workspaceStore.activeProjectId;
-                    renamingName = activeProject.name;
-                  }}
-                >
-                  <Sliders size={12} />
-                </button>
-                <button 
-                  class="project-control-btn delete-hover" 
-                  title="Delete Project"
-                  onclick={() => {
-                    deleteConfirmModal = {
+                    inputPromptModal = {
                       show: true,
-                      projectId: $workspaceStore.activeProjectId!,
-                      projectName: activeProject.name,
-                      isActiveProject: true
+                      title: "Create New File",
+                      placeholder: "e.g. src/main.c",
+                      value: "",
+                      actionType: "file",
                     };
                   }}
                 >
-                  <Trash2 size={12} />
+                  <Plus size={13} />
+                </button>
+                <button
+                  type="button"
+                  class="close-ai-btn"
+                  title="New Folder"
+                  onclick={() => {
+                    inputPromptModal = {
+                      show: true,
+                      title: "Create New Folder",
+                      placeholder: "e.g. src/components",
+                      value: "",
+                      actionType: "folder",
+                    };
+                  }}
+                >
+                  <FolderOpen size={12} />
                 </button>
               </div>
             </div>
-          {/if}
-          <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
-            <div class="panel-title">PROJECT EXPLORER</div>
-            <div class="pane-header-actions" style="display: flex; gap: 6px;">
-              <button
-                type="button"
-                class="close-ai-btn"
-                title="New File"
-                onclick={() => {
-                  inputPromptModal = {
-                    show: true,
-                    title: "Create New File",
-                    placeholder: "e.g. src/main.c",
-                    value: "",
-                    actionType: "file"
-                  };
-                }}
-              >
-                <Plus size={13} />
-              </button>
-              <button
-                type="button"
-                class="close-ai-btn"
-                title="New Folder"
-                onclick={() => {
-                  inputPromptModal = {
-                    show: true,
-                    title: "Create New Folder",
-                    placeholder: "e.g. src/components",
-                    value: "",
-                    actionType: "folder"
-                  };
-                }}
-              >
-                <FolderOpen size={12} />
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div
-          class="panel-body flex-container-explorer"
-          style="display: flex; flex-direction: column; gap: 16px;"
-        >
-          <div class="explorer-section">
-            <div class="file-list">
-              <div style="margin-bottom: 2px;">
-                <!-- svelte-ignore a11y-click-events-have-key-events -->
-                <!-- svelte-ignore a11y-no-static-element-interactions -->
-                <div
-                  class="file-item folder"
-                  onclick={() => { showConfigurator = true; aiOpen = true; }}
-                >
-                  <Blocks size={14} style="color: var(--accent-violet);" />
-                  <span>Embedded Configurator</span>
-                </div>
-                <div class="folder-contents">
-                  {#each $workspaceStore.fileTree as cat}
-                    {@const render = renderFileNode(cat)}
-                    {#if render.isFolder}
-                      <div style="margin-bottom: 2px;">
-                        <div class="file-item folder">
-                          <Folder
-                            size={14}
-                            style="color: var(--accent-violet);"
-                          />
-                          <span>{render.item.name}</span>
-                        </div>
-                        <div class="folder-contents">
-                          {#each render.children as child}
-                            <!-- svelte-ignore a11y-click-events-have-key-events -->
-                            <!-- svelte-ignore a11y-no-static-element-interactions -->
-                            <div
-                              class="file-item {$workspaceStore.activeFile ===
-                              child.path
-                                ? 'active'
-                                : ''}"
-                              onclick={() => actions.setActiveFile(child.path)}
-                            >
-                              <FileCode
-                                size={14}
-                                style="color: var(--accent-violet-hover);"
-                              />
-                              <span>{child.name}</span>
-                            </div>
-                          {/each}
-                        </div>
-                      </div>
-                    {:else}
-                      <!-- svelte-ignore a11y-click-events-have-key-events -->
-                      <!-- svelte-ignore a11y-no-static-element-interactions -->
-                      <div
-                        class="file-item {render.isActive ? 'active' : ''}"
-                        onclick={() => actions.setActiveFile(render.item.path)}
-                      >
-                        <File size={14} style="color: var(--text-muted);" />
-                        <span>{render.item.name}</span>
-                      </div>
-                    {/if}
-                  {/each}
-                </div>
-              </div>
-            </div>
           </div>
 
-          <!-- QUICK ACCESS section -->
-          <div class="explorer-sub-section">
-            <div class="explorer-sub-header">QUICK ACCESS</div>
-            
-            <button type="button" class="quick-access-item" onclick={() => {
-              inputPromptModal = {
-                show: true,
-                title: "Create New Project",
-                placeholder: "e.g. Blinky Project",
-                value: "",
-                actionType: "project"
-              };
-            }}>
-              <div style="display: flex; align-items: center; gap: 8px;">
-                <Plus size={13} style="color: var(--accent-violet);" />
-                <span>New Project</span>
-              </div>
-            </button>
-
-            <button type="button" class="quick-access-item" onclick={() => actions.setShowWelcomeScreen(true)}>
-              <div style="display: flex; align-items: center; gap: 8px;">
-                <FolderOpen size={13} style="color: var(--accent-violet);" />
-                <span>Open Folder...</span>
-              </div>
-              <span class="shortcut-tag">Ctrl+O</span>
-            </button>
-
-            <button type="button" class="quick-access-item" onclick={() => actions.setShowWelcomeScreen(true)}>
-              <div style="display: flex; align-items: center; gap: 8px;">
-                <Blocks size={13} style="color: var(--accent-violet);" />
-                <span>Open Workspace...</span>
-              </div>
-              <span class="shortcut-tag">Ctrl+K Ctrl+O</span>
-            </button>
-
-            <button type="button" class="quick-access-item" onclick={() => recentProjectsExpanded = !recentProjectsExpanded}>
-              <div style="display: flex; align-items: center; gap: 8px;">
-                <Sliders size={13} style="color: var(--accent-violet);" />
-                <span>Recent Projects</span>
-              </div>
-              <span class="shortcut-tag">{recentProjectsExpanded ? '▼' : '▶'}</span>
-            </button>
-
-            {#if recentProjectsExpanded}
-              <div class="recent-projects-list" style="padding-left: 16px; display: flex; flex-direction: column; gap: 4px; margin-top: 4px;">
-                {#each $workspaceStore.projectsList as project}
-                  <button
-                    type="button"
-                    class="quick-access-item"
-                    style="padding: 4px 8px; font-size: 0.7rem; justify-content: flex-start; gap: 6px;"
-                    onclick={async () => {
-                      await actions.loadProject(project.id);
-                      recentProjectsExpanded = false;
+          <div
+            class="panel-body flex-container-explorer"
+            style="display: flex; flex-direction: column; gap: 16px;"
+          >
+            <div class="explorer-section">
+              <div class="file-list">
+                <div style="margin-bottom: 2px;">
+                  <!-- svelte-ignore a11y-click-events-have-key-events -->
+                  <!-- svelte-ignore a11y-no-static-element-interactions -->
+                  <div
+                    class="file-item folder"
+                    onclick={() => {
+                      showConfigurator = true;
+                      aiOpen = true;
                     }}
                   >
-                    <Cpu size={11} style="color: var(--text-dark);" />
-                    <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{project.name}</span>
-                  </button>
-                {/each}
-                {#if $workspaceStore.projectsList.length === 0}
-                  <div style="font-size: 0.65rem; color: var(--text-dark); padding: 4px 8px; font-style: italic;">No recent projects</div>
-                {/if}
+                    <Blocks size={14} style="color: var(--accent-violet);" />
+                    <span>Embedded Configurator</span>
+                  </div>
+                  <div class="folder-contents">
+                    {#each $workspaceStore.fileTree as cat}
+                      {@const render = renderFileNode(cat)}
+                      {#if render.isFolder}
+                        <div style="margin-bottom: 2px;">
+                          <div class="file-item folder">
+                            <Folder
+                              size={14}
+                              style="color: var(--accent-violet);"
+                            />
+                            <span>{render.item.name}</span>
+                          </div>
+                          <div class="folder-contents">
+                            {#each render.children as child}
+                              <!-- svelte-ignore a11y-click-events-have-key-events -->
+                              <!-- svelte-ignore a11y-no-static-element-interactions -->
+                              <div
+                                class="file-item {$workspaceStore.activeFile ===
+                                child.path
+                                  ? 'active'
+                                  : ''}"
+                                onclick={() =>
+                                  actions.setActiveFile(child.path)}
+                              >
+                                <FileCode
+                                  size={14}
+                                  style="color: var(--accent-violet-hover);"
+                                />
+                                <span>{child.name}</span>
+                              </div>
+                            {/each}
+                          </div>
+                        </div>
+                      {:else}
+                        <!-- svelte-ignore a11y-click-events-have-key-events -->
+                        <!-- svelte-ignore a11y-no-static-element-interactions -->
+                        <div
+                          class="file-item {render.isActive ? 'active' : ''}"
+                          onclick={() =>
+                            actions.setActiveFile(render.item.path)}
+                        >
+                          <File size={14} style="color: var(--text-muted);" />
+                          <span>{render.item.name}</span>
+                        </div>
+                      {/if}
+                    {/each}
+                  </div>
+                </div>
               </div>
-            {/if}
-          </div>
+            </div>
 
-          <!-- RAG Context indicator shortcut inside explorer -->
-          <div class="explorer-sub-section">
-            <div class="explorer-sub-header">RAG DATABASES CONTEXT</div>
-            {#each $workspaceStore.ragDocuments as doc}
+            <!-- QUICK ACCESS section -->
+            <div class="explorer-sub-section">
+              <div class="explorer-sub-header">QUICK ACCESS</div>
+
               <button
                 type="button"
                 class="quick-access-item"
-                onclick={() => actions.setActiveSidebarTab("rag")}
-                style="cursor: pointer; display: flex; align-items: center; justify-content: space-between;"
+                onclick={() => {
+                  inputPromptModal = {
+                    show: true,
+                    title: "Create New Project",
+                    placeholder: "e.g. Blinky Project",
+                    value: "",
+                    actionType: "project",
+                  };
+                }}
+              >
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <Plus size={13} style="color: var(--accent-violet);" />
+                  <span>New Project</span>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                class="quick-access-item"
+                onclick={() => actions.setShowWelcomeScreen(true)}
+              >
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <FolderOpen size={13} style="color: var(--accent-violet);" />
+                  <span>Open Folder...</span>
+                </div>
+                <span class="shortcut-tag">Ctrl+O</span>
+              </button>
+
+              <button
+                type="button"
+                class="quick-access-item"
+                onclick={() => actions.setShowWelcomeScreen(true)}
+              >
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <Blocks size={13} style="color: var(--accent-violet);" />
+                  <span>Open Workspace...</span>
+                </div>
+                <span class="shortcut-tag">Ctrl+K Ctrl+O</span>
+              </button>
+
+              <button
+                type="button"
+                class="quick-access-item"
+                onclick={() =>
+                  (recentProjectsExpanded = !recentProjectsExpanded)}
+              >
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <Sliders size={13} style="color: var(--accent-violet);" />
+                  <span>Recent Projects</span>
+                </div>
+                <span class="shortcut-tag"
+                  >{recentProjectsExpanded ? "▼" : "▶"}</span
+                >
+              </button>
+
+              {#if recentProjectsExpanded}
+                <div
+                  class="recent-projects-list"
+                  style="padding-left: 16px; display: flex; flex-direction: column; gap: 4px; margin-top: 4px;"
+                >
+                  {#each $workspaceStore.projectsList as project}
+                    <button
+                      type="button"
+                      class="quick-access-item"
+                      style="padding: 4px 8px; font-size: 0.7rem; justify-content: flex-start; gap: 6px;"
+                      onclick={async () => {
+                        await actions.loadProject(project.id);
+                        recentProjectsExpanded = false;
+                      }}
+                    >
+                      <Cpu size={11} style="color: var(--text-dark);" />
+                      <span
+                        style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                        >{project.name}</span
+                      >
+                    </button>
+                  {/each}
+                  {#if $workspaceStore.projectsList.length === 0}
+                    <div
+                      style="font-size: 0.65rem; color: var(--text-dark); padding: 4px 8px; font-style: italic;"
+                    >
+                      No recent projects
+                    </div>
+                  {/if}
+                </div>
+              {/if}
+            </div>
+
+            <!-- RAG Context indicator shortcut inside explorer -->
+            <div class="explorer-sub-section">
+              <div class="explorer-sub-header">RAG DATABASES CONTEXT</div>
+              {#each $workspaceStore.ragDocuments as doc}
+                <button
+                  type="button"
+                  class="quick-access-item"
+                  onclick={() => actions.setActiveSidebarTab("rag")}
+                  style="cursor: pointer; display: flex; align-items: center; justify-content: space-between;"
+                >
+                  <span
+                    style="font-family: var(--font-mono); font-size: 0.65rem; color: var(--accent-cyan); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px;"
+                    >{doc.name}</span
+                  >
+                  <span class="shortcut-tag">{doc.size}</span>
+                </button>
+              {/each}
+            </div>
+
+            <!-- Live hardware connection status -->
+            <div class="explorer-sub-section">
+              <div class="explorer-sub-header">HARDWARE STATUS</div>
+              <div
+                class="workspace-item-row"
+                style="display: flex; align-items: center; justify-content: space-between; font-size: 0.65rem;"
+                title={$workspaceStore.deviceStatus.detail}
               >
                 <span
-                  style="font-family: var(--font-mono); font-size: 0.65rem; color: var(--accent-cyan); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px;"
-                  >{doc.name}</span
+                  >{$workspaceStore.deviceStatus.target ||
+                    "STM32 Target"}:</span
                 >
-                <span class="shortcut-tag">{doc.size}</span>
-              </button>
-            {/each}
+                <span
+                  style="color: {$workspaceStore.deviceStatus.connected
+                    ? 'var(--accent-success)'
+                    : 'var(--text-dark)'}; font-weight: bold;"
+                >
+                  {$workspaceStore.deviceStatus.connected
+                    ? `CONNECTED (${$workspaceStore.deviceStatus.probe || "ST-Link"})`
+                    : "NO DEVICE"}
+                </span>
+              </div>
+            </div>
           </div>
+        {/if}
 
-          <!-- Live hardware connection status -->
-          <div class="explorer-sub-section">
-            <div class="explorer-sub-header">HARDWARE STATUS</div>
-            <div
-              class="workspace-item-row"
-              style="display: flex; align-items: center; justify-content: space-between; font-size: 0.65rem;"
-              title={$workspaceStore.deviceStatus.detail}
-            >
-              <span>{$workspaceStore.deviceStatus.target || "STM32 Target"}:</span>
-              <span
-                style="color: {$workspaceStore.deviceStatus.connected
-                  ? 'var(--accent-success)'
-                  : 'var(--text-dark)'}; font-weight: bold;"
+        {#if $workspaceStore.activeSidebarTab === "search"}
+          <div class="panel-header">
+            <div class="panel-title">Search Workspace</div>
+          </div>
+          <div class="panel-body">
+            <div class="sidebar-search-panel">
+              <input type="text" placeholder="Search string..." />
+              <input type="text" placeholder="Files to include (e.g. *.c)" />
+              <div
+                style="font-size: 0.75rem; color: var(--text-dark); margin-top: 10px;"
               >
-                {$workspaceStore.deviceStatus.connected
-                  ? `CONNECTED (${$workspaceStore.deviceStatus.probe || "ST-Link"})`
-                  : "NO DEVICE"}
-              </span>
+                No active search results. Press Enter to search.
+              </div>
             </div>
           </div>
+        {/if}
 
-        </div>
-      {/if}
-
-      {#if $workspaceStore.activeSidebarTab === "search"}
-        <div class="panel-header">
-          <div class="panel-title">Search Workspace</div>
-        </div>
-        <div class="panel-body">
-          <div class="sidebar-search-panel">
-            <input type="text" placeholder="Search string..." />
-            <input type="text" placeholder="Files to include (e.g. *.c)" />
+        {#if $workspaceStore.activeSidebarTab === "git"}
+          <div class="panel-header">
+            <div class="panel-title">Source Control</div>
+          </div>
+          <div class="panel-body">
             <div
-              style="font-size: 0.75rem; color: var(--text-dark); margin-top: 10px;"
+              class="sidebar-git-panel"
+              style="display: flex; flex-direction: column; gap: 8px; padding: 12px;"
             >
-              No active search results. Press Enter to search.
-            </div>
-          </div>
-        </div>
-      {/if}
-
-      {#if $workspaceStore.activeSidebarTab === "git"}
-        <div class="panel-header">
-          <div class="panel-title">Source Control</div>
-        </div>
-        <div class="panel-body">
-          <div class="sidebar-git-panel" style="display: flex; flex-direction: column; gap: 8px; padding: 12px;">
-            <input 
-              type="text" 
-              placeholder="Commit message (Ctrl+Enter)..." 
-              bind:value={gitCommitMessage}
-              disabled={gitCommitting}
-              onkeydown={async (e) => {
-                if (e.key === 'Enter' && e.ctrlKey && !gitCommitting) {
+              <input
+                type="text"
+                placeholder="Commit message (Ctrl+Enter)..."
+                bind:value={gitCommitMessage}
+                disabled={gitCommitting}
+                onkeydown={async (e) => {
+                  if (e.key === "Enter" && e.ctrlKey && !gitCommitting) {
+                    const msg = gitCommitMessage.trim();
+                    if (msg) {
+                      gitCommitting = true;
+                      gitCommitFeedback = "";
+                      try {
+                        await actions.commitChanges(msg);
+                        gitCommitMessage = "";
+                        gitCommitFeedback = "Commit successful!";
+                        setTimeout(() => {
+                          gitCommitFeedback = "";
+                        }, 3000);
+                      } catch (err) {
+                        gitCommitFeedback = "Failed to commit.";
+                        setTimeout(() => {
+                          gitCommitFeedback = "";
+                        }, 4000);
+                      } finally {
+                        gitCommitting = false;
+                      }
+                    }
+                  }
+                }}
+                style="width: 100%; padding: 6px 10px; font-size: 0.76rem;"
+              />
+              <button
+                class="git-commit-btn"
+                disabled={!gitCommitMessage.trim() || gitCommitting}
+                onclick={async () => {
                   const msg = gitCommitMessage.trim();
                   if (msg) {
                     gitCommitting = true;
@@ -1348,1008 +1570,1338 @@
                       await actions.commitChanges(msg);
                       gitCommitMessage = "";
                       gitCommitFeedback = "Commit successful!";
-                      setTimeout(() => { gitCommitFeedback = ""; }, 3000);
+                      setTimeout(() => {
+                        gitCommitFeedback = "";
+                      }, 3000);
                     } catch (err) {
                       gitCommitFeedback = "Failed to commit.";
-                      setTimeout(() => { gitCommitFeedback = ""; }, 4000);
+                      setTimeout(() => {
+                        gitCommitFeedback = "";
+                      }, 4000);
                     } finally {
                       gitCommitting = false;
                     }
                   }
-                }
-              }}
-              style="width: 100%; padding: 6px 10px; font-size: 0.76rem;"
-            />
-            <button 
-              class="git-commit-btn" 
-              disabled={!gitCommitMessage.trim() || gitCommitting} 
-              onclick={async () => {
-                const msg = gitCommitMessage.trim();
-                if (msg) {
-                  gitCommitting = true;
-                  gitCommitFeedback = "";
-                  try {
-                    await actions.commitChanges(msg);
-                    gitCommitMessage = "";
-                    gitCommitFeedback = "Commit successful!";
-                    setTimeout(() => { gitCommitFeedback = ""; }, 3000);
-                  } catch (err) {
-                    gitCommitFeedback = "Failed to commit.";
-                    setTimeout(() => { gitCommitFeedback = ""; }, 4000);
-                  } finally {
-                    gitCommitting = false;
-                  }
-                }
-              }}
-              style="width: 100%; margin-top: 4px;"
-            >
-              {gitCommitting ? "Committing..." : "Commit Changes"}
-            </button>
-            
-            {#if gitCommitFeedback}
-              <div 
-                style="font-size: 0.72rem; text-align: center; margin-top: 2px; font-weight: 500;
-                  {gitCommitFeedback.includes('Failed') ? 'color: var(--accent-error);' : 'color: var(--accent-success);'}"
+                }}
+                style="width: 100%; margin-top: 4px;"
               >
-                {gitCommitFeedback}
-              </div>
-            {/if}
-            
-            <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 12px; border-top: 1px solid var(--border-color); padding-top: 8px;">
-              <strong style="display: block; margin-bottom: 6px;">
-                Changed Files ({$workspaceStore.gitChanges.length})
-              </strong>
-              
-              <div style="max-height: 250px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;">
-                {#each $workspaceStore.gitChanges as change}
-                  <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; background: rgba(255,255,255,0.02); border-radius: 3px; font-family: var(--font-mono); font-size: 0.7rem;">
-                    <span 
-                      style="text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 180px; color: var(--text-active);"
-                      title={change.path}
-                    >
-                      {change.path}
-                    </span>
-                    <span 
-                      style="font-weight: 700; font-size: 0.65rem; padding: 1px 4px; border-radius: 2px;
-                        {change.status.includes('M') ? 'color: var(--accent-warning); background: rgba(245,158,11,0.1);' : 
-                         change.status.includes('?') ? 'color: var(--accent-cyan); background: rgba(6,182,212,0.1);' : 
-                         change.status.includes('A') ? 'color: var(--accent-success); background: rgba(16,185,129,0.1);' : 
-                         change.status.includes('D') ? 'color: var(--accent-error); background: rgba(239,68,68,0.1);' : 
-                         'color: var(--text-muted);'}"
-                    >
-                      {change.status}
-                    </span>
-                  </div>
-                {/each}
-                
-                {#if $workspaceStore.gitChanges.length === 0}
-                  <div style="font-size: 0.7rem; color: var(--text-dark); padding: 8px 0; font-style: italic;">
-                    No staged or unstaged changes.
-                  </div>
-                {/if}
-              </div>
-            </div>
-          </div>
-        </div>
-      {/if}
+                {gitCommitting ? "Committing..." : "Commit Changes"}
+              </button>
 
-      {#if $workspaceStore.activeSidebarTab === "debug"}
-        <div class="panel-header">
-          <div class="panel-title">Run & Debug GDB</div>
-        </div>
-        <div class="panel-body">
-          <div class="sidebar-debug-panel">
-            <div
-              style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 12px;"
-            >
-              <strong style="display: block; margin-bottom: 4px;"
-                >Call Stack</strong
-              >
-              <div
-                style="font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted);"
-              >
-                {$workspaceStore.callStack[0]}
-              </div>
-              <div
-                style="font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-dark);"
-              >
-                {$workspaceStore.callStack[1]}
-              </div>
-            </div>
-            <div style="font-size: 0.75rem; color: var(--text-muted);">
-              <strong style="display: block; margin-bottom: 4px;"
-                >Active Breakpoints</strong
-              >
-              <div
-                style="padding: 2px 0; display: flex; align-items: center; gap: 6px;"
-              >
-                <span
-                  style="width: 6px; height: 6px; border-radius: 50%; background-color: var(--accent-error);"
-                ></span>
-                <span>main.c: Line 24</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      {/if}
-
-      {#if $workspaceStore.activeSidebarTab === "rag"}
-        <RagUploadPanel />
-      {/if}
-
-      {#if $workspaceStore.activeSidebarTab === "boards"}
-        <div class="panel-header">
-          <div class="panel-title">Target Config</div>
-        </div>
-        <div class="panel-body">
-          <div class="boards-config-panel">
-            <div class="config-group">
-              <!-- svelte-ignore a11y-label-has-associated-control -->
-              <label>MCU Board Target</label>
-              <select
-                class="config-select"
-                value={$workspaceStore.selectedBoard}
-                onchange={(e) =>
-                  actions.setSelectedBoard(e.currentTarget.value as any)}
-              >
-                <option value="STM32F401">STM32F401 (Cortex-M4)</option>
-                <option value="ESP32-S3">ESP32-S3 (Xtensa LX7)</option>
-                <option value="RP2040">RP2040 (Cortex-M0+)</option>
-              </select>
-            </div>
-            <div class="config-group">
-              <!-- svelte-ignore a11y-label-has-associated-control -->
-              <label>Debugger Probe</label>
-              <select
-                class="config-select"
-                value={$workspaceStore.selectedProbe}
-                onchange={(e) =>
-                  actions.setSelectedProbe(e.currentTarget.value as any)}
-              >
-                <option value="ST-Link V2">ST-Link V2 (SWD)</option>
-                <option value="J-Link">J-Link (SWD/JTAG)</option>
-                <option value="CMSIS-DAP">CMSIS-DAP (SWD)</option>
-              </select>
-            </div>
-            <div class="config-group">
-              <!-- svelte-ignore a11y-label-has-associated-control -->
-              <label>Toolchain compiler Path</label>
-              <div class="path-input-wrapper">
-                <input
-                  type="text"
-                  class="config-input"
-                  value={$workspaceStore.toolchainPath}
-                  onchange={(e) =>
-                    actions.setToolchainPath(e.currentTarget.value)}
-                />
-                <button
-                  class="browse-btn"
-                  onclick={() =>
-                    actions.setToolchainPath("/usr/bin/arm-none-eabi-gcc")}
-                  >Reset</button
+              {#if gitCommitFeedback}
+                <div
+                  style="font-size: 0.72rem; text-align: center; margin-top: 2px; font-weight: 500;
+                  {gitCommitFeedback.includes('Failed')
+                    ? 'color: var(--accent-error);'
+                    : 'color: var(--accent-success);'}"
                 >
+                  {gitCommitFeedback}
+                </div>
+              {/if}
+
+              <div
+                style="font-size: 0.75rem; color: var(--text-muted); margin-top: 12px; border-top: 1px solid var(--border-color); padding-top: 8px;"
+              >
+                <strong style="display: block; margin-bottom: 6px;">
+                  Changed Files ({$workspaceStore.gitChanges.length})
+                </strong>
+
+                <div
+                  style="max-height: 250px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;"
+                >
+                  {#each $workspaceStore.gitChanges as change}
+                    <div
+                      style="display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; background: rgba(255,255,255,0.02); border-radius: 3px; font-family: var(--font-mono); font-size: 0.7rem;"
+                    >
+                      <span
+                        style="text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 180px; color: var(--text-active);"
+                        title={change.path}
+                      >
+                        {change.path}
+                      </span>
+                      <span
+                        style="font-weight: 700; font-size: 0.65rem; padding: 1px 4px; border-radius: 2px;
+                        {change.status.includes('M')
+                          ? 'color: var(--accent-warning); background: rgba(245,158,11,0.1);'
+                          : change.status.includes('?')
+                            ? 'color: var(--accent-cyan); background: rgba(6,182,212,0.1);'
+                            : change.status.includes('A')
+                              ? 'color: var(--accent-success); background: rgba(16,185,129,0.1);'
+                              : change.status.includes('D')
+                                ? 'color: var(--accent-error); background: rgba(239,68,68,0.1);'
+                                : 'color: var(--text-muted);'}"
+                      >
+                        {change.status}
+                      </span>
+                    </div>
+                  {/each}
+
+                  {#if $workspaceStore.gitChanges.length === 0}
+                    <div
+                      style="font-size: 0.7rem; color: var(--text-dark); padding: 8px 0; font-style: italic;"
+                    >
+                      No staged or unstaged changes.
+                    </div>
+                  {/if}
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      {/if}
+        {/if}
 
-      {#if $workspaceStore.activeSidebarTab === "libraries"}
-        <LibraryManager />
-      {/if}
-    </aside>
+        {#if $workspaceStore.activeSidebarTab === "debug"}
+          <div class="panel-header">
+            <div class="panel-title">Run & Debug GDB</div>
+          </div>
+          <div class="panel-body">
+            <div class="sidebar-debug-panel">
+              <div
+                style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 12px;"
+              >
+                <strong style="display: block; margin-bottom: 4px;"
+                  >Call Stack</strong
+                >
+                <div
+                  style="font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted);"
+                >
+                  {$workspaceStore.callStack[0]}
+                </div>
+                <div
+                  style="font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-dark);"
+                >
+                  {$workspaceStore.callStack[1]}
+                </div>
+              </div>
+              <div style="font-size: 0.75rem; color: var(--text-muted);">
+                <strong style="display: block; margin-bottom: 4px;"
+                  >Active Breakpoints</strong
+                >
+                <div
+                  style="padding: 2px 0; display: flex; align-items: center; gap: 6px;"
+                >
+                  <span
+                    style="width: 6px; height: 6px; border-radius: 50%; background-color: var(--accent-error);"
+                  ></span>
+                  <span>main.c: Line 24</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        {/if}
 
-    <!-- Sidebar Drag Handle -->
-    <!-- svelte-ignore a11y-no-static-element-interactions -->
-    <div
-      class="resize-handle vertical-handle"
-      onmousedown={() => { isDraggingLeft = true; document.body.classList.add('dragging-col'); }}
-      style="left: {sidebarWidth + 52}px;"
-    ></div>
+        {#if $workspaceStore.activeSidebarTab === "rag"}
+          <RagUploadPanel />
+        {/if}
 
-    <!-- Center Workspace Area (Editor + Bottom Drawer) -->
-    <main class="center-editor-panel editor-container">
-      <!-- Editor Frame -->
-      <section class="monaco-editor-frame">
-        <!-- Editor Header Tab bar -->
-        <div class="editor-tabs">
-          {#each $workspaceStore.openFiles as path}
-            <!-- svelte-ignore a11y-click-events-have-key-events -->
-            <!-- svelte-ignore a11y-no-static-element-interactions -->
-            <div 
-              class="editor-tab {path === $workspaceStore.activeFile ? 'active' : ''}"
-              onclick={() => actions.setActiveFile(path)}
-            >
-              {#if path === $workspaceStore.activeFile}
-                <div class="active-tab-top-bar"></div>
-              {/if}
-              <FileCode size={12} style="color: {path === $workspaceStore.activeFile ? 'var(--accent-violet-hover)' : 'var(--text-dark)'};" />
-              <span>{path.split("/").pop()}</span>
+        {#if $workspaceStore.activeSidebarTab === "boards"}
+          <div class="panel-header">
+            <div class="panel-title">Target Config</div>
+          </div>
+          <div class="panel-body">
+            <div class="boards-config-panel">
+              <div class="config-group">
+                <!-- svelte-ignore a11y-label-has-associated-control -->
+                <label>MCU Board Target</label>
+                <select
+                  class="config-select"
+                  value={$workspaceStore.selectedBoard}
+                  onchange={(e) =>
+                    actions.setSelectedBoard(e.currentTarget.value as any)}
+                >
+                  <option value="STM32F401">STM32F401 (Cortex-M4)</option>
+                  <option value="ESP32-S3">ESP32-S3 (Xtensa LX7)</option>
+                  <option value="RP2040">RP2040 (Cortex-M0+)</option>
+                </select>
+              </div>
+              <div class="config-group">
+                <!-- svelte-ignore a11y-label-has-associated-control -->
+                <label>Debugger Probe</label>
+                <select
+                  class="config-select"
+                  value={$workspaceStore.selectedProbe}
+                  onchange={(e) =>
+                    actions.setSelectedProbe(e.currentTarget.value as any)}
+                >
+                  <option value="ST-Link V2">ST-Link V2 (SWD)</option>
+                  <option value="J-Link">J-Link (SWD/JTAG)</option>
+                  <option value="CMSIS-DAP">CMSIS-DAP (SWD)</option>
+                </select>
+              </div>
+              <div class="config-group">
+                <!-- svelte-ignore a11y-label-has-associated-control -->
+                <label>Toolchain compiler Path</label>
+                <div class="path-input-wrapper">
+                  <input
+                    type="text"
+                    class="config-input"
+                    value={$workspaceStore.toolchainPath}
+                    onchange={(e) =>
+                      actions.setToolchainPath(e.currentTarget.value)}
+                  />
+                  <button
+                    class="browse-btn"
+                    onclick={() =>
+                      actions.setToolchainPath("/usr/bin/arm-none-eabi-gcc")}
+                    >Reset</button
+                  >
+                </div>
+              </div>
+            </div>
+          </div>
+        {/if}
+
+        {#if $workspaceStore.activeSidebarTab === "libraries"}
+          <LibraryManager />
+        {/if}
+      </aside>
+
+      <!-- Sidebar Drag Handle -->
+      <!-- svelte-ignore a11y-no-static-element-interactions -->
+      <div
+        class="resize-handle vertical-handle"
+        onmousedown={() => {
+          isDraggingLeft = true;
+          document.body.classList.add("dragging-col");
+        }}
+        style="left: {sidebarWidth + 52}px;"
+      ></div>
+
+      <!-- Center Workspace Area (Editor + Bottom Drawer) -->
+      <main class="center-editor-panel editor-container">
+        <!-- Editor Frame -->
+        <section class="monaco-editor-frame">
+          <!-- Editor Header Tab bar -->
+          <div class="editor-tabs">
+            {#each $workspaceStore.openFiles as path}
               <!-- svelte-ignore a11y-click-events-have-key-events -->
               <!-- svelte-ignore a11y-no-static-element-interactions -->
-              <span
-                class="close-tab"
-                onclick={(e) => {
-                  e.stopPropagation();
-                  actions.closeFileTab(path);
-                }}
-                title="Close Tab"
-              >×</span>
-            </div>
-          {/each}
-        </div>
-
-        <!-- Active Editor Display -->
-        <div class="monaco-editor-wrapper">
-          {#if $workspaceStore.activeFile}
-            <div class="monaco-container" use:initMonaco></div>
-            <div class="editor-bottom-bar">
-              <span>Ln {currentLine}, Col {currentColumn}</span>
-              <span>Spaces: 4</span>
-              <span>UTF-8</span>
-              <span>LF</span>
-              <span>C</span>
-              <span>{$workspaceStore.selectedBoard}RETx</span>
-            </div>
-          {:else}
-            <div class="empty-editor-state">
-              <h2 style="color: var(--text-muted); font-weight: 500; font-size: 1.1rem; letter-spacing: 0.5px; margin-bottom: 2rem;">
-                HARDCORE IDE WORKSPACE
-              </h2>
-              <div class="quick-actions-row">
-                <button class="action-card" onclick={() => actions.setActiveSidebarTab("explorer")}>
-                  <Folder size={24} style="color: var(--accent-blue);" />
-                  <span>Open Project Folder</span>
-                </button>
-                <button class="action-card" onclick={() => { showConfigurator = true; aiOpen = true; }}>
-                  <Settings size={24} style="color: var(--accent-orange);" />
-                  <span>Configure Target Hardware</span>
-                </button>
-                <button class="action-card" onclick={() => actions.setTerminalOpen(true)}>
-                  <MonitorPlay size={24} style="color: var(--accent-green);" />
-                  <span>Open Terminal &rarr;</span>
-                </button>
-              </div>
-            </div>
-          {/if}
-
-          {#if $workspaceStore.crashed}
-            <div class="crash-overlay">
-              <div class="crash-icon-box">
-                <AlertTriangle size={24} />
-              </div>
-              <div class="crash-details">
-                <h3>HARDWARE EXCEPTION (Core halted in HardFault_Handler)</h3>
-                <p>{$workspaceStore.crashReason}</p>
+              <div
+                class="editor-tab {path === $workspaceStore.activeFile
+                  ? 'active'
+                  : ''}"
+                onclick={() => actions.setActiveFile(path)}
+              >
+                {#if path === $workspaceStore.activeFile}
+                  <div class="active-tab-top-bar"></div>
+                {/if}
+                <FileCode
+                  size={12}
+                  style="color: {path === $workspaceStore.activeFile
+                    ? 'var(--accent-violet-hover)'
+                    : 'var(--text-dark)'};"
+                />
+                <span>{path.split("/").pop()}</span>
+                <!-- svelte-ignore a11y-click-events-have-key-events -->
+                <!-- svelte-ignore a11y-no-static-element-interactions -->
                 <span
-                  >Line 45: *crash_trigger = 0xDEADC0DE; (Dereferenced Null
-                  Pointer PC: 0x08001A4E)</span
+                  class="close-tab"
+                  onclick={(e) => {
+                    e.stopPropagation();
+                    actions.closeFileTab(path);
+                  }}
+                  title="Close Tab">×</span
                 >
               </div>
-              <button class="crash-resolve-btn" onclick={actions.resolveCrash}>
-                <Sparkles size={13} />
-                Apply AI Hotpatch Fix
-              </button>
+            {/each}
+          </div>
+
+          <!-- Active Editor Display -->
+          <div class="monaco-editor-wrapper">
+            {#if $workspaceStore.activeFile}
+              <div class="monaco-container" use:initMonaco></div>
+              <div class="editor-bottom-bar">
+                <span>Ln {currentLine}, Col {currentColumn}</span>
+                <span>Spaces: 4</span>
+                <span>UTF-8</span>
+                <span>LF</span>
+                <span>C</span>
+                <span>{$workspaceStore.selectedBoard}RETx</span>
+              </div>
+            {:else}
+              <div class="empty-editor-state">
+                <h2
+                  style="color: var(--text-muted); font-weight: 500; font-size: 1.1rem; letter-spacing: 0.5px; margin-bottom: 2rem;"
+                >
+                  HARDCORE IDE WORKSPACE
+                </h2>
+                <div class="quick-actions-row">
+                  <button
+                    class="action-card"
+                    onclick={() => actions.setActiveSidebarTab("explorer")}
+                  >
+                    <Folder size={24} style="color: var(--accent-blue);" />
+                    <span>Open Project Folder</span>
+                  </button>
+                  <button
+                    class="action-card"
+                    onclick={() => {
+                      showConfigurator = true;
+                      aiOpen = true;
+                    }}
+                  >
+                    <Settings size={24} style="color: var(--accent-orange);" />
+                    <span>Configure Target Hardware</span>
+                  </button>
+                  <button
+                    class="action-card"
+                    onclick={() => actions.setTerminalOpen(true)}
+                  >
+                    <MonitorPlay
+                      size={24}
+                      style="color: var(--accent-green);"
+                    />
+                    <span>Open Terminal &rarr;</span>
+                  </button>
+                </div>
+              </div>
+            {/if}
+
+            {#if $workspaceStore.crashed}
+              <div class="crash-overlay">
+                <div class="crash-icon-box">
+                  <AlertTriangle size={24} />
+                </div>
+                <div class="crash-details">
+                  <h3>HARDWARE EXCEPTION (Core halted in HardFault_Handler)</h3>
+                  <p>{$workspaceStore.crashReason}</p>
+                  <span
+                    >Line 45: *crash_trigger = 0xDEADC0DE; (Dereferenced Null
+                    Pointer PC: 0x08001A4E)</span
+                  >
+                </div>
+                <button
+                  class="crash-resolve-btn"
+                  onclick={actions.resolveCrash}
+                >
+                  <Sparkles size={13} />
+                  Apply AI Hotpatch Fix
+                </button>
+              </div>
+            {/if}
+          </div>
+        </section>
+
+        <!-- Bottom Drawer Resizer Handle (inline flex child, sits between editor and terminal) -->
+        <!-- svelte-ignore a11y-no-static-element-interactions -->
+        {#if $workspaceStore.terminalOpen}
+          <div
+            class="resize-handle horizontal-handle"
+            onmousedown={() => {
+              isDraggingBottom = true;
+              document.body.classList.add("dragging-row");
+            }}
+          ></div>
+        {/if}
+
+        <!-- Bottom Drawer Frame -->
+        {#if $workspaceStore.terminalOpen}
+          <footer
+            class="helix-bottom-drawer"
+            style="height: {bottomDrawerHeight}px;"
+          >
+            <!-- Tabs bar -->
+            <div class="drawer-tabs">
+              <div class="tab-group">
+                <button
+                  class="drawer-tab {$workspaceStore.activeBottomTab ===
+                  'terminal'
+                    ? 'active'
+                    : ''}"
+                  onclick={() => actions.setBottomTab("terminal")}
+                >
+                  <span>SERIAL TERMINAL</span>
+                </button>
+                <button
+                  class="drawer-tab {$workspaceStore.activeBottomTab ===
+                  'plotter'
+                    ? 'active'
+                    : ''}"
+                  onclick={() => actions.setBottomTab("plotter")}
+                >
+                  <span>TELEMETRY PLOTTER</span>
+                </button>
+                <button
+                  class="drawer-tab {$workspaceStore.activeBottomTab ===
+                  'registers'
+                    ? 'active'
+                    : ''}"
+                  onclick={() => actions.setBottomTab("registers")}
+                >
+                  <span>SFR REGISTERS</span>
+                </button>
+                <button
+                  class="drawer-tab {$workspaceStore.activeBottomTab ===
+                  'memory'
+                    ? 'active'
+                    : ''}"
+                  onclick={() => actions.setBottomTab("memory")}
+                >
+                  <span>BUILD OUTPUT</span>
+                </button>
+              </div>
+              <div class="drawer-actions">
+                {#if $workspaceStore.activeBottomTab === "memory"}
+                  <button
+                    class="drawer-icon-btn"
+                    type="button"
+                    onclick={copyBuildOutput}
+                    disabled={$workspaceStore.buildLogs.length === 0}
+                    title={buildOutputCopied ? "Copied" : "Copy Build Output"}
+                    aria-label={buildOutputCopied
+                      ? "Copied build output"
+                      : "Copy build output"}
+                  >
+                    {#if buildOutputCopied}
+                      <Check size={13} />
+                    {:else}
+                      <Copy size={13} />
+                    {/if}
+                  </button>
+                {/if}
+                <button
+                  class="close-ai-btn"
+                  type="button"
+                  onclick={() => actions.setTerminalOpen(false)}
+                  title="Minimize Terminal"
+                >
+                  <X size={13} />
+                </button>
+              </div>
             </div>
-          {/if}
-        </div>
 
-      </section>
+            <!-- Active tab view -->
+            <div class="drawer-content">
+              {#if $workspaceStore.activeBottomTab === "terminal"}
+                <div class="serial-panel">
+                  <div class="terminal-scroll">
+                    {#each $workspaceStore.serialLogs as log}
+                      <div class="terminal-line">{log}</div>
+                    {/each}
+                    <div bind:this={terminalEndRef}></div>
+                  </div>
+                  <form class="terminal-input-bar" onsubmit={handleSerialSend}>
+                    <span class="prompt">COM4 &gt;</span>
+                    <input
+                      type="text"
+                      class="terminal-input"
+                      placeholder="Send serial bytes to MCU..."
+                      bind:value={serialInput}
+                    />
+                    <button type="submit">SEND</button>
+                    <select
+                      class="baud-rate-select"
+                      value={$workspaceStore.baudRate}
+                      onchange={(e) =>
+                        actions.setBaudRate(Number(e.currentTarget.value))}
+                      style="background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-active); font-size: 0.72rem; padding: 4px 8px; border-radius: var(--radius-sm); outline: none; margin-left: 8px; cursor: pointer; transition: border-color 0.15s ease;"
+                    >
+                      <option value={9600}>9600 baud</option>
+                      <option value={19200}>19200 baud</option>
+                      <option value={38400}>38400 baud</option>
+                      <option value={57600}>57600 baud</option>
+                      <option value={74880}>74880 baud</option>
+                      <option value={115200}>115200 baud</option>
+                      <option value={230400}>230400 baud</option>
+                      <option value={460800}>460800 baud</option>
+                      <option value={921600}>921600 baud</option>
+                    </select>
+                  </form>
+                </div>
+              {/if}
 
-      <!-- Bottom Drawer Resizer Handle (inline flex child, sits between editor and terminal) -->
+              {#if $workspaceStore.activeBottomTab === "plotter"}
+                <div class="plotter-panel">
+                  <div class="plot-stats-overlay">
+                    <div class="stat-lbl">
+                      <span class="stat-dot temp"></span>TEMP:
+                      <span class="stat-val"
+                        >{$workspaceStore.analogSensors.temp.toFixed(1)} °C</span
+                      >
+                    </div>
+                    <div class="stat-lbl">
+                      <span class="stat-dot volt"></span>VDD:
+                      <span class="stat-val"
+                        >{$workspaceStore.analogSensors.voltage.toFixed(2)} V</span
+                      >
+                    </div>
+                    <div class="stat-lbl">
+                      <span class="stat-dot curr"></span>IDD:
+                      <span class="stat-val"
+                        >{$workspaceStore.analogSensors.current.toFixed(1)} mA</span
+                      >
+                    </div>
+                  </div>
+                  <div class="plotter-canvas-container">
+                    <canvas bind:this={canvasEl} class="telemetry-canvas"
+                    ></canvas>
+                  </div>
+                </div>
+              {/if}
+
+              {#if $workspaceStore.activeBottomTab === "registers"}
+                <div class="registers-panel">
+                  <div class="peripheral-list">
+                    {#each $workspaceStore.registers as reg}
+                      <!-- svelte-ignore a11y-click-events-have-key-events -->
+                      <!-- svelte-ignore a11y-no-static-element-interactions -->
+                      <div
+                        class="peripheral-item {selectedPeripheral === reg.name
+                          ? 'active'
+                          : ''}"
+                        onclick={() => (selectedPeripheral = reg.name)}
+                      >
+                        <div
+                          style="display: flex; align-items: center; gap: 8px;"
+                        >
+                          <Cpu size={12} style="color: var(--accent-violet);" />
+                          <span>{reg.name}</span>
+                        </div>
+                        <span class="peripheral-address">{reg.value}</span>
+                      </div>
+                    {/each}
+                  </div>
+
+                  <div class="register-details-grid">
+                    {#each $workspaceStore.registers as reg}
+                      {#if selectedPeripheral === reg.name}
+                        {#each reg.bits || [] as bit}
+                          <div class="register-row">
+                            <div class="register-row-header">
+                              <span class="register-name">{bit.name}</span>
+                              <span class="register-value"
+                                >0x{bit.value.toString(16).toUpperCase()}</span
+                              >
+                            </div>
+                            <div class="register-desc">{bit.description}</div>
+                            <div
+                              style="display: flex; justify-content: space-between; align-items: center; font-size: 0.65rem; color: var(--text-dark); margin-top: 4px;"
+                            >
+                              <span>Range: {bit.range}</span>
+                            </div>
+                          </div>
+                        {/each}
+                      {/if}
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+
+              {#if $workspaceStore.activeBottomTab === "memory"}
+                <div class="serial-panel">
+                  <div
+                    class="terminal-scroll"
+                    style="font-family: var(--font-mono);"
+                  >
+                    {#each $workspaceStore.buildLogs as log}
+                      <div
+                        class="terminal-line"
+                        style="color: {log.includes('Successful')
+                          ? 'var(--accent-success)'
+                          : log.includes('Error')
+                            ? 'var(--accent-error)'
+                            : '#94A3B8'};"
+                      >
+                        {log}
+                      </div>
+                    {/each}
+                    <div bind:this={buildOutputEndRef}></div>
+                  </div>
+                </div>
+              {/if}
+            </div>
+          </footer>
+        {/if}
+
+        <!-- Terminal Toggle Pill -->
+        {#if !$workspaceStore.terminalOpen}
+          <!-- svelte-ignore a11y-click-events-have-key-events -->
+          <!-- svelte-ignore a11y-no-static-element-interactions -->
+          <div
+            class="terminal-toggle-pill"
+            onclick={() => actions.setTerminalOpen(true)}
+          >
+            <Sliders size={12} />
+            <span>TERMINAL</span>
+          </div>
+        {/if}
+      </main>
+
+      <!-- Right Panel Resizer Handle -->
       <!-- svelte-ignore a11y-no-static-element-interactions -->
-      {#if $workspaceStore.terminalOpen}
+      {#if aiOpen}
         <div
-          class="resize-handle horizontal-handle"
-          onmousedown={() => { isDraggingBottom = true; document.body.classList.add('dragging-row'); }}
+          class="resize-handle vertical-handle"
+          onmousedown={() => {
+            isDraggingRight = true;
+            document.body.classList.add("dragging-col");
+          }}
+          style="right: {rightSidebarWidth}px;"
         ></div>
       {/if}
 
-      <!-- Bottom Drawer Frame -->
-      {#if $workspaceStore.terminalOpen}
-        <footer
-          class="helix-bottom-drawer"
-          style="height: {bottomDrawerHeight}px;"
+      <!-- Right AI Panel Column -->
+      <aside
+        class="split-sidebar-right right-ai-panel"
+        style="width: {rightSidebarWidth}px; display: {aiOpen
+          ? 'flex'
+          : 'none'};"
+      >
+        <div class="panel-mode-switch">
+          <select
+            onchange={(e) => {
+              const v = (e.target as HTMLSelectElement).value;
+
+              if (v === "both") {
+                showConfigurator = true;
+                showCopilot = true;
+              }
+
+              if (v === "config") {
+                showConfigurator = true;
+                showCopilot = false;
+              }
+
+              if (v === "copilot") {
+                showConfigurator = false;
+                showCopilot = true;
+              }
+            }}
+          >
+            <option value="both">Both</option>
+            <option value="config">Configurator</option>
+            <option value="copilot">Copilot</option>
+          </select>
+        </div>
+        {#if showConfigurator}
+          <section
+            class="sidebar-right-pane embedded-configurator-pane"
+            style={`height:${showCopilot ? rightPaneSplit : 100}%`}
+          >
+            <EmbeddedConfigurator
+              selectedBoard={$workspaceStore.selectedBoard}
+              onClose={() => (showConfigurator = false)}
+              isDetached={false}
+              onDetach={() => (showConfigurator = false)}
+            />
+          </section>
+        {/if}
+
+        {#if showConfigurator && showCopilot}
+          <div class="right-pane-resizer" onmousedown={startRightResize} />
+        {/if}
+
+        <section
+          class="sidebar-right-pane ai-copilot-pane"
+          class:expanded={!showConfigurator}
+          style={`height:${showConfigurator ? 100 - rightPaneSplit : 100}%`}
         >
-          <!-- Tabs bar -->
-          <div class="drawer-tabs">
-            <div class="tab-group">
-              <button
-                class="drawer-tab {$workspaceStore.activeBottomTab === 'terminal'
-                  ? 'active'
-                  : ''}"
-                onclick={() => actions.setBottomTab("terminal")}
-              >
-                <span>SERIAL TERMINAL</span>
-              </button>
-              <button
-                class="drawer-tab {$workspaceStore.activeBottomTab === 'plotter'
-                  ? 'active'
-                  : ''}"
-                onclick={() => actions.setBottomTab("plotter")}
-              >
-                <span>TELEMETRY PLOTTER</span>
-              </button>
-              <button
-                class="drawer-tab {$workspaceStore.activeBottomTab === 'registers'
-                  ? 'active'
-                  : ''}"
-                onclick={() => actions.setBottomTab("registers")}
-              >
-                <span>SFR REGISTERS</span>
-              </button>
-              <button
-                class="drawer-tab {$workspaceStore.activeBottomTab === 'memory'
-                  ? 'active'
-                  : ''}"
-                onclick={() => actions.setBottomTab("memory")}
-              >
-                <span>BUILD OUTPUT</span>
-              </button>
+          <!-- Chat Header -->
+          <div class="ai-chat-header">
+            <div class="ai-chat-header-info">
+              <div class="ai-avatar-badge">
+                <Sparkles size={12} />
+              </div>
+              <div>
+                <div class="ai-chat-title">HARDCOREAI COPILOT</div>
+                <div class="ai-chat-subtitle">
+                  Embedded AI Assistant · Online
+                </div>
+              </div>
             </div>
-            <div class="drawer-actions">
-              {#if $workspaceStore.activeBottomTab === "memory"}
+            <div style="display: flex; gap: 6px;">
+              {#if $workspaceStore.activeProjectId}
                 <button
-                  class="drawer-icon-btn"
-                  type="button"
-                  onclick={copyBuildOutput}
-                  disabled={$workspaceStore.buildLogs.length === 0}
-                  title={buildOutputCopied ? "Copied" : "Copy Build Output"}
-                  aria-label={buildOutputCopied ? "Copied build output" : "Copy build output"}
+                  class="close-ai-btn"
+                  onclick={() =>
+                    actions.clearChat($workspaceStore.activeProjectId!)}
+                  title="Clear Conversation History"
                 >
-                  {#if buildOutputCopied}
-                    <Check size={13} />
-                  {:else}
-                    <Copy size={13} />
-                  {/if}
+                  <Trash2 size={13} />
                 </button>
               {/if}
-              <button class="close-ai-btn" type="button" onclick={() => actions.setTerminalOpen(false)} title="Minimize Terminal">
+              <button
+                class="close-ai-btn"
+                onclick={() => (aiOpen = false)}
+                title="Minimize panel"
+              >
                 <X size={13} />
               </button>
             </div>
           </div>
 
-        <!-- Active tab view -->
-        <div class="drawer-content">
-          {#if $workspaceStore.activeBottomTab === "terminal"}
-            <div class="serial-panel">
-              <div class="terminal-scroll">
-                {#each $workspaceStore.serialLogs as log}
-                  <div class="terminal-line">{log}</div>
-                {/each}
-                <div bind:this={terminalEndRef}></div>
-              </div>
-              <form class="terminal-input-bar" onsubmit={handleSerialSend}>
-                <span class="prompt">COM4 &gt;</span>
-                <input
-                  type="text"
-                  class="terminal-input"
-                  placeholder="Send serial bytes to MCU..."
-                  bind:value={serialInput}
-                />
-                <button type="submit">SEND</button>
-                <select
-                  class="baud-rate-select"
-                  value={$workspaceStore.baudRate}
-                  onchange={(e) => actions.setBaudRate(Number(e.currentTarget.value))}
-                  style="background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-active); font-size: 0.72rem; padding: 4px 8px; border-radius: var(--radius-sm); outline: none; margin-left: 8px; cursor: pointer; transition: border-color 0.15s ease;"
-                >
-                  <option value={9600}>9600 baud</option>
-                  <option value={19200}>19200 baud</option>
-                  <option value={38400}>38400 baud</option>
-                  <option value={57600}>57600 baud</option>
-                  <option value={74880}>74880 baud</option>
-                  <option value={115200}>115200 baud</option>
-                  <option value={230400}>230400 baud</option>
-                  <option value={460800}>460800 baud</option>
-                  <option value={921600}>921600 baud</option>
-                </select>
-              </form>
-            </div>
-          {/if}
-
-          {#if $workspaceStore.activeBottomTab === "plotter"}
-            <div class="plotter-panel">
-              <div class="plot-stats-overlay">
-                <div class="stat-lbl">
-                  <span class="stat-dot temp"></span>TEMP:
-                  <span class="stat-val"
-                    >{$workspaceStore.analogSensors.temp.toFixed(1)} °C</span
-                  >
+          <!-- Chat messages view -->
+          <div class="ai-copilot-chat-content">
+            {#if !$workspaceStore.aiMessages.some((m) => m.sender === "user")}
+              <div class="copilot-welcome-container">
+                <div class="copilot-welcome-title">
+                  Hello! I'm HardcoreAI Copilot
                 </div>
-                <div class="stat-lbl">
-                  <span class="stat-dot volt"></span>VDD:
-                  <span class="stat-val"
-                    >{$workspaceStore.analogSensors.voltage.toFixed(2)} V</span
-                  >
+                <div class="copilot-welcome-subtitle">
+                  Ask me anything about your embedded project.
                 </div>
-                <div class="stat-lbl">
-                  <span class="stat-dot curr"></span>IDD:
-                  <span class="stat-val"
-                    >{$workspaceStore.analogSensors.current.toFixed(1)} mA</span
+
+                <div class="copilot-welcome-grid">
+                  <button
+                    type="button"
+                    class="copilot-shortcut-card"
+                    onclick={() =>
+                      actions.sendAiMessage(
+                        "Explain the code in the active file.",
+                      )}
                   >
+                    <FileCode size={14} class="shortcut-card-icon" />
+                    <span>Explain this code</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    class="copilot-shortcut-card"
+                    onclick={() =>
+                      actions.sendAiMessage(
+                        "Fix any errors in the current code.",
+                      )}
+                  >
+                    <AlertTriangle size={14} class="shortcut-card-icon" />
+                    <span>Fix errors</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    class="copilot-shortcut-card"
+                    onclick={() =>
+                      actions.sendAiMessage(
+                        "Help me debug this issue in the project.",
+                      )}
+                  >
+                    <Bug size={14} class="shortcut-card-icon" />
+                    <span>Debug this issue</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    class="copilot-shortcut-card"
+                    onclick={() =>
+                      actions.sendAiMessage(
+                        "Optimize the performance of this code.",
+                      )}
+                  >
+                    <Cpu size={14} class="shortcut-card-icon" />
+                    <span>Optimize this code</span>
+                  </button>
                 </div>
               </div>
-              <div class="plotter-canvas-container">
-                <canvas bind:this={canvasEl} class="telemetry-canvas"></canvas>
-              </div>
-            </div>
-          {/if}
-
-          {#if $workspaceStore.activeBottomTab === "registers"}
-            <div class="registers-panel">
-              <div class="peripheral-list">
-                {#each $workspaceStore.registers as reg}
-                  <!-- svelte-ignore a11y-click-events-have-key-events -->
-                  <!-- svelte-ignore a11y-no-static-element-interactions -->
-                  <div
-                    class="peripheral-item {selectedPeripheral === reg.name
-                      ? 'active'
-                      : ''}"
-                    onclick={() => (selectedPeripheral = reg.name)}
-                  >
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                      <Cpu size={12} style="color: var(--accent-violet);" />
-                      <span>{reg.name}</span>
-                    </div>
-                    <span class="peripheral-address">{reg.value}</span>
-                  </div>
-                {/each}
-              </div>
-
-              <div class="register-details-grid">
-                {#each $workspaceStore.registers as reg}
-                  {#if selectedPeripheral === reg.name}
-                    {#each reg.bits || [] as bit}
-                      <div class="register-row">
-                        <div class="register-row-header">
-                          <span class="register-name">{bit.name}</span>
-                          <span class="register-value">0x{bit.value.toString(16).toUpperCase()}</span>
-                        </div>
-                        <div class="register-desc">{bit.description}</div>
-                        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.65rem; color: var(--text-dark); margin-top: 4px;">
-                          <span>Range: {bit.range}</span>
-                        </div>
-                      </div>
-                    {/each}
-                  {/if}
-                {/each}
-              </div>
-            </div>
-          {/if}
-
-          {#if $workspaceStore.activeBottomTab === "memory"}
-            <div class="serial-panel">
-              <div class="terminal-scroll" style="font-family: var(--font-mono);">
-                {#each $workspaceStore.buildLogs as log}
-                  <div
-                    class="terminal-line"
-                    style="color: {log.includes('Successful')
-                      ? 'var(--accent-success)'
-                      : log.includes('Error')
-                        ? 'var(--accent-error)'
-                        : '#94A3B8'};"
-                  >
-                    {log}
-                  </div>
-                {/each}
-                <div bind:this={buildOutputEndRef}></div>
-              </div>
-            </div>
-          {/if}
-        </div>
-        </footer>
-      {/if}
-
-      <!-- Terminal Toggle Pill -->
-      {#if !$workspaceStore.terminalOpen}
-        <!-- svelte-ignore a11y-click-events-have-key-events -->
-        <!-- svelte-ignore a11y-no-static-element-interactions -->
-        <div class="terminal-toggle-pill" onclick={() => actions.setTerminalOpen(true)}>
-          <Sliders size={12} />
-          <span>TERMINAL</span>
-        </div>
-      {/if}
-    </main>
-
-    <!-- Right Panel Resizer Handle -->
-    <!-- svelte-ignore a11y-no-static-element-interactions -->
-    {#if aiOpen}
-      <div
-        class="resize-handle vertical-handle"
-        onmousedown={() => { isDraggingRight = true; document.body.classList.add('dragging-col'); }}
-        style="right: {rightSidebarWidth}px;"
-      ></div>
-    {/if}
-
-    <!-- Right AI Panel Column -->
-    <aside
-      class="split-sidebar-right right-ai-panel"
-      style="width: {rightSidebarWidth}px; display: {aiOpen ? 'flex' : 'none'};"
-    >
-      {#if showConfigurator}
-        <section class="sidebar-right-pane embedded-configurator-pane">
-          <EmbeddedConfigurator
-            selectedBoard={$workspaceStore.selectedBoard}
-            onClose={() => (showConfigurator = false)}
-            isDetached={false}
-            onDetach={() => (showConfigurator = false)}
-          />
-        </section>
-      {/if}
-
-      <section class="sidebar-right-pane ai-copilot-pane" class:expanded={!showConfigurator}>
-      <!-- Chat Header -->
-      <div class="ai-chat-header">
-        <div class="ai-chat-header-info">
-          <div class="ai-avatar-badge">
-            <Sparkles size={12} />
-          </div>
-          <div>
-            <div class="ai-chat-title">HARDCOREAI COPILOT</div>
-            <div class="ai-chat-subtitle">Embedded AI Assistant · Online</div>
-          </div>
-        </div>
-        <div style="display: flex; gap: 6px;">
-          {#if $workspaceStore.activeProjectId}
-            <button 
-              class="close-ai-btn" 
-              onclick={() => actions.clearChat($workspaceStore.activeProjectId!)} 
-              title="Clear Conversation History"
-            >
-              <Trash2 size={13} />
-            </button>
-          {/if}
-          <button class="close-ai-btn" onclick={() => (aiOpen = false)} title="Minimize panel">
-            <X size={13} />
-          </button>
-        </div>
-      </div>
-
-      <!-- Chat messages view -->
-      <div class="ai-copilot-chat-content">
-        {#if !$workspaceStore.aiMessages.some(m => m.sender === 'user')}
-          <div class="copilot-welcome-container">
-            <div class="copilot-welcome-title">Hello! I'm HardcoreAI Copilot</div>
-            <div class="copilot-welcome-subtitle">Ask me anything about your embedded project.</div>
-            
-            <div class="copilot-welcome-grid">
-              <button type="button" class="copilot-shortcut-card" onclick={() => actions.sendAiMessage("Explain the code in the active file.")}>
-                <FileCode size={14} class="shortcut-card-icon" />
-                <span>Explain this code</span>
-              </button>
-              
-              <button type="button" class="copilot-shortcut-card" onclick={() => actions.sendAiMessage("Fix any errors in the current code.")}>
-                <AlertTriangle size={14} class="shortcut-card-icon" />
-                <span>Fix errors</span>
-              </button>
-              
-              <button type="button" class="copilot-shortcut-card" onclick={() => actions.sendAiMessage("Help me debug this issue in the project.")}>
-                <Bug size={14} class="shortcut-card-icon" />
-                <span>Debug this issue</span>
-              </button>
-              
-              <button type="button" class="copilot-shortcut-card" onclick={() => actions.sendAiMessage("Optimize the performance of this code.")}>
-                <Cpu size={14} class="shortcut-card-icon" />
-                <span>Optimize this code</span>
-              </button>
-            </div>
-          </div>
-        {:else}
-          {#each $workspaceStore.aiMessages as msg}
-          <div class="chat-row {msg.sender}">
-            {#if msg.sender === 'ai'}
-              <div class="chat-avatar ai-avatar"><Sparkles size={9} /></div>
             {:else}
-              <div class="chat-avatar user-avatar">DEV</div>
-            {/if}
-            <div class="chat-msg-block {msg.sender}">
-              <div class="chat-msg-meta">
-                <span class="chat-msg-sender">{msg.sender === 'ai' ? 'HARDCOREAI' : 'You'}</span>
-                <span class="chat-msg-time">{msg.timestamp}</span>
-              </div>
-              <div class="chat-msg-bubble {msg.sender}">
-                <!-- Live agent trace: thinking, function-call cards, code cards -->
-                {#if msg.steps && msg.steps.length > 0}
-                  <div class="agent-trace">
-                    {#each msg.steps as step}
-                      {#if step.kind === 'think'}
-                        <div class="agent-think-step">
-                          <span class="agent-think-icon">💭</span>
-                          <span class="agent-think-text-inline">{step.text}</span>
-                        </div>
-                      {:else if step.kind === 'call'}
-                        <div class="agent-call-card">
-                          <span class="agent-call-icon"><Sparkles size={11} /></span>
-                          <span class="agent-call-name">{step.name}</span>
-                          <span class="agent-call-args">({step.args ? Object.entries(step.args).map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join(', ') : ''})</span>
-                        </div>
-                      {:else if step.kind === 'code'}
-                        <div class="agent-code-card">
-                          <div class="agent-code-head">
-                            <span class="agent-code-file">{step.path}</span>
-                            <span class="agent-code-badge">generated</span>
-                          </div>
-                          <pre class="agent-code-body"><code>{step.code}</code></pre>
-                        </div>
-                      {:else if step.kind === 'proposal'}
-                        <div class="agent-proposal-card" class:allowed={step.decision === 'allowed'} class:rejected={step.decision === 'rejected'}>
-                          <div class="agent-proposal-head">
-                            <span class="agent-proposal-file">{step.deleted ? '🗑 ' : ''}{step.path}</span>
-                            <span class="agent-proposal-badge {step.decision}">
-                              {step.decision === 'allowed' ? '✓ Applied' : step.decision === 'rejected' ? '✕ Rejected' : 'Proposed change'}
-                            </span>
-                          </div>
-                          <pre class="agent-diff-body"><code>{#each computeProposalDiff(step.old || '', step.deleted ? '' : (step.code || '')) as line}<span class="diff-line {line.type}">{line.text}</span>{"\n"}{/each}</code></pre>
-                          {#if (step.decision || 'pending') === 'pending'}
-                            <div class="agent-proposal-actions">
-                              <button class="proposal-btn allow" onclick={() => actions.approveProposal(msg.id, step.path || '')}>Allow</button>
-                              <button class="proposal-btn reject" onclick={() => actions.rejectProposal(msg.id, step.path || '')}>Reject</button>
-                            </div>
-                          {/if}
-                        </div>
-                      {:else if step.kind === 'result'}
-                        {#if step.result && step.result.includes('=== Unified Diff ===')}
-                          <div class="agent-result-line">↳ Code edits applied:</div>
-                          <div class="agent-diff-card">
-                            <pre class="agent-diff-body"><code>{#each parseDiff(step.result) as line}<span class="diff-line {line.type}">{line.text}</span>{"\n"}{/each}</code></pre>
-                          </div>
-                        {:else}
-                          <div class="agent-result-line">↳ {step.result}</div>
-                        {/if}
-                      {:else if step.kind === 'note'}
-                        <div class="agent-note-line">{step.text}</div>
-                      {:else if step.kind === 'error'}
-                        <div class="agent-error-line">⚠ {step.text}</div>
-                      {/if}
-                    {/each}
-                  </div>
-                {/if}
-
-                <!-- Collapsible streamed thinking (italic) -->
-                {#if msg.thinking && msg.thinking.trim()}
-                  <div class="agent-think-block" class:collapsed={msg.thinkingCollapsed}>
-                    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-                    <div class="agent-think-header" onclick={() => { msg.thinkingCollapsed = !msg.thinkingCollapsed; }}>
-                      <span class="agent-think-caret">{msg.thinkingCollapsed ? '▸' : '▾'}</span>
-                      <span class="agent-think-label">{msg.thinkingDone ? 'Thought' : 'Thinking…'}</span>
+              {#each $workspaceStore.aiMessages as msg}
+                <div class="chat-row {msg.sender}">
+                  {#if msg.sender === "ai"}
+                    <div class="chat-avatar ai-avatar">
+                      <Sparkles size={9} />
                     </div>
-                    {#if !msg.thinkingCollapsed}
-                      <p class="agent-think-text">{msg.thinking}</p>
-                    {/if}
-                  </div>
-                {/if}
-
-                {#if msg.text && msg.text.trim()}
-                  <div class="chat-markdown">{@html renderMarkdown(msg.text)}</div>
-                {/if}
-
-                {#if msg.streaming}
-                  <div class="agent-work-indicator" aria-live="polite">
-                    <div class="agent-work-mark">
-                      <Sparkles size={12} />
-                      <span></span>
-                    </div>
-                    <div class="agent-work-body">
-                      <div class="agent-work-label">{agentWorkingPhrase}</div>
-                      <div class="agent-work-meter"><span></span></div>
-                    </div>
-                  </div>
-                {/if}
-
-                {#if msg.status === 'waiting_for_user' && msg.options && msg.options.length > 0}
-                  {#if msg.inputType === 'radio'}
-                    <div class="chat-radio-list">
-                      {#each msg.options as option}
-                        <label class="chat-radio-item" class:disabled={msg.submitted}>
-                          <input 
-                            type="radio" 
-                            name="radio-{msg.id}" 
-                            value={option} 
-                            disabled={msg.submitted}
-                            checked={msg.submitted ? msg.selectedValue === option : chatRadioSelections[msg.id] === option}
-                            onchange={() => { if (!msg.submitted) chatRadioSelections[msg.id] = option; }}
-                          />
-                          <span class="custom-radio"></span>
-                          <span class="radio-label">{option}</span>
-                        </label>
-                      {/each}
-                    </div>
-                    {#if !msg.submitted}
-                      <button 
-                        class="chat-submit-choice-btn" 
-                        disabled={!chatRadioSelections[msg.id]}
-                        onclick={() => {
-                          const val = chatRadioSelections[msg.id];
-                          if (val) {
-                            msg.selectedValue = val;
-                            actions.sendAiMessage(val);
-                          }
-                        }}
-                      >
-                        Submit Choice
-                      </button>
-                    {:else}
-                      <div class="chat-submitted-badge">
-                        Submitted: <strong>{msg.selectedValue || chatRadioSelections[msg.id]}</strong>
-                      </div>
-                    {/if}
                   {:else}
-                    {#if msg.inputType === 'checkbox'}
-                      <div class="chat-checkbox-list">
-                        {#each msg.options as option}
-                          {@const isChecked = msg.submitted 
-                            ? (Array.isArray(msg.selectedValue) ? msg.selectedValue.includes(option) : msg.selectedValue === option)
-                            : (chatCheckboxSelections[msg.id] || []).includes(option)}
-                          <label class="chat-checkbox-item" class:disabled={msg.submitted}>
-                            <input 
-                              type="checkbox" 
-                              value={option} 
-                              disabled={msg.submitted}
-                              checked={isChecked}
-                              onchange={(e) => {
-                                if (msg.submitted) return;
-                                const arr = chatCheckboxSelections[msg.id] || [];
-                                if (e.currentTarget.checked) {
-                                  chatCheckboxSelections[msg.id] = [...arr, option];
-                                } else {
-                                  chatCheckboxSelections[msg.id] = arr.filter(o => o !== option);
-                                }
-                              }}
-                            />
-                            <span class="custom-checkbox"></span>
-                            <span class="checkbox-label">{option}</span>
-                          </label>
-                        {/each}
-                      </div>
-                      {#if !msg.submitted}
-                        <button 
-                          class="chat-submit-choice-btn" 
-                          disabled={!(chatCheckboxSelections[msg.id] && chatCheckboxSelections[msg.id].length > 0)}
-                          onclick={() => {
-                            const val = chatCheckboxSelections[msg.id] || [];
-                            msg.selectedValue = val;
-                            actions.sendAiMessage(val.join(", "));
-                          }}
-                        >
-                          Submit Selection
-                        </button>
-                      {:else}
-                        <div class="chat-submitted-badge">
-                          Submitted: <strong>
-                            {Array.isArray(msg.selectedValue) ? msg.selectedValue.join(", ") : msg.selectedValue}
-                          </strong>
+                    <div class="chat-avatar user-avatar">DEV</div>
+                  {/if}
+                  <div class="chat-msg-block {msg.sender}">
+                    <div class="chat-msg-meta">
+                      <span class="chat-msg-sender"
+                        >{msg.sender === "ai" ? "HARDCOREAI" : "You"}</span
+                      >
+                      <span class="chat-msg-time">{msg.timestamp}</span>
+                    </div>
+                    <div class="chat-msg-bubble {msg.sender}">
+                      <!-- Live agent trace: thinking, function-call cards, code cards -->
+                      {#if msg.steps && msg.steps.length > 0}
+                        <div class="agent-trace">
+                          {#each msg.steps as step}
+                            {#if step.kind === "think"}
+                              <div class="agent-think-step">
+                                <span class="agent-think-icon">💭</span>
+                                <span class="agent-think-text-inline"
+                                  >{step.text}</span
+                                >
+                              </div>
+                            {:else if step.kind === "call"}
+                              <div class="agent-call-card">
+                                <span class="agent-call-icon"
+                                  ><Sparkles size={11} /></span
+                                >
+                                <span class="agent-call-name">{step.name}</span>
+                                <span class="agent-call-args"
+                                  >({step.args
+                                    ? Object.entries(step.args)
+                                        .map(
+                                          ([k, v]) =>
+                                            `${k}: ${JSON.stringify(v)}`,
+                                        )
+                                        .join(", ")
+                                    : ""})</span
+                                >
+                              </div>
+                            {:else if step.kind === "code"}
+                              <div class="agent-code-card">
+                                <div class="agent-code-head">
+                                  <span class="agent-code-file"
+                                    >{step.path}</span
+                                  >
+                                  <span class="agent-code-badge">generated</span
+                                  >
+                                </div>
+                                <pre class="agent-code-body"><code
+                                    >{step.code}</code
+                                  ></pre>
+                              </div>
+                            {:else if step.kind === "proposal"}
+                              <div
+                                class="agent-proposal-card"
+                                class:allowed={step.decision === "allowed"}
+                                class:rejected={step.decision === "rejected"}
+                              >
+                                <div class="agent-proposal-head">
+                                  <span class="agent-proposal-file"
+                                    >{step.deleted
+                                      ? "🗑 "
+                                      : ""}{step.path}</span
+                                  >
+                                  <span
+                                    class="agent-proposal-badge {step.decision}"
+                                  >
+                                    {step.decision === "allowed"
+                                      ? "✓ Applied"
+                                      : step.decision === "rejected"
+                                        ? "✕ Rejected"
+                                        : "Proposed change"}
+                                  </span>
+                                </div>
+                                <pre class="agent-diff-body"><code
+                                    >{#each computeProposalDiff(step.old || "", step.deleted ? "" : step.code || "") as line}<span
+                                        class="diff-line {line.type}"
+                                        >{line.text}</span
+                                      >{"\n"}{/each}</code
+                                  ></pre>
+                                {#if (step.decision || "pending") === "pending"}
+                                  <div class="agent-proposal-actions">
+                                    <button
+                                      class="proposal-btn allow"
+                                      onclick={() =>
+                                        actions.approveProposal(
+                                          msg.id,
+                                          step.path || "",
+                                        )}>Allow</button
+                                    >
+                                    <button
+                                      class="proposal-btn reject"
+                                      onclick={() =>
+                                        actions.rejectProposal(
+                                          msg.id,
+                                          step.path || "",
+                                        )}>Reject</button
+                                    >
+                                  </div>
+                                {/if}
+                              </div>
+                            {:else if step.kind === "result"}
+                              {#if step.result && step.result.includes("=== Unified Diff ===")}
+                                <div class="agent-result-line">
+                                  ↳ Code edits applied:
+                                </div>
+                                <div class="agent-diff-card">
+                                  <pre class="agent-diff-body"><code
+                                      >{#each parseDiff(step.result) as line}<span
+                                          class="diff-line {line.type}"
+                                          >{line.text}</span
+                                        >{"\n"}{/each}</code
+                                    ></pre>
+                                </div>
+                              {:else}
+                                <div class="agent-result-line">
+                                  ↳ {step.result}
+                                </div>
+                              {/if}
+                            {:else if step.kind === "note"}
+                              <div class="agent-note-line">{step.text}</div>
+                            {:else if step.kind === "error"}
+                              <div class="agent-error-line">⚠ {step.text}</div>
+                            {/if}
+                          {/each}
                         </div>
                       {/if}
-                    {:else}
-                      {#if msg.inputType === 'select'}
-                        <div class="chat-select-wrapper">
-                          <select 
-                            class="chat-select-dropdown"
-                            disabled={msg.submitted}
-                            value={msg.submitted ? msg.selectedValue : (chatDropdownSelections[msg.id] || "")}
-                            onchange={(e) => { if (!msg.submitted) chatDropdownSelections[msg.id] = e.currentTarget.value; }}
-                          >
-                            <option value="" disabled>-- Select Option --</option>
-                            {#each msg.options as option}
-                              <option value={option}>{option}</option>
-                            {/each}
-                          </select>
-                        </div>
-                        {#if !msg.submitted}
-                          <button 
-                            class="chat-submit-choice-btn" 
-                            disabled={!chatDropdownSelections[msg.id]}
+
+                      <!-- Collapsible streamed thinking (italic) -->
+                      {#if msg.thinking && msg.thinking.trim()}
+                        <div
+                          class="agent-think-block"
+                          class:collapsed={msg.thinkingCollapsed}
+                        >
+                          <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+                          <div
+                            class="agent-think-header"
                             onclick={() => {
-                              const val = chatDropdownSelections[msg.id];
-                              if (val) {
-                                msg.selectedValue = val;
-                                actions.sendAiMessage(val);
-                              }
+                              msg.thinkingCollapsed = !msg.thinkingCollapsed;
                             }}
                           >
-                            Submit Choice
-                          </button>
-                        {:else}
-                          <div class="chat-submitted-badge">
-                            Submitted: <strong>{msg.selectedValue || chatDropdownSelections[msg.id]}</strong>
+                            <span class="agent-think-caret"
+                              >{msg.thinkingCollapsed ? "▸" : "▾"}</span
+                            >
+                            <span class="agent-think-label"
+                              >{msg.thinkingDone
+                                ? "Thought"
+                                : "Thinking…"}</span
+                            >
                           </div>
-                        {/if}
-                      {:else}
-                        <!-- inputType === 'buttons' or default fallback -->
-                        {#if !msg.submitted}
-                          <div class="chat-options-container">
+                          {#if !msg.thinkingCollapsed}
+                            <p class="agent-think-text">{msg.thinking}</p>
+                          {/if}
+                        </div>
+                      {/if}
+
+                      {#if msg.text && msg.text.trim()}
+                        <div class="chat-markdown">
+                          {@html renderMarkdown(msg.text)}
+                        </div>
+                      {/if}
+
+                      {#if msg.streaming}
+                        <div class="agent-work-indicator" aria-live="polite">
+                          <div class="agent-work-mark">
+                            <Sparkles size={12} />
+                            <span></span>
+                          </div>
+                          <div class="agent-work-body">
+                            <div class="agent-work-label">
+                              {agentWorkingPhrase}
+                            </div>
+                            <div class="agent-work-meter"><span></span></div>
+                          </div>
+                        </div>
+                      {/if}
+
+                      {#if msg.status === "waiting_for_user" && msg.options && msg.options.length > 0}
+                        {#if msg.inputType === "radio"}
+                          <div class="chat-radio-list">
                             {#each msg.options as option}
-                              {#if option.toLowerCase().startsWith('other')}
-                                <button class="chat-option-btn chat-option-other" onclick={() => { chatOtherOpen[msg.id] = !chatOtherOpen[msg.id]; }}>
-                                  {option}
-                                </button>
-                              {:else}
-                                <button class="chat-option-btn" onclick={() => {
-                                  msg.selectedValue = option;
-                                  actions.sendAiMessage(option);
-                                }}>
-                                  {option}
-                                </button>
-                              {/if}
+                              <label
+                                class="chat-radio-item"
+                                class:disabled={msg.submitted}
+                              >
+                                <input
+                                  type="radio"
+                                  name="radio-{msg.id}"
+                                  value={option}
+                                  disabled={msg.submitted}
+                                  checked={msg.submitted
+                                    ? msg.selectedValue === option
+                                    : chatRadioSelections[msg.id] === option}
+                                  onchange={() => {
+                                    if (!msg.submitted)
+                                      chatRadioSelections[msg.id] = option;
+                                  }}
+                                />
+                                <span class="custom-radio"></span>
+                                <span class="radio-label">{option}</span>
+                              </label>
                             {/each}
                           </div>
-                          {#if chatOtherOpen[msg.id]}
-                            <div class="chat-other-input-row">
-                              <input
-                                type="text"
-                                class="chat-other-input"
-                                placeholder="Describe it yourself…"
-                                bind:value={chatOtherText[msg.id]}
-                                onkeydown={(e) => {
-                                  if (e.key === 'Enter' && chatOtherText[msg.id]?.trim()) {
-                                    msg.selectedValue = chatOtherText[msg.id].trim();
-                                    actions.sendAiMessage(chatOtherText[msg.id].trim());
-                                  }
-                                }}
-                              />
-                              <button
-                                class="chat-submit-choice-btn"
-                                disabled={!chatOtherText[msg.id]?.trim()}
-                                onclick={() => {
-                                  const v = chatOtherText[msg.id]?.trim();
-                                  if (v) { msg.selectedValue = v; actions.sendAiMessage(v); }
-                                }}
+                          {#if !msg.submitted}
+                            <button
+                              class="chat-submit-choice-btn"
+                              disabled={!chatRadioSelections[msg.id]}
+                              onclick={() => {
+                                const val = chatRadioSelections[msg.id];
+                                if (val) {
+                                  msg.selectedValue = val;
+                                  actions.sendAiMessage(val);
+                                }
+                              }}
+                            >
+                              Submit Choice
+                            </button>
+                          {:else}
+                            <div class="chat-submitted-badge">
+                              Submitted: <strong
+                                >{msg.selectedValue ||
+                                  chatRadioSelections[msg.id]}</strong
                               >
-                                Send
-                              </button>
+                            </div>
+                          {/if}
+                        {:else if msg.inputType === "checkbox"}
+                          <div class="chat-checkbox-list">
+                            {#each msg.options as option}
+                              {@const isChecked = msg.submitted
+                                ? Array.isArray(msg.selectedValue)
+                                  ? msg.selectedValue.includes(option)
+                                  : msg.selectedValue === option
+                                : (
+                                    chatCheckboxSelections[msg.id] || []
+                                  ).includes(option)}
+                              <label
+                                class="chat-checkbox-item"
+                                class:disabled={msg.submitted}
+                              >
+                                <input
+                                  type="checkbox"
+                                  value={option}
+                                  disabled={msg.submitted}
+                                  checked={isChecked}
+                                  onchange={(e) => {
+                                    if (msg.submitted) return;
+                                    const arr =
+                                      chatCheckboxSelections[msg.id] || [];
+                                    if (e.currentTarget.checked) {
+                                      chatCheckboxSelections[msg.id] = [
+                                        ...arr,
+                                        option,
+                                      ];
+                                    } else {
+                                      chatCheckboxSelections[msg.id] =
+                                        arr.filter((o) => o !== option);
+                                    }
+                                  }}
+                                />
+                                <span class="custom-checkbox"></span>
+                                <span class="checkbox-label">{option}</span>
+                              </label>
+                            {/each}
+                          </div>
+                          {#if !msg.submitted}
+                            <button
+                              class="chat-submit-choice-btn"
+                              disabled={!(
+                                chatCheckboxSelections[msg.id] &&
+                                chatCheckboxSelections[msg.id].length > 0
+                              )}
+                              onclick={() => {
+                                const val =
+                                  chatCheckboxSelections[msg.id] || [];
+                                msg.selectedValue = val;
+                                actions.sendAiMessage(val.join(", "));
+                              }}
+                            >
+                              Submit Selection
+                            </button>
+                          {:else}
+                            <div class="chat-submitted-badge">
+                              Submitted: <strong>
+                                {Array.isArray(msg.selectedValue)
+                                  ? msg.selectedValue.join(", ")
+                                  : msg.selectedValue}
+                              </strong>
+                            </div>
+                          {/if}
+                        {:else if msg.inputType === "select"}
+                          <div class="chat-select-wrapper">
+                            <select
+                              class="chat-select-dropdown"
+                              disabled={msg.submitted}
+                              value={msg.submitted
+                                ? msg.selectedValue
+                                : chatDropdownSelections[msg.id] || ""}
+                              onchange={(e) => {
+                                if (!msg.submitted)
+                                  chatDropdownSelections[msg.id] =
+                                    e.currentTarget.value;
+                              }}
+                            >
+                              <option value="" disabled
+                                >-- Select Option --</option
+                              >
+                              {#each msg.options as option}
+                                <option value={option}>{option}</option>
+                              {/each}
+                            </select>
+                          </div>
+                          {#if !msg.submitted}
+                            <button
+                              class="chat-submit-choice-btn"
+                              disabled={!chatDropdownSelections[msg.id]}
+                              onclick={() => {
+                                const val = chatDropdownSelections[msg.id];
+                                if (val) {
+                                  msg.selectedValue = val;
+                                  actions.sendAiMessage(val);
+                                }
+                              }}
+                            >
+                              Submit Choice
+                            </button>
+                          {:else}
+                            <div class="chat-submitted-badge">
+                              Submitted: <strong
+                                >{msg.selectedValue ||
+                                  chatDropdownSelections[msg.id]}</strong
+                              >
                             </div>
                           {/if}
                         {:else}
-                          <div class="chat-submitted-badge">
-                            Submitted: <strong>{msg.selectedValue}</strong>
-                          </div>
+                          <!-- inputType === 'buttons' or default fallback -->
+                          {#if !msg.submitted}
+                            <div class="chat-options-container">
+                              {#each msg.options as option}
+                                {#if option.toLowerCase().startsWith("other")}
+                                  <button
+                                    class="chat-option-btn chat-option-other"
+                                    onclick={() => {
+                                      chatOtherOpen[msg.id] =
+                                        !chatOtherOpen[msg.id];
+                                    }}
+                                  >
+                                    {option}
+                                  </button>
+                                {:else}
+                                  <button
+                                    class="chat-option-btn"
+                                    onclick={() => {
+                                      msg.selectedValue = option;
+                                      actions.sendAiMessage(option);
+                                    }}
+                                  >
+                                    {option}
+                                  </button>
+                                {/if}
+                              {/each}
+                            </div>
+                            {#if chatOtherOpen[msg.id]}
+                              <div class="chat-other-input-row">
+                                <input
+                                  type="text"
+                                  class="chat-other-input"
+                                  placeholder="Describe it yourself…"
+                                  bind:value={chatOtherText[msg.id]}
+                                  onkeydown={(e) => {
+                                    if (
+                                      e.key === "Enter" &&
+                                      chatOtherText[msg.id]?.trim()
+                                    ) {
+                                      msg.selectedValue =
+                                        chatOtherText[msg.id].trim();
+                                      actions.sendAiMessage(
+                                        chatOtherText[msg.id].trim(),
+                                      );
+                                    }
+                                  }}
+                                />
+                                <button
+                                  class="chat-submit-choice-btn"
+                                  disabled={!chatOtherText[msg.id]?.trim()}
+                                  onclick={() => {
+                                    const v = chatOtherText[msg.id]?.trim();
+                                    if (v) {
+                                      msg.selectedValue = v;
+                                      actions.sendAiMessage(v);
+                                    }
+                                  }}
+                                >
+                                  Send
+                                </button>
+                              </div>
+                            {/if}
+                          {:else}
+                            <div class="chat-submitted-badge">
+                              Submitted: <strong>{msg.selectedValue}</strong>
+                            </div>
+                          {/if}
                         {/if}
                       {/if}
-                    {/if}
-                  {/if}
-                {/if}
 
-                {#if msg.status === 'waiting_for_approval'}
-                  <div class="chat-approval-gate-card">
-                    <div class="approval-gate-header">
-                      <div class="approval-icon-pulse">
-                        <Sparkles size={14} />
-                      </div>
-                      <div class="approval-header-texts">
-                        <div class="approval-gate-title">PLAN APPROVAL REQUIRED</div>
-                        <div class="approval-gate-subtitle">Confirm plan to execute code updates</div>
-                      </div>
-                    </div>
-                    
-                    {#if msg.plan}
-                      <div class="chat-plan-steps">
-                        {#each msg.plan.split('\n').filter(Boolean) as step}
-                          <div class="plan-step-item">
-                            <span class="plan-step-dot"></span>
-                            <span class="plan-step-text">{step}</span>
+                      {#if msg.status === "waiting_for_approval"}
+                        <div class="chat-approval-gate-card">
+                          <div class="approval-gate-header">
+                            <div class="approval-icon-pulse">
+                              <Sparkles size={14} />
+                            </div>
+                            <div class="approval-header-texts">
+                              <div class="approval-gate-title">
+                                PLAN APPROVAL REQUIRED
+                              </div>
+                              <div class="approval-gate-subtitle">
+                                Confirm plan to execute code updates
+                              </div>
+                            </div>
                           </div>
-                        {/each}
-                      </div>
-                    {/if}
-                    
-                    {#if !msg.submitted}
-                      <div class="chat-approval-actions">
-                        <button class="chat-approve-btn-premium" onclick={() => {
-                          msg.selectedValue = "APPROVED";
-                          actions.sendAiMessage("APPROVE");
-                        }}>
-                          Accept & Generate
-                        </button>
-                        <button class="chat-reject-btn" onclick={() => {
-                          aiInput = "Reject: I would like you to change...";
-                          const inp = document.querySelector(".chat-input-field") as HTMLInputElement;
-                          if (inp) inp.focus();
-                        }}>
-                          Reject & Revise
-                        </button>
-                      </div>
-                    {:else}
-                      <div class="chat-submitted-badge plan-approved">
-                        <span class="status-dot active"></span>
-                        <span>Plan Approved & Executed</span>
-                      </div>
-                    {/if}
+
+                          {#if msg.plan}
+                            <div class="chat-plan-steps">
+                              {#each msg.plan
+                                .split("\n")
+                                .filter(Boolean) as step}
+                                <div class="plan-step-item">
+                                  <span class="plan-step-dot"></span>
+                                  <span class="plan-step-text">{step}</span>
+                                </div>
+                              {/each}
+                            </div>
+                          {/if}
+
+                          {#if !msg.submitted}
+                            <div class="chat-approval-actions">
+                              <button
+                                class="chat-approve-btn-premium"
+                                onclick={() => {
+                                  msg.selectedValue = "APPROVED";
+                                  actions.sendAiMessage("APPROVE");
+                                }}
+                              >
+                                Accept & Generate
+                              </button>
+                              <button
+                                class="chat-reject-btn"
+                                onclick={() => {
+                                  aiInput =
+                                    "Reject: I would like you to change...";
+                                  const inp = document.querySelector(
+                                    ".chat-input-field",
+                                  ) as HTMLInputElement;
+                                  if (inp) inp.focus();
+                                }}
+                              >
+                                Reject & Revise
+                              </button>
+                            </div>
+                          {:else}
+                            <div class="chat-submitted-badge plan-approved">
+                              <span class="status-dot active"></span>
+                              <span>Plan Approved & Executed</span>
+                            </div>
+                          {/if}
+                        </div>
+                      {/if}
+                    </div>
                   </div>
-                {/if}
-              </div>
-            </div>
-          </div>
-        {/each}
-        {/if}
+                </div>
+              {/each}
+            {/if}
 
-        {#if $workspaceStore.aiWaiting}
-          <div class="chat-row ai">
-            <div class="chat-avatar ai-avatar"><Sparkles size={9} /></div>
-            <div class="chat-msg-block ai">
-              <div class="chat-msg-meta">
-                <span class="chat-msg-sender">HARDCOREAI</span>
+            {#if $workspaceStore.aiWaiting}
+              <div class="chat-row ai">
+                <div class="chat-avatar ai-avatar"><Sparkles size={9} /></div>
+                <div class="chat-msg-block ai">
+                  <div class="chat-msg-meta">
+                    <span class="chat-msg-sender">HARDCOREAI</span>
+                  </div>
+                  <div class="chat-msg-bubble ai waiting-bubble">
+                    <span class="dot"></span>
+                    <span class="dot"></span>
+                    <span class="dot"></span>
+                  </div>
+                </div>
               </div>
-              <div class="chat-msg-bubble ai waiting-bubble">
-                <span class="dot"></span>
-                <span class="dot"></span>
-                <span class="dot"></span>
-              </div>
-            </div>
+            {/if}
           </div>
-        {/if}
-      </div>
 
-      <!-- Input Box -->
-      <div class="chat-input-zone">
-        {#if activeAgentStreaming}
-          <div class="chat-stop-generating-row" style="display: flex; justify-content: center; margin-bottom: 8px;">
-            <button
-              type="button"
-              class="stop-generating-btn"
-              onclick={() => actions.cancelAiMessage()}
-              style="display: flex; align-items: center; gap: 6px; padding: 6px 12px; font-size: 0.72rem; font-weight: 600; border-radius: var(--radius-sm); border: 1px solid var(--border-color); background: var(--bg-tertiary); color: var(--text-active); cursor: pointer; transition: all 0.2s;"
+          <!-- Input Box -->
+          <div class="chat-input-zone">
+            {#if activeAgentStreaming}
+              <div
+                class="chat-stop-generating-row"
+                style="display: flex; justify-content: center; margin-bottom: 8px;"
+              >
+                <button
+                  type="button"
+                  class="stop-generating-btn"
+                  onclick={() => actions.cancelAiMessage()}
+                  style="display: flex; align-items: center; gap: 6px; padding: 6px 12px; font-size: 0.72rem; font-weight: 600; border-radius: var(--radius-sm); border: 1px solid var(--border-color); background: var(--bg-tertiary); color: var(--text-active); cursor: pointer; transition: all 0.2s;"
+                >
+                  <div
+                    style="width: 8px; height: 8px; background: var(--accent-error); border-radius: 1px;"
+                  ></div>
+                  <span>Stop Generating</span>
+                </button>
+              </div>
+            {/if}
+            {#if queuedAiFollowup}
+              <div class="chat-followup-queued">
+                <span class="chat-followup-dot"></span>
+                <span class="chat-followup-label">Follow-up queued</span>
+                <span class="chat-followup-text">{queuedAiFollowup}</span>
+                <button
+                  type="button"
+                  class="chat-followup-clear"
+                  title="Clear queued follow-up"
+                  onclick={() => actions.clearQueuedAiFollowup()}
+                >
+                  <X size={10} />
+                </button>
+              </div>
+            {/if}
+            <form
+              class="chat-input-form"
+              class:streaming={activeAgentStreaming}
+              onsubmit={handleAiSend}
             >
-              <div style="width: 8px; height: 8px; background: var(--accent-error); border-radius: 1px;"></div>
-              <span>Stop Generating</span>
-            </button>
+              <input
+                type="text"
+                class="chat-input-field"
+                placeholder={activeAgentStreaming
+                  ? "Type a follow-up while HARDCOREAI works..."
+                  : "Ask about registers, RAG docs, or request a code fix..."}
+                bind:value={aiInput}
+              />
+              <button
+                type="submit"
+                class="chat-send-btn"
+                class:followup={activeAgentStreaming}
+                disabled={!aiInput.trim()}
+                title={activeAgentStreaming ? "Queue follow-up" : "Send"}
+              >
+                <Send size={13} />
+              </button>
+            </form>
+            <div class="chat-input-hint">
+              {activeAgentStreaming
+                ? "Agent running · next prompt will send as a follow-up"
+                : "Press Enter to send"}
+            </div>
           </div>
-        {/if}
-        {#if queuedAiFollowup}
-          <div class="chat-followup-queued">
-            <span class="chat-followup-dot"></span>
-            <span class="chat-followup-label">Follow-up queued</span>
-            <span class="chat-followup-text">{queuedAiFollowup}</span>
-            <button type="button" class="chat-followup-clear" title="Clear queued follow-up" onclick={() => actions.clearQueuedAiFollowup()}>
-              <X size={10} />
-            </button>
-          </div>
-        {/if}
-        <form class="chat-input-form" class:streaming={activeAgentStreaming} onsubmit={handleAiSend}>
-          <input
-            type="text"
-            class="chat-input-field"
-            placeholder={activeAgentStreaming ? "Type a follow-up while HARDCOREAI works..." : "Ask about registers, RAG docs, or request a code fix..."}
-            bind:value={aiInput}
-          />
-          <button type="submit" class="chat-send-btn" class:followup={activeAgentStreaming} disabled={!aiInput.trim()} title={activeAgentStreaming ? "Queue follow-up" : "Send"}>
-            <Send size={13} />
-          </button>
-        </form>
-        <div class="chat-input-hint">{activeAgentStreaming ? "Agent running · next prompt will send as a follow-up" : "Press Enter to send"}</div>
-      </div>
-      </section>
-    </aside>
+        </section>
+      </aside>
 
-    <!-- AI Panel Collapsed Sidebar Strip -->
-    {#if !aiOpen}
-      <!-- svelte-ignore a11y-click-events-have-key-events -->
-      <!-- svelte-ignore a11y-no-static-element-interactions -->
-      <div class="ai-collapsed-strip" onclick={() => (aiOpen = true)} title="Open AI Copilot">
-        <div class="ai-collapsed-icon"><Sparkles size={14} /></div>
-        <div class="ai-collapsed-label">AI COPILOT</div>
-        <div class="ai-collapsed-dot"></div>
-      </div>
-    {/if}
+      <!-- AI Panel Collapsed Sidebar Strip -->
+      {#if !aiOpen}
+        <!-- svelte-ignore a11y-click-events-have-key-events -->
+        <!-- svelte-ignore a11y-no-static-element-interactions -->
+        <div
+          class="ai-collapsed-strip"
+          onclick={() => (aiOpen = true)}
+          title="Open AI Copilot"
+        >
+          <div class="ai-collapsed-icon"><Sparkles size={14} /></div>
+          <div class="ai-collapsed-label">AI COPILOT</div>
+          <div class="ai-collapsed-dot"></div>
+        </div>
+      {/if}
     </div>
 
     <footer class="hardcoreai-status-bar">
       <div class="status-bar-left">
-        <button class="status-bar-item branch-status active-branch" type="button" onclick={() => actions.setActiveSidebarTab("git")} title="Open source control">
+        <button
+          class="status-bar-item branch-status active-branch"
+          type="button"
+          onclick={() => actions.setActiveSidebarTab("git")}
+          title="Open source control"
+        >
           <GitBranch size={13} />
           <span class="branch-name">main*</span>
         </button>
-        <button class="status-bar-item" type="button" onclick={() => actions.setActiveSidebarTab("debug")} title="Open diagnostics">
+        <button
+          class="status-bar-item"
+          type="button"
+          onclick={() => actions.setActiveSidebarTab("debug")}
+          title="Open diagnostics"
+        >
           <Bug size={13} />
           <span>0</span>
         </button>
-        <button class="status-bar-item" type="button" onclick={() => actions.setActiveSidebarTab("debug")} title="Warnings">
+        <button
+          class="status-bar-item"
+          type="button"
+          onclick={() => actions.setActiveSidebarTab("debug")}
+          title="Warnings"
+        >
           <AlertTriangle size={13} />
           <span>0</span>
         </button>
         <button
-          class="status-bar-item probe-status {$workspaceStore.serialConnected ? 'connected' : ''}"
+          class="status-bar-item probe-status {$workspaceStore.serialConnected
+            ? 'connected'
+            : ''}"
           type="button"
           onclick={() => actions.toggleSerialConnection()}
           title="Toggle ST-Link probe connection"
@@ -2357,14 +2909,25 @@
           <span class="ready-dot-glow"></span>
           <span>{$workspaceStore.selectedProbe} (SWD)</span>
         </button>
-        <button class="status-bar-item" type="button" onclick={() => { showConfigurator = true; aiOpen = true; }} title="Open target configurator">
+        <button
+          class="status-bar-item"
+          type="button"
+          onclick={() => {
+            showConfigurator = true;
+            aiOpen = true;
+          }}
+          title="Open target configurator"
+        >
           <Cpu size={13} />
           <span>{$workspaceStore.selectedBoard}RETx</span>
         </button>
         <button
           class="status-bar-item"
           type="button"
-          onclick={() => { actions.setTerminalOpen(true); actions.setBottomTab("terminal"); }}
+          onclick={() => {
+            actions.setTerminalOpen(true);
+            actions.setBottomTab("terminal");
+          }}
           title="Open serial terminal"
         >
           <MonitorPlay size={13} />
@@ -2373,11 +2936,24 @@
       </div>
 
       <div class="status-bar-right">
-        <button class="status-bar-item" type="button" onclick={() => actions.setTerminalOpen(!$workspaceStore.terminalOpen)} title="Toggle bottom panel">
+        <button
+          class="status-bar-item"
+          type="button"
+          onclick={() => actions.setTerminalOpen(!$workspaceStore.terminalOpen)}
+          title="Toggle bottom panel"
+        >
           <Sliders size={13} />
           <span>{$workspaceStore.terminalOpen ? "Panel" : "Panel Hidden"}</span>
         </button>
-        <button class="status-bar-item" type="button" onclick={() => { actions.setTerminalOpen(true); actions.setBottomTab("registers"); }} title="Open register view">
+        <button
+          class="status-bar-item"
+          type="button"
+          onclick={() => {
+            actions.setTerminalOpen(true);
+            actions.setBottomTab("registers");
+          }}
+          title="Open register view"
+        >
           <Database size={13} />
           <span>Ln {currentLine}, Col {currentColumn}</span>
         </button>
@@ -2385,11 +2961,25 @@
         <span class="status-bar-item text-only">UTF-8</span>
         <span class="status-bar-item text-only">LF</span>
         <span class="status-bar-item text-only">C</span>
-        <button class="status-bar-item ready-status" type="button" onclick={() => actions.pollDeviceStatus()} title="Refresh device status">
+        <button
+          class="status-bar-item ready-status"
+          type="button"
+          onclick={() => actions.pollDeviceStatus()}
+          title="Refresh device status"
+        >
           <span class="ready-dot-glow"></span>
-          <span>{$workspaceStore.deviceStatus.connected ? "Ready" : "No Device"}</span>
+          <span
+            >{$workspaceStore.deviceStatus.connected
+              ? "Ready"
+              : "No Device"}</span
+          >
         </button>
-        <button class="status-bar-item icon-only" type="button" onclick={() => actions.setActiveSidebarTab("boards")} title="Board settings">
+        <button
+          class="status-bar-item icon-only"
+          type="button"
+          onclick={() => actions.setActiveSidebarTab("boards")}
+          title="Board settings"
+        >
           <Settings size={13} />
         </button>
       </div>
@@ -2401,39 +2991,53 @@
 {#if deleteConfirmModal.show}
   <!-- svelte-ignore a11y-click-events-have-key-events -->
   <!-- svelte-ignore a11y-no-static-element-interactions -->
-  <div class="delete-modal-backdrop" onclick={() => deleteConfirmModal.show = false}>
+  <div
+    class="delete-modal-backdrop"
+    onclick={() => (deleteConfirmModal.show = false)}
+  >
     <div class="delete-modal-card" onclick={(e) => e.stopPropagation()}>
       <div class="delete-modal-header">
         <div class="delete-modal-title">
           <AlertTriangle size={16} class="delete-warning-icon" />
           <span>Confirm Deletion</span>
         </div>
-        <button class="delete-close-btn" onclick={() => deleteConfirmModal.show = false} title="Close">
+        <button
+          class="delete-close-btn"
+          onclick={() => (deleteConfirmModal.show = false)}
+          title="Close"
+        >
           <X size={14} />
         </button>
       </div>
 
       <div class="delete-modal-body">
         <p class="delete-msg-main">
-          Are you sure you want to delete <strong>'{deleteConfirmModal.projectName}'</strong>?
+          Are you sure you want to delete <strong
+            >'{deleteConfirmModal.projectName}'</strong
+          >?
         </p>
         {#if deleteConfirmModal.isActiveProject}
           <p class="delete-msg-sub">
-            This will permanently erase all project files and close the active workspace. This action cannot be undone.
+            This will permanently erase all project files and close the active
+            workspace. This action cannot be undone.
           </p>
         {:else}
           <p class="delete-msg-sub">
-            This will permanently erase all project files from the database. This action cannot be undone.
+            This will permanently erase all project files from the database.
+            This action cannot be undone.
           </p>
         {/if}
       </div>
 
       <div class="delete-modal-footer">
-        <button class="delete-btn-cancel" onclick={() => deleteConfirmModal.show = false}>
+        <button
+          class="delete-btn-cancel"
+          onclick={() => (deleteConfirmModal.show = false)}
+        >
           Cancel
         </button>
-        <button 
-          class="delete-btn-confirm" 
+        <button
+          class="delete-btn-confirm"
           onclick={async () => {
             const id = deleteConfirmModal.projectId;
             const isActive = deleteConfirmModal.isActiveProject;
@@ -2457,20 +3061,27 @@
 {#if inputPromptModal.show}
   <!-- svelte-ignore a11y-click-events-have-key-events -->
   <!-- svelte-ignore a11y-no-static-element-interactions -->
-  <div class="delete-modal-backdrop" onclick={() => inputPromptModal.show = false}>
+  <div
+    class="delete-modal-backdrop"
+    onclick={() => (inputPromptModal.show = false)}
+  >
     <div class="delete-modal-card" onclick={(e) => e.stopPropagation()}>
       <div class="delete-modal-header">
         <div class="delete-modal-title">
-          {#if inputPromptModal.actionType === 'file'}
+          {#if inputPromptModal.actionType === "file"}
             <Plus size={15} style="color: var(--accent-violet);" />
-          {:else if inputPromptModal.actionType === 'project'}
+          {:else if inputPromptModal.actionType === "project"}
             <Cpu size={14} style="color: var(--accent-violet);" />
           {:else}
             <FolderOpen size={14} style="color: var(--accent-violet);" />
           {/if}
           <span>{inputPromptModal.title}</span>
         </div>
-        <button class="delete-close-btn" onclick={() => inputPromptModal.show = false} title="Close">
+        <button
+          class="delete-close-btn"
+          onclick={() => (inputPromptModal.show = false)}
+          title="Close"
+        >
           <X size={14} />
         </button>
       </div>
@@ -2478,12 +3089,14 @@
       <div class="delete-modal-body">
         <div class="modal-param-group">
           <!-- svelte-ignore a11y-label-has-associated-control -->
-          <label style="font-size: 0.68rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; display: block;">
+          <label
+            style="font-size: 0.68rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; display: block;"
+          >
             Name / Path
           </label>
-          <input 
-            type="text" 
-            class="modal-input" 
+          <input
+            type="text"
+            class="modal-input"
             placeholder={inputPromptModal.placeholder}
             bind:value={inputPromptModal.value}
             onkeydown={(e) => {
@@ -2496,13 +3109,23 @@
                   } else if (inputPromptModal.actionType === "project") {
                     (async () => {
                       try {
-                        const project = await api.createProject(val, "Created from IDE");
+                        const folderPath = await api.pickFolder();
+                        if (!folderPath) return; // user cancelled
+                        const project = await api.createProject(
+                          inputPromptModal.value.trim(),
+                          "Created from IDE",
+                          folderPath,
+                        );
                         await actions.loadProject(project.id);
                         await actions.loadProjects();
                         actions.setActiveSidebarTab("explorer");
-                        actions.addBuildLog("Created new embedded project template successfully.");
+                        actions.addBuildLog(
+                          "Created new embedded project template successfully.",
+                        );
                       } catch (e: any) {
-                        actions.addBuildLog("Failed to create project: " + e.message);
+                        actions.addBuildLog(
+                          "Failed to create project: " + e.message,
+                        );
                       }
                     })();
                   } else {
@@ -2519,11 +3142,14 @@
       </div>
 
       <div class="delete-modal-footer">
-        <button class="delete-btn-cancel" onclick={() => inputPromptModal.show = false}>
+        <button
+          class="delete-btn-cancel"
+          onclick={() => (inputPromptModal.show = false)}
+        >
           Cancel
         </button>
-        <button 
-          class="save-btn" 
+        <button
+          class="save-btn"
           disabled={!inputPromptModal.value.trim()}
           onclick={() => {
             const val = inputPromptModal.value.trim();
@@ -2534,13 +3160,23 @@
               } else if (inputPromptModal.actionType === "project") {
                 (async () => {
                   try {
-                    const project = await api.createProject(val, "Created from IDE");
+                    const folderPath = await api.pickFolder();
+                    if (!folderPath) return; // user cancelled
+                    const project = await api.createProject(
+                      inputPromptModal.value.trim(),
+                      "Created from IDE",
+                      folderPath,
+                    );
                     await actions.loadProject(project.id);
                     await actions.loadProjects();
                     actions.setActiveSidebarTab("explorer");
-                    actions.addBuildLog("Created new embedded project template successfully.");
+                    actions.addBuildLog(
+                      "Created new embedded project template successfully.",
+                    );
                   } catch (e: any) {
-                    actions.addBuildLog("Failed to create project: " + e.message);
+                    actions.addBuildLog(
+                      "Failed to create project: " + e.message,
+                    );
                   }
                 })();
               } else {
@@ -2729,8 +3365,13 @@
     text-transform: uppercase;
     letter-spacing: 0.04em;
   }
-  .agent-think-header:hover { color: var(--text-bright); }
-  .agent-think-caret { font-size: 0.6rem; opacity: 0.7; }
+  .agent-think-header:hover {
+    color: var(--text-bright);
+  }
+  .agent-think-caret {
+    font-size: 0.6rem;
+    opacity: 0.7;
+  }
   .agent-think-text {
     margin: 4px 0 0 0;
     font-style: italic;
@@ -2752,9 +3393,18 @@
     font-size: 0.68rem;
     flex-wrap: wrap;
   }
-  .agent-call-icon { color: #818cf8; display: flex; }
-  .agent-call-name { color: #c7d2fe; font-weight: 700; }
-  .agent-call-args { color: #6b7280; word-break: break-all; }
+  .agent-call-icon {
+    color: #818cf8;
+    display: flex;
+  }
+  .agent-call-name {
+    color: #c7d2fe;
+    font-weight: 700;
+  }
+  .agent-call-args {
+    color: #6b7280;
+    word-break: break-all;
+  }
 
   /* Code card */
   .agent-code-card {
@@ -2823,8 +3473,11 @@
     margin-top: 2px;
     padding: 8px;
     border-radius: 8px;
-    background:
-      linear-gradient(90deg, rgba(6, 182, 212, 0.08), rgba(139, 92, 246, 0.08)),
+    background: linear-gradient(
+        90deg,
+        rgba(6, 182, 212, 0.08),
+        rgba(139, 92, 246, 0.08)
+      ),
       #08080d;
     border: 1px solid rgba(99, 102, 241, 0.22);
   }
@@ -2881,15 +3534,29 @@
   }
 
   @keyframes agent-scan {
-    0% { transform: translateX(0) rotate(18deg); opacity: 0; }
-    25% { opacity: 1; }
-    100% { transform: translateX(52px) rotate(18deg); opacity: 0; }
+    0% {
+      transform: translateX(0) rotate(18deg);
+      opacity: 0;
+    }
+    25% {
+      opacity: 1;
+    }
+    100% {
+      transform: translateX(52px) rotate(18deg);
+      opacity: 0;
+    }
   }
 
   @keyframes agent-meter {
-    0% { transform: translateX(-120%); }
-    55% { transform: translateX(95%); }
-    100% { transform: translateX(250%); }
+    0% {
+      transform: translateX(-120%);
+    }
+    55% {
+      transform: translateX(95%);
+    }
+    100% {
+      transform: translateX(250%);
+    }
   }
 
   .waiting-bubble-inline {
@@ -2969,8 +3636,15 @@
   }
 
   @keyframes followup-pulse {
-    0%, 100% { transform: scale(0.75); opacity: 0.55; }
-    50% { transform: scale(1); opacity: 1; }
+    0%,
+    100% {
+      transform: scale(0.75);
+      opacity: 0.55;
+    }
+    50% {
+      transform: scale(1);
+      opacity: 1;
+    }
   }
 
   /* "Other — describe it yourself" free-text row */
@@ -2992,7 +3666,9 @@
     outline: none;
     border-color: #6366f1;
   }
-  .chat-option-other { border-style: dashed; }
+  .chat-option-other {
+    border-style: dashed;
+  }
 
   /* Plot statistics */
   .plot-stats-overlay {
@@ -3058,7 +3734,9 @@
   }
 
   @keyframes bounce {
-    0%, 80%, 100% {
+    0%,
+    80%,
+    100% {
       transform: scale(0.6);
       opacity: 0.5;
     }
@@ -3200,8 +3878,13 @@
     overflow: hidden;
     max-width: 100%;
   }
-  .agent-proposal-card.allowed { border-color: rgba(16, 185, 129, 0.45); }
-  .agent-proposal-card.rejected { border-color: rgba(239, 68, 68, 0.35); opacity: 0.65; }
+  .agent-proposal-card.allowed {
+    border-color: rgba(16, 185, 129, 0.45);
+  }
+  .agent-proposal-card.rejected {
+    border-color: rgba(239, 68, 68, 0.35);
+    opacity: 0.65;
+  }
   .agent-proposal-head {
     display: flex;
     align-items: center;
@@ -3225,8 +3908,14 @@
     color: #93c5fd;
     white-space: nowrap;
   }
-  .agent-proposal-badge.allowed { background: rgba(16, 185, 129, 0.18); color: #34d399; }
-  .agent-proposal-badge.rejected { background: rgba(239, 68, 68, 0.18); color: #f87171; }
+  .agent-proposal-badge.allowed {
+    background: rgba(16, 185, 129, 0.18);
+    color: #34d399;
+  }
+  .agent-proposal-badge.rejected {
+    background: rgba(239, 68, 68, 0.18);
+    color: #f87171;
+  }
   .agent-proposal-actions {
     display: flex;
     gap: 8px;
@@ -3242,18 +3931,24 @@
     font-weight: 600;
     cursor: pointer;
     border: 1px solid transparent;
-    transition: background 0.12s, border-color 0.12s;
+    transition:
+      background 0.12s,
+      border-color 0.12s;
   }
   .proposal-btn.allow {
     background: rgba(16, 185, 129, 0.18);
     color: #34d399;
     border-color: rgba(16, 185, 129, 0.4);
   }
-  .proposal-btn.allow:hover { background: rgba(16, 185, 129, 0.3); }
+  .proposal-btn.allow:hover {
+    background: rgba(16, 185, 129, 0.3);
+  }
   .proposal-btn.reject {
     background: rgba(239, 68, 68, 0.12);
     color: #f87171;
     border-color: rgba(239, 68, 68, 0.35);
   }
-  .proposal-btn.reject:hover { background: rgba(239, 68, 68, 0.22); }
+  .proposal-btn.reject:hover {
+    background: rgba(239, 68, 68, 0.22);
+  }
 </style>

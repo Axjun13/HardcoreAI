@@ -45,6 +45,7 @@ def project_out(project: ProjectRow) -> ProjectOut:
         id=str(project.id),
         name=project.name,
         description=project.description or "",
+        path=project.path,
         created_at=project.created_at,
         updated_at=project.updated_at,
     )
