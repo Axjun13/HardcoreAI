@@ -610,26 +610,6 @@
 
       <div class="divider-line"></div>
 
-      <button
-        class="capsule-btn debug {$workspaceStore.isDebugging
-          ? $workspaceStore.crashed
-            ? 'active crashed'
-            : 'active debug-running'
-          : ''}"
-        onclick={handleDebugToggle}
-        title="Toggle Debugger (OpenOCD + GDB)"
-      >
-        <Bug size={12} />
-        <span
-          >{$workspaceStore.isDebugging
-            ? $workspaceStore.crashed
-              ? "CRASHED"
-              : "Debug"
-            : "Debug"}</span
-        >
-      </button>
-
-      <div class="divider-line"></div>
 
       <div class="capsule-more-options">
         <MoreHorizontal
@@ -642,32 +622,6 @@
     <!-- Connectivity Status & Controls -->
     <div class="connection-status-group">
       <div class="connection-status">
-        {#if $workspaceStore.isDebugging && !$workspaceStore.crashed}
-          <div
-            class="command-capsule"
-            style="background: rgba(6, 182, 212, 0.08); border-color: rgba(6, 182, 212, 0.3);"
-          >
-            <button
-              class="capsule-btn"
-              style="color: var(--accent-cyan); padding: 4px 8px;"
-              onclick={actions.stepOver}
-            >
-              <span>Step Over</span>
-            </button>
-            <div
-              class="divider-line"
-              style="background-color: rgba(6, 182, 212, 0.3);"
-            ></div>
-            <button
-              class="capsule-btn"
-              style="color: var(--accent-cyan); padding: 4px 8px;"
-              onclick={actions.continueExecution}
-            >
-              <span>Run</span>
-            </button>
-          </div>
-        {/if}
-
         {#if !$workspaceStore.crashed}
           <button
             class="status-pill"
@@ -942,17 +896,6 @@
         title="Source Control"
       >
         <GitBranch size={18} />
-      </button>
-      <!-- svelte-ignore a11y-click-events-have-key-events -->
-      <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
-      <button
-        class="activity-item {$workspaceStore.activeSidebarTab === 'debug'
-          ? 'active'
-          : ''}"
-        onclick={() => actions.setActiveSidebarTab("debug")}
-        title="Run & Debug"
-      >
-        <Bug size={18} />
       </button>
       <!-- svelte-ignore a11y-click-events-have-key-events -->
       <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
@@ -1329,46 +1272,6 @@
                     No staged or unstaged changes.
                   </div>
                 {/if}
-              </div>
-            </div>
-          </div>
-        </div>
-      {/if}
-
-      {#if $workspaceStore.activeSidebarTab === "debug"}
-        <div class="panel-header">
-          <div class="panel-title">Run & Debug GDB</div>
-        </div>
-        <div class="panel-body">
-          <div class="sidebar-debug-panel">
-            <div
-              style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 12px;"
-            >
-              <strong style="display: block; margin-bottom: 4px;"
-                >Call Stack</strong
-              >
-              <div
-                style="font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted);"
-              >
-                {$workspaceStore.callStack[0]}
-              </div>
-              <div
-                style="font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-dark);"
-              >
-                {$workspaceStore.callStack[1]}
-              </div>
-            </div>
-            <div style="font-size: 0.75rem; color: var(--text-muted);">
-              <strong style="display: block; margin-bottom: 4px;"
-                >Active Breakpoints</strong
-              >
-              <div
-                style="padding: 2px 0; display: flex; align-items: center; gap: 6px;"
-              >
-                <span
-                  style="width: 6px; height: 6px; border-radius: 50%; background-color: var(--accent-error);"
-                ></span>
-                <span>main.c: Line 24</span>
               </div>
             </div>
           </div>
