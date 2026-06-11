@@ -687,19 +687,33 @@ input, button, select, textarea {
 }
 
 .embedded-configurator-pane {
-  flex: 1 1 50%;
-  min-height: 260px;
+  flex: none;
+  min-height: 0;
+  overflow: hidden;
   background-color: var(--bg-secondary);
 }
 
 .ai-copilot-pane {
-  flex: 1 1 50%;
-  min-height: 220px;
+  flex: none;
+  min-height: 0;
+  overflow: hidden;
   border-bottom: none;
 }
 
 .ai-copilot-pane.expanded {
   flex-basis: 100%;
+}
+.right-pane-resizer {
+  height: 5px;
+  flex-shrink: 0;
+  cursor: row-resize;
+  background: transparent;
+  border-top: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.right-pane-resizer:hover {
+  background: var(--accent-violet);
 }
 
 .debug-variables-pane {
@@ -2037,18 +2051,21 @@ input, button, select, textarea {
   flex-direction: column;
   flex: 1;
   background-color: var(--bg-primary);
-  overflow-y: auto;
+  overflow: hidden;
   padding: 40px;
   justify-content: center;
   align-items: center;
+  min-height: 0;
 }
 
 .welcome-container {
   max-width: 900px;
   width: 100%;
+  max-height: 100%;
   display: flex;
   flex-direction: column;
   gap: 32px;
+  min-height: 0;
 }
 
 .welcome-header {
@@ -2080,6 +2097,15 @@ input, button, select, textarea {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 40px;
+  min-height: 0;
+  align-items: start;
+}
+
+.welcome-column {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: calc(100vh - 280px);
 }
 
 @media (max-width: 768px) {
@@ -2135,6 +2161,10 @@ input, button, select, textarea {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .recent-item {
@@ -2359,8 +2389,13 @@ input, button, select, textarea {
 }
 
 .right-ai-panel .embedded-configurator-pane .ec-root {
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
   background-color: var(--bg-secondary);
 }
+
+
 
 .right-ai-panel .embedded-configurator-pane .ec-header {
   height: 34px;
@@ -3184,4 +3219,36 @@ body.dragging-col {
 
 .baud-rate-select:hover {
   border-color: var(--accent-violet) !important;
+}
+
+
+.panel-mode-switch {
+  display: flex;
+  justify-content: flex-end;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+}
+
+.panel-mode-switch select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+
+  width: 100px;
+  height: 38px;
+
+  background: var(--bg-secondary);
+  color: var(--text-active);
+
+  border: 1px solid rgba(139,92,246,.35);
+  border-radius: 8px;
+
+  padding: 8px 28px 8px 10px;
+
+  font-size: 0.75rem;
+  font-weight: 600;
+
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23c4b5fd' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
 }
