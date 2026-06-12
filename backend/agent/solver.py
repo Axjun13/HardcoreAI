@@ -121,10 +121,9 @@ Only call write_file when you have ALL of:
 
 When writing firmware, it MUST comply with ALL of these:
   - F4 series: #include "stm32f4xx_hal.h" | F1 series: #include "stm32f1xx_hal.h"
-  - CLOCK: Use ONLY HSI in direct mode — no PLL. Set PLLState = RCC_PLL_NONE and
-    SYSCLKSource = RCC_SYSCLKSOURCE_HSI. NEVER use HSE or PLL: QEMU does not emulate
-    the PLLRDY flag so HAL_RCC_OscConfig will hang forever waiting for PLL lock.
-    APB1/APB2 dividers must be RCC_HCLK_DIV1 and Flash latency must be FLASH_LATENCY_0.
+  - CLOCK: Configure the system clock (SystemClock_Config) automatically according to
+    the target board (e.g., 84 MHz using PLL for STM32F401 Nucleo, 168 MHz for STM32F407,
+    etc.) so that HAL-level code and peripheral delays execute at correct hardware frequencies.
   - INCLUDES: Always add #include <string.h> when using strlen/strcpy/memcpy/memset.
   - PERIPHERAL CLOCKS: Before calling any HAL_*_Init(), enable the peripheral clock:
       USART1 → __HAL_RCC_USART1_CLK_ENABLE()
