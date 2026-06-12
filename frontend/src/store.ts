@@ -87,6 +87,26 @@ export interface RagDocument {
   tokens: number;
 }
 
+export interface GitCommit {
+  hash: string;
+  short_hash: string;
+  subject: string;
+  author_name: string;
+  author_email: string;
+  date_iso: string;
+  date_relative: string;
+  refs: string[];
+  parents: string[];
+}
+
+export interface GitInfo {
+  is_repo: boolean;
+  branch: string | null;
+  detached: boolean;
+  head_hash: string | null;
+  short_hash: string | null;
+}
+
 
 // Pin configuration data
 const stm32F401Pins = [
@@ -165,6 +185,11 @@ export const workspaceStore = writable({
   activeFile: null as string | null,
   openFiles: [] as string[],
   gitChanges: [] as { path: string; status: string }[],
+  gitInfo: { is_repo: false, branch: null, detached: false, head_hash: null, short_hash: null } as GitInfo,
+  gitBranches: [] as string[],
+  gitLog: [] as GitCommit[],
+  gitLogLoading: false,
+  gitExpandedCommit: null as string | null, // hash of expanded commit row
   fileContents: {} as Record<string, string>,
   fileTree: [] as FileItem[],
 
@@ -320,7 +345,8 @@ export const actions = {
       
       // Also fetch RAG documents for this project
       await actions.fetchRagDocuments();
-      // Load git status
+      // Load git status and info
+      await actions.loadGitInfo();
       await actions.loadGitStatus();
     } catch (e) {
       console.error("Failed to load project files", e);
@@ -357,6 +383,99 @@ export const actions = {
     } catch (e) {
       console.error("Failed to load git status:", e);
     }
+  },
+
+  loadGitInfo: async () => {
+    let projectId: string | null = null;
+    workspaceStore.subscribe(s => { projectId = s.activeProjectId; })();
+    if (!projectId) return;
+
+    try {
+      const info = await api.getGitInfo();
+      workspaceStore.update(s => ({ ...s, gitInfo: info }));
+      if (info.is_repo) {
+        await actions.loadGitBranches();
+      }
+    } catch (e) {
+      console.error("Failed to load git info:", e);
+    }
+  },
+
+  loadGitBranches: async () => {
+    try {
+      const branches = await api.getGitBranches();
+      workspaceStore.update(s => ({ ...s, gitBranches: branches }));
+    } catch (e) {
+      console.error("Failed to load git branches:", e);
+    }
+  },
+
+  createGitBranch: async (name: string) => {
+    try {
+      await api.createGitBranch(name);
+      await actions.loadGitInfo();
+      await actions.loadGitLog();
+      await actions.loadGitStatus();
+    } catch (e) {
+      console.error("Failed to create git branch:", e);
+      throw e;
+    }
+  },
+
+  loadGitLog: async () => {
+    let projectId: string | null = null;
+    workspaceStore.subscribe(s => { projectId = s.activeProjectId; })();
+    if (!projectId) return;
+
+    workspaceStore.update(s => ({ ...s, gitLogLoading: true }));
+    try {
+      const log = await api.getGitLog(50);
+      const { computeGitGraph } = await import("./gitGraph");
+      const graphNodes = computeGitGraph(log);
+      workspaceStore.update(s => ({ ...s, gitLog: graphNodes as any, gitLogLoading: false }));
+    } catch (e) {
+      console.error("Failed to load git log:", e);
+      workspaceStore.update(s => ({ ...s, gitLogLoading: false }));
+    }
+  },
+
+  checkoutCommit: async (ref: string) => {
+    try {
+      await api.checkoutCommit(ref);
+      // Reload git state after checkout
+      await actions.loadGitInfo();
+      await actions.loadGitLog();
+      await actions.loadGitStatus();
+      let projectId: string | null = null;
+      workspaceStore.subscribe(s => { projectId = s.activeProjectId; })();
+      if (projectId) {
+        await actions.refreshProjectFiles(projectId);
+      }
+    } catch (e) {
+      console.error("Checkout failed:", e);
+      throw e;
+    }
+  },
+
+  checkoutHead: async () => {
+    try {
+      await api.checkoutHead();
+      await actions.loadGitInfo();
+      await actions.loadGitLog();
+      await actions.loadGitStatus();
+      let projectId: string | null = null;
+      workspaceStore.subscribe(s => { projectId = s.activeProjectId; })();
+      if (projectId) {
+        await actions.refreshProjectFiles(projectId);
+      }
+    } catch (e) {
+      console.error("Checkout HEAD failed:", e);
+      throw e;
+    }
+  },
+
+  setGitExpandedCommit: (hash: string | null) => {
+    workspaceStore.update(s => ({ ...s, gitExpandedCommit: s.gitExpandedCommit === hash ? null : hash }));
   },
 
   commitChanges: async (message: string) => {
@@ -618,7 +737,9 @@ export const actions = {
   setActiveSidebarTab: (tab: "explorer" | "search" | "git" | "debug" | "extensions" | "boards" | "rag" | "libraries") => {
     workspaceStore.update(s => ({ ...s, activeSidebarTab: tab }));
     if (tab === "git") {
+      actions.loadGitInfo();
       actions.loadGitStatus();
+      actions.loadGitLog();
     }
     if (tab === "libraries") {
       actions.fetchAvailableLibraries();

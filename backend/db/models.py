@@ -66,6 +66,7 @@ class ProjectRow(SQLModel, table=True):
     viewport: dict[str, Any] = SQLField(
         default_factory=lambda: {"x": 0, "y": 0, "zoom": 1}, sa_column=Column(JSON)
     )
+    version_number: str | None = None
     # These columns are NOT NULL in Postgres with a `default now()`, but that
     # default only applies when the column is omitted from the INSERT. SQLModel
     # always emits it, so we supply the value from Python.
