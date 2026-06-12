@@ -182,28 +182,7 @@ input, button, select, textarea {
   background-color: rgba(16, 185, 129, 0.08);
 }
 
-.capsule-btn.debug:hover {
-  color: var(--accent-cyan);
-  background-color: rgba(6, 182, 212, 0.08);
-}
 
-.capsule-btn.active.debug {
-  background: var(--accent-violet-muted);
-  color: var(--accent-violet-hover);
-  border: 1px solid rgba(139, 92, 246, 0.3);
-}
-
-.capsule-btn.active.debug-running {
-  background: var(--accent-cyan-muted);
-  color: var(--accent-cyan);
-  border: 1px solid rgba(6, 182, 212, 0.3);
-}
-
-.capsule-btn.active.crashed {
-  background: rgba(239, 68, 68, 0.12);
-  color: var(--accent-error);
-  border: 1px solid rgba(239, 68, 68, 0.3);
-}
 
 .divider-line {
   width: 1px;
@@ -552,23 +531,7 @@ input, button, select, textarea {
   width: 100%;
 }
 
-/* Visual Debug Line Indicator inside editor */
-.debug-line-overlay {
-  position: absolute;
-  left: 0;
-  right: 0;
-  background-color: rgba(6, 182, 212, 0.04);
-  border-top: 1px dashed rgba(6, 182, 212, 0.25);
-  border-bottom: 1px dashed rgba(6, 182, 212, 0.25);
-  pointer-events: none;
-  z-index: 5;
-}
 
-.debug-line-overlay.crashed {
-  background-color: rgba(239, 68, 68, 0.05);
-  border-top: 1px solid rgba(239, 68, 68, 0.2);
-  border-bottom: 1px solid rgba(239, 68, 68, 0.2);
-}
 
 /* Resizable Divider Handles Styling */
 .resizer-handle {
@@ -664,11 +627,7 @@ input, button, select, textarea {
   min-height: 180px;
 }
 
-.debug-variables-pane {
-  flex: 23;
-  min-height: 120px;
-  border-bottom: none;
-}
+
 
 /* Embedded Configurator Split Columns styling */
 .configurator-split {

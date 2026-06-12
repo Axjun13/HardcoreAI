@@ -143,15 +143,7 @@ export const workspaceStore = writable({
   // Live hardware connection status (polled from the backend)
   deviceStatus: { connected: false, probe: null as string | null, target: null as string | null, detail: "" },
 
-  // GDB Debugging
-  isDebugging: false,
-  debuggerActive: false,
-  currentLine: null as number | null,
-  breakpoints: [] as number[],
-  callStack: [] as string[],
-  registers: [] as RegisterItem[],
-  crashed: false,
-  crashReason: null as string | null,
+
 
   // Telemetry & Serial
   serialLogs: [] as string[],
@@ -170,7 +162,7 @@ export const workspaceStore = writable({
   activeBottomTab: "terminal" as "terminal" | "plotter" | "registers" | "memory",
   terminalOpen: true,  // whether the bottom drawer (serial/build/etc.) is expanded
   showWelcomeScreen: true,
-  activeSidebarTab: "explorer" as "explorer" | "search" | "git" | "debug" | "extensions" | "boards" | "rag" | "libraries",
+  activeSidebarTab: "explorer" as "explorer" | "search" | "git" | "extensions" | "boards" | "rag" | "libraries",
   selectedBoard: "STM32F401" as "STM32F401" | "ESP32-S3" | "RP2040",
   selectedProbe: "ST-Link V2" as "ST-Link V2" | "J-Link" | "CMSIS-DAP",
   toolchainPath: "/usr/bin/arm-none-eabi-gcc",
@@ -276,11 +268,7 @@ export const actions = {
         aiMessages: [],
         buildLogs: [],
         serialLogs: [],
-        isDebugging: false,
-        debuggerActive: false,
-        currentLine: null,
-        crashed: false,
-        crashReason: null,
+
 
       }));
       
@@ -519,34 +507,7 @@ export const actions = {
     }
   },
 
-  toggleBreakpoint: (line: number) => {
-    workspaceStore.update(s => ({
-      ...s,
-      breakpoints: s.breakpoints.includes(line)
-        ? s.breakpoints.filter(l => l !== line)
-        : [...s.breakpoints, line]
-    }));
-  },
-  startDebugging: async () => {
-    workspaceStore.update(s => ({
-      ...s,
-      isDebugging: true,
-      debuggerActive: true,
-      currentLine: 20,
-      activeBottomTab: "registers"
-    }));
-    actions.addBuildLog('[GDB] Debugger UI requires backend GDB integration.');
-  },
-  stopDebugging: () => {
-    workspaceStore.update(s => ({
-      ...s,
-      isDebugging: false,
-      debuggerActive: false,
-      currentLine: null,
-      crashed: false,
-      crashReason: null
-    }));
-  },
+
   toggleSerialConnection: () => {
     workspaceStore.update(s => ({ ...s, serialConnected: !s.serialConnected }));
   },
@@ -562,22 +523,11 @@ export const actions = {
   setTerminalOpen: (open: boolean) => {
     workspaceStore.update(s => ({ ...s, terminalOpen: open }));
   },
-  triggerCrash: () => {
-    actions.addBuildLog('Crash UI requires backend GDB integration to trigger manually.');
-  },
-  resolveCrash: () => {
-    actions.addBuildLog('Crash UI requires backend GDB integration to resolve manually.');
-  },
-  stepOver: () => {
-    actions.addBuildLog('[GDB] Step requires backend GDB integration.');
-  },
-  continueExecution: () => {
-    workspaceStore.update(s => ({ ...s, currentLine: null }));
-  },
+
   setShowWelcomeScreen: (val: boolean) => {
     workspaceStore.update(s => ({ ...s, showWelcomeScreen: val }));
   },
-  setActiveSidebarTab: (tab: "explorer" | "search" | "git" | "debug" | "extensions" | "boards" | "rag" | "libraries") => {
+  setActiveSidebarTab: (tab: "explorer" | "search" | "git" | "extensions" | "boards" | "rag" | "libraries") => {
     workspaceStore.update(s => ({ ...s, activeSidebarTab: tab }));
     if (tab === "git") {
       actions.loadGitStatus();

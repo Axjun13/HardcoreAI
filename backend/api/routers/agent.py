@@ -175,9 +175,7 @@ async def agent_solve(project_id: str, payload: AgentRequest, user_id: str = Dep
     git_mgr.sync_db_to_disk(new_files)
     git_mgr.commit_changes(f"Agent solve: {payload.problem[:60]}")
 
-    # Empty placeholder traces for the wiring and debugging slots the schema requires.
     empty_wiring = AgentTrace(phase="wiring", final="")
-    empty_debug = AgentTrace(phase="debugging", final="")
 
     def _phase_trace(t: AgentTrace) -> PhaseTrace:
         return PhaseTrace(
@@ -194,7 +192,6 @@ async def agent_solve(project_id: str, payload: AgentRequest, user_id: str = Dep
         provider=payload.provider,
         wiring=_phase_trace(empty_wiring),
         coding=_phase_trace(agent_trace),
-        debugging=_phase_trace(empty_debug),
         workbench=final_state,
         files=[
             CodeFileRead(path=f.path, language=f.language, content=f.content, updated_at=f.updated_at)

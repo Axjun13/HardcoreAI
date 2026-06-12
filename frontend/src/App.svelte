@@ -339,23 +339,6 @@
     actions.runFlash();
   }
 
-  function handleDebugToggle() {
-    if ($workspaceStore.isDebugging) {
-      actions.stopDebugging();
-      actions.addBuildLog("Debugger disconnected.");
-    } else {
-      actions.addBuildLog("Launching GDB debug server...");
-      actions.addBuildLog(
-        `Probe: ${$workspaceStore.selectedProbe} connected to target: ${$workspaceStore.selectedBoard}`,
-      );
-      setTimeout(() => {
-        actions.startDebugging();
-        actions.addBuildLog(
-          "Debugger successfully attached. Target halted at main() -> main.c:22",
-        );
-      }, 800);
-    }
-  }
 
   function handleAiSend(e: Event) {
     e.preventDefault();
@@ -622,27 +605,7 @@
     <!-- Connectivity Status & Controls -->
     <div class="connection-status-group">
       <div class="connection-status">
-        {#if !$workspaceStore.crashed}
-          <button
-            class="status-pill"
-            onclick={actions.triggerCrash}
-            style="border-color: rgba(239, 68, 68, 0.2); cursor: pointer;"
-            title="Trigger Heat Loop Overheat Exception"
-          >
-            <span class="status-dot" style="background-color: #EF4444;"></span>
-            <span style="color: #EF4444;">Simulate Overheat</span>
-          </button>
-        {:else}
-          <button
-            class="status-pill"
-            onclick={actions.resolveCrash}
-            style="border-color: rgba(16, 185, 129, 0.4); cursor: pointer;"
-            title="Apply Code Patch Fix"
-          >
-            <span class="status-dot active"></span>
-            <span style="color: #10B981;">Apply AI Patch</span>
-          </button>
-        {/if}
+
 
         <button
           class="status-pill"
@@ -860,7 +823,7 @@
     </div>
   {:else}
     <!-- 2. Main Workspace Layout -->
-    <div class="helix-main-workspace {$workspaceStore.isDebugging ? 'debug-active' : ''} {aiOpen ? 'ai-open' : ''}">
+    <div class="helix-main-workspace {aiOpen ? 'ai-open' : ''}">
 
       <!-- Leftmost Activity Bar -->
       <nav class="activity-bar">
@@ -1424,25 +1387,7 @@
             </div>
           {/if}
 
-          {#if $workspaceStore.crashed}
-            <div class="crash-overlay">
-              <div class="crash-icon-box">
-                <AlertTriangle size={24} />
-              </div>
-              <div class="crash-details">
-                <h3>HARDWARE EXCEPTION (Core halted in HardFault_Handler)</h3>
-                <p>{$workspaceStore.crashReason}</p>
-                <span
-                  >Line 45: *crash_trigger = 0xDEADC0DE; (Dereferenced Null
-                  Pointer PC: 0x08001A4E)</span
-                >
-              </div>
-              <button class="crash-resolve-btn" onclick={actions.resolveCrash}>
-                <Sparkles size={13} />
-                Apply AI Hotpatch Fix
-              </button>
-            </div>
-          {/if}
+
         </div>
 
         <!-- Configurator view -->

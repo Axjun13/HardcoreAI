@@ -121,7 +121,6 @@ class AgentRunResult(BaseModel):
     provider: str
     wiring: PhaseTrace
     coding: PhaseTrace
-    debugging: PhaseTrace | None = None
     workbench: WorkbenchState
     files: list[CodeFileRead]
 
