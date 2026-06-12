@@ -10,7 +10,6 @@
   import {
     Play,
     Zap,
-    Bug,
     FolderOpen,
     FileCode,
     File,
@@ -20,8 +19,6 @@
     ArrowRight,
     Search,
     GitBranch,
-    GitCommit,
-    Tag,
     RotateCcw,
     AlertCircle,
     Blocks,
@@ -47,7 +44,6 @@
   let aiInput = "";
   let serialInput = "";
   let selectedPeripheral = "Core Registers";
-  let aiOpen = true;
 
   let showConfigurator = true;
   let showCopilot = true;
@@ -225,7 +221,7 @@
   });
 
   // DOM Elements
-  let canvasEl: HTMLCanvasElement;
+  let canvasEl: HTMLCanvasElement | undefined;
   let terminalEndRef: HTMLDivElement;
   let buildOutputEndRef: HTMLDivElement;
   let monacoEditor: monaco.editor.IStandaloneCodeEditor | null = null;
@@ -714,25 +710,6 @@
     closeParagraph();
     closeList();
     return html.join("");
-  }
-
-  function renderFileNode(item: FileItem) {
-    const isFolder = item.isFolder;
-    const isActive = $workspaceStore.activeFile === item.path;
-
-    if (isFolder) {
-      return {
-        isFolder: true,
-        item,
-        children: item.children || [],
-      };
-    } else {
-      return {
-        isFolder: false,
-        item,
-        isActive,
-      };
-    }
   }
 
   // Local state for tracking selections in chat dialogues
@@ -1506,7 +1483,7 @@
                     <span>Embedded Configurator</span>
                   </div>
                   
-                  {#snippet fileNodeSnippet(item)}
+                  {#snippet fileNodeSnippet(item: FileItem)}
                     {#if item.isFolder}
                       <div style="margin-bottom: 2px;">
                         <div class="file-item folder" style="display: flex; align-items: center; justify-content: space-between; width: 100%; padding-right: 8px;">
@@ -1633,6 +1610,7 @@
                     placeholder: "e.g. Blinky Project",
                     value: "",
                     actionType: "project",
+                    folderPath: "",
                   };
                 }}
               >
@@ -1971,7 +1949,7 @@
                     <div class="git-empty-hint">No commits yet.</div>
                   {:else}
                     <div class="git-graph-container">
-                      {#each $workspaceStore.gitLog as commit, i}
+                      {#each $workspaceStore.gitLog as commit}
                         {@const isHead = commit.hash === $workspaceStore.gitInfo.head_hash}
                         {@const isExp = $workspaceStore.gitExpandedCommit === commit.hash}
                         <!-- svelte-ignore a11y-click-events-have-key-events -->

@@ -1,5 +1,6 @@
 import { writable } from "svelte/store";
 import { api } from "./api";
+import type { GraphNode } from "./gitGraph";
 
 export interface FileItem {
   name: string;
@@ -309,7 +310,7 @@ export const workspaceStore = writable({
   gitChanges: [] as { path: string; status: string }[],
   gitInfo: { is_repo: false, branch: null, detached: false, head_hash: null, short_hash: null } as GitInfo,
   gitBranches: [] as string[],
-  gitLog: [] as GitCommit[],
+  gitLog: [] as GraphNode[],
   gitLogLoading: false,
   gitExpandedCommit: null as string | null, // hash of expanded commit row
   fileContents: {} as Record<string, string>,
@@ -323,6 +324,9 @@ export const workspaceStore = writable({
   deviceStatus: { connected: false, probe: null as string | null, target: null as string | null, detail: "" },
 
 
+
+  // Peripheral registers (shown in the bottom "registers" tab)
+  registers: [] as RegisterItem[],
 
   // Telemetry & Serial
   serialLogs: [] as string[],
@@ -439,7 +443,7 @@ export const actions = {
       }
 
       workspaceStore.update(s => {
-        const filePaths = files.map(f => "/" + String(f.path || "").replace(/^\/+/, ""));
+        const filePaths = files.map((f: any) => "/" + String(f.path || "").replace(/^\/+/, ""));
 
         let activeFile = s.activeFile;
         let openFiles = s.openFiles;
@@ -448,7 +452,7 @@ export const actions = {
           activeFile = files.length > 0 ? "/" + files[0].path : null;
         }
 
-        openFiles = openFiles.filter(f => filePaths.includes(f));
+        openFiles = openFiles.filter((f: string) => filePaths.includes(f));
         if (openFiles.length === 0 && activeFile) {
           openFiles = [activeFile];
         }
@@ -495,7 +499,7 @@ export const actions = {
 
   closeFileTab: (path: string) => {
     workspaceStore.update(s => {
-      const openFiles = s.openFiles.filter(f => f !== path);
+      const openFiles = s.openFiles.filter((f: string) => f !== path);
       let activeFile = s.activeFile;
       if (activeFile === path) {
         activeFile = openFiles.length > 0 ? openFiles[openFiles.length - 1] : null;
@@ -700,7 +704,7 @@ export const actions = {
       projectId = s.activeProjectId;
       const fileContents = { ...s.fileContents };
       delete fileContents[path];
-      const openFiles = s.openFiles.filter(f => f !== path);
+      const openFiles = s.openFiles.filter((f: string) => f !== path);
       let activeFile = s.activeFile;
       if (activeFile === path) {
         activeFile = openFiles.length > 0 ? openFiles[openFiles.length - 1] : null;
@@ -740,7 +744,7 @@ export const actions = {
       const fileContents = { ...s.fileContents };
       filesToDelete.forEach(path => delete fileContents[path]);
 
-      const openFiles = s.openFiles.filter(f => !filesToDelete.includes(f));
+      const openFiles = s.openFiles.filter((f: string) => !filesToDelete.includes(f));
       let activeFile = s.activeFile;
       if (activeFile && filesToDelete.includes(activeFile)) {
         activeFile = openFiles.length > 0 ? openFiles[openFiles.length - 1] : null;
