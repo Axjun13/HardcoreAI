@@ -1784,7 +1784,7 @@
                 <div class="git-branch-row">
                   <GitBranch size={12} style="color: var(--accent-violet); flex-shrink:0;" />
                   {#if $workspaceStore.gitInfo.detached}
-                    <span class="git-detached-badge" style="cursor: pointer" title="Create branch from here" onclick={async () => {
+                    <button type="button" class="git-detached-badge" style="cursor: pointer; background: none; border: none; padding: 0; margin: 0; font: inherit; color: inherit; display: inline-flex; align-items: center;" title="Create branch from here" onclick={async () => {
                         const name = prompt("Enter new branch name to save this detached state:");
                         if (name && name.trim()) {
                           try {
@@ -1796,7 +1796,7 @@
                     }}>
                       DETACHED @ {$workspaceStore.gitInfo.short_hash ?? '???'}
                       <span style="opacity: 0.6; margin-left: 4px;">(+ Branch)</span>
-                    </span>
+                    </button>
                   {:else}
                     <select
                       class="git-branch-select"
@@ -2442,7 +2442,8 @@
         {/if}
 
         {#if showConfigurator && showCopilot}
-          <div class="right-pane-resizer" onmousedown={startRightResize} />
+          <!-- svelte-ignore a11y-no-static-element-interactions -->
+          <div class="right-pane-resizer" onmousedown={startRightResize}></div>
         {/if}
 
         {#if showCopilot}
