@@ -35,6 +35,7 @@
     Copy,
     Check,
     Package,
+    Camera,
   } from "lucide-svelte";
 
   let aiInput = "";
@@ -69,6 +70,11 @@
     isActiveProject: false,
   };
 
+  // Decoupled panel states
+  let showSidebar = true;
+  let showViewDropdown = false;
+  let html2canvas: any = null;
+
   // Input prompt modal state (New File/Folder)
   let inputPromptModal = {
     show: false,
@@ -76,7 +82,15 @@
     placeholder: "",
     value: "",
     actionType: "file" as "file" | "folder" | "project",
+    folderPath: "",
   };
+
+  // Autocomplete @tag states
+  let fileTagInputRef: HTMLInputElement;
+  let showFileTagDropdown = false;
+  let fileTagFilter = "";
+  let fileTagIndex = 0;
+  let fileTagTriggerPos = -1;
 
   let gitCommitMessage = "";
   let gitCommitting = false;
@@ -217,8 +231,23 @@
     setTimeout(drawCanvas, 0);
   }
 
-  onMount(() => {
-    actions.loadProjects();
+  onMount(async () => {
+    await actions.loadProjects();
+    if (typeof window !== "undefined") {
+      const script = document.createElement("script");
+      script.src = "https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js";
+      script.onload = () => {
+        html2canvas = (window as any).html2canvas;
+      };
+      document.head.appendChild(script);
+
+      // Auto-load project files if there is a saved activeProjectId
+      let savedProjId: string | null = null;
+      workspaceStore.subscribe(s => { savedProjId = s.activeProjectId; })();
+      if (savedProjId) {
+        await actions.loadProject(savedProjId);
+      }
+    }
   });
 
   onMount(() => {
@@ -686,12 +715,139 @@
   $: activeProject = $workspaceStore.projectsList.find(
     (p) => p.id === $workspaceStore.activeProjectId,
   );
+
+  // Resize and Layout management
+  async function triggerEditorLayout() {
+    await tick();
+    window.requestAnimationFrame(() => {
+      if (monacoEditor) monacoEditor.layout();
+    });
+  }
+
+  $: {
+    showConfigurator;
+    showCopilot;
+    showSidebar;
+    $workspaceStore.terminalOpen;
+    triggerEditorLayout();
+  }
+
+  // Handle left activity tab click (VS Code style toggle sidebar)
+  function handleActivityTabClick(tab: any) {
+    if (showSidebar && $workspaceStore.activeSidebarTab === tab) {
+      showSidebar = false;
+    } else {
+      showSidebar = true;
+      actions.setActiveSidebarTab(tab);
+    }
+  }
+
+  // Project files flat list for tagging autocomplete
+  $: projectFilesList = Object.keys($workspaceStore.fileContents).map(p => p.startsWith('/') ? p.substring(1) : p);
+
+  function handleChatInput(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const value = input.value;
+    const cursor = input.selectionStart || 0;
+
+    // Find the last '@' before the cursor
+    const lastAtPos = value.lastIndexOf("@", cursor - 1);
+    if (lastAtPos !== -1) {
+      // Check if there is no space between '@' and cursor
+      const substring = value.substring(lastAtPos + 1, cursor);
+      if (!substring.includes(" ") && !substring.includes("\n")) {
+        showFileTagDropdown = true;
+        fileTagFilter = substring.toLowerCase();
+        fileTagTriggerPos = lastAtPos;
+        fileTagIndex = 0;
+        return;
+      }
+    }
+    showFileTagDropdown = false;
+    fileTagTriggerPos = -1;
+  }
+
+  function handleChatInputKeyDown(e: KeyboardEvent) {
+    if (!showFileTagDropdown) return;
+
+    const filteredFiles = projectFilesList.filter(f => 
+      f.toLowerCase().includes(fileTagFilter)
+    );
+
+    if (filteredFiles.length === 0) return;
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      fileTagIndex = (fileTagIndex + 1) % filteredFiles.length;
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      fileTagIndex = (fileTagIndex - 1 + filteredFiles.length) % filteredFiles.length;
+    } else if (e.key === "Enter" || e.key === "Tab") {
+      e.preventDefault();
+      insertFileTag(filteredFiles[fileTagIndex]);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      showFileTagDropdown = false;
+    }
+  }
+
+  function insertFileTag(filePath: string) {
+    if (fileTagTriggerPos === -1 || !fileTagInputRef) return;
+    const value = fileTagInputRef.value;
+    const cursor = fileTagInputRef.selectionStart || 0;
+    
+    const before = value.substring(0, fileTagTriggerPos);
+    const after = value.substring(cursor);
+    
+    aiInput = before + "@" + filePath + " " + after;
+    showFileTagDropdown = false;
+    fileTagTriggerPos = -1;
+
+    tick().then(() => {
+      if (fileTagInputRef) {
+        fileTagInputRef.focus();
+        const newCursorPos = fileTagTriggerPos + filePath.length + 2; // +1 for @, +1 for space
+        fileTagInputRef.setSelectionRange(newCursorPos, newCursorPos);
+      }
+    });
+  }
+
+  // Screenshot capture functionality
+  async function takeScreenshot() {
+    if (!html2canvas) {
+      alert("Screenshot library is loading, please try again in a moment.");
+      return;
+    }
+    try {
+      const appEl = document.querySelector(".helix-app") as HTMLElement;
+      if (!appEl) return;
+      const canvas = await html2canvas(appEl, {
+        backgroundColor: null,
+        useCORS: true,
+        logging: false,
+      });
+      const url = canvas.toDataURL("image/png");
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `hardcoreai-screenshot-${Date.now()}.png`;
+      a.click();
+    } catch (err) {
+      console.error("Failed to capture screenshot:", err);
+      alert("Failed to capture screenshot: " + err);
+    }
+  }
 </script>
 
 <svelte:window
   onmousemove={handleMouseMove}
   onmouseup={handleMouseUp}
   onkeydown={handleKeyDown}
+  onclick={(e) => {
+    const target = e.target as HTMLElement;
+    if (showViewDropdown && !target.closest('.view-menu-container')) {
+      showViewDropdown = false;
+    }
+  }}
 />
 <div class="helix-app {isLightTheme ? 'light-theme' : ''}">
   <!-- 1. Header Command Bar -->
@@ -778,43 +934,7 @@
           </div>
         {/if}
 
-        {#if !$workspaceStore.crashed}
-          <button
-            class="status-pill"
-            onclick={actions.triggerCrash}
-            style="border-color: rgba(239, 68, 68, 0.2); cursor: pointer;"
-            title="Trigger Heat Loop Overheat Exception"
-          >
-            <span class="status-dot" style="background-color: #EF4444;"></span>
-            <span style="color: #EF4444;">Simulate Overheat</span>
-          </button>
-        {:else}
-          <button
-            class="status-pill"
-            onclick={actions.resolveCrash}
-            style="border-color: rgba(16, 185, 129, 0.4); cursor: pointer;"
-            title="Apply Code Patch Fix"
-          >
-            <span class="status-dot active"></span>
-            <span style="color: #10B981;">Apply AI Patch</span>
-          </button>
-        {/if}
 
-        <button
-          class="status-pill"
-          onclick={actions.toggleSerialConnection}
-          style="cursor: pointer;"
-          title="Toggle UART Serial Port Connection"
-        >
-          <span
-            class="status-dot {$workspaceStore.serialConnected ? 'active' : ''}"
-          ></span>
-          <span
-            >{$workspaceStore.serialConnected
-              ? `UART COM4: ${$workspaceStore.baudRate}`
-              : "UART Offline"}</span
-          >
-        </button>
 
         <button
           class="status-pill"
@@ -828,7 +948,92 @@
       </div>
 
       <!-- Quick Access Right -->
-      <div class="tauri-controls-group">
+      <div class="tauri-controls-group" style="display: flex; align-items: center; gap: 8px;">
+        <!-- Take SS Button -->
+        <button
+          type="button"
+          class="control-icon-btn"
+          onclick={takeScreenshot}
+          title="Take Screenshot (PNG)"
+          style="display: flex; align-items: center; gap: 4px; padding: 4px 8px; border: 1px solid var(--border-color); border-radius: 4px; background: transparent; color: var(--text-muted); cursor: pointer;"
+        >
+          <Camera size={13} />
+          <span style="font-size: 0.72rem; font-weight: 500;">Take SS</span>
+        </button>
+
+        <!-- View Panels Toggle Dropdown -->
+        <div class="view-menu-container" style="position: relative;">
+          <button
+            type="button"
+            class="control-icon-btn view-toggle-btn"
+            style="display: flex; align-items: center; gap: 4px; padding: 4px 8px; border: 1px solid var(--border-color); border-radius: 4px; background: transparent; color: var(--text-muted); cursor: pointer;"
+            onclick={() => (showViewDropdown = !showViewDropdown)}
+            title="Toggle Panels Layout"
+          >
+            <Sliders size={13} />
+            <span style="font-size: 0.72rem; font-weight: 500;">View</span>
+          </button>
+
+          {#if showViewDropdown}
+            <!-- svelte-ignore a11y-click-events-have-key-events -->
+            <!-- svelte-ignore a11y-no-static-element-interactions -->
+            <div
+              class="view-dropdown-menu"
+              onclick={() => (showViewDropdown = false)}
+            >
+              <div class="dropdown-header">Toggle Panels</div>
+              
+              <button
+                type="button"
+                class="dropdown-item"
+                onclick={(e) => {
+                  e.stopPropagation();
+                  showSidebar = !showSidebar;
+                }}
+              >
+                <span>Left Sidebar</span>
+                <span class="check-icon" style="color: {showSidebar ? 'var(--accent-violet)' : 'var(--text-dark)'}">{showSidebar ? "✓" : "○"}</span>
+              </button>
+
+              <button
+                type="button"
+                class="dropdown-item"
+                onclick={(e) => {
+                  e.stopPropagation();
+                  actions.setTerminalOpen(!$workspaceStore.terminalOpen);
+                }}
+              >
+                <span>Bottom Terminal</span>
+                <span class="check-icon" style="color: {$workspaceStore.terminalOpen ? 'var(--accent-violet)' : 'var(--text-dark)'}">{$workspaceStore.terminalOpen ? "✓" : "○"}</span>
+              </button>
+
+              <button
+                type="button"
+                class="dropdown-item"
+                onclick={(e) => {
+                  e.stopPropagation();
+                  showConfigurator = !showConfigurator;
+                }}
+              >
+                <span>Embedded Configurator</span>
+                <span class="check-icon" style="color: {showConfigurator ? 'var(--accent-violet)' : 'var(--text-dark)'}">{showConfigurator ? "✓" : "○"}</span>
+              </button>
+
+              <button
+                type="button"
+                class="dropdown-item"
+                onclick={(e) => {
+                  e.stopPropagation();
+                  showCopilot = !showCopilot;
+                }}
+              >
+                <span>AI Copilot Chat</span>
+                <span class="check-icon" style="color: {showCopilot ? 'var(--accent-violet)' : 'var(--text-dark)'}">{showCopilot ? "✓" : "○"}</span>
+              </button>
+            </div>
+          {/if}
+        </div>
+
         <Search
           size={14}
           class="control-icon-btn"
@@ -839,7 +1044,7 @@
           class="control-icon-btn"
           onclick={() => {
             showConfigurator = true;
-            aiOpen = true;
+            showCopilot = true;
           }}
         />
         <!-- svelte-ignore a11y-click-events-have-key-events -->
@@ -1076,17 +1281,17 @@
     <div
       class="helix-main-workspace {$workspaceStore.isDebugging
         ? 'debug-active'
-        : ''} {aiOpen ? 'ai-open' : ''}"
+        : ''} {(showConfigurator || showCopilot) ? 'ai-open' : ''}"
     >
       <!-- Leftmost Activity Bar -->
       <nav class="activity-bar">
         <!-- svelte-ignore a11y-click-events-have-key-events -->
         <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
         <button
-          class="activity-item {$workspaceStore.activeSidebarTab === 'explorer'
+          class="activity-item {$workspaceStore.activeSidebarTab === 'explorer' && showSidebar
             ? 'active'
             : ''}"
-          onclick={() => actions.setActiveSidebarTab("explorer")}
+          onclick={() => handleActivityTabClick("explorer")}
           title="Explorer"
         >
           <Folder size={18} />
@@ -1094,10 +1299,10 @@
         <!-- svelte-ignore a11y-click-events-have-key-events -->
         <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
         <button
-          class="activity-item {$workspaceStore.activeSidebarTab === 'search'
+          class="activity-item {$workspaceStore.activeSidebarTab === 'search' && showSidebar
             ? 'active'
             : ''}"
-          onclick={() => actions.setActiveSidebarTab("search")}
+          onclick={() => handleActivityTabClick("search")}
           title="Search"
         >
           <Search size={18} />
@@ -1105,10 +1310,10 @@
         <!-- svelte-ignore a11y-click-events-have-key-events -->
         <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
         <button
-          class="activity-item {$workspaceStore.activeSidebarTab === 'git'
+          class="activity-item {$workspaceStore.activeSidebarTab === 'git' && showSidebar
             ? 'active'
             : ''}"
-          onclick={() => actions.setActiveSidebarTab("git")}
+          onclick={() => handleActivityTabClick("git")}
           title="Source Control"
         >
           <GitBranch size={18} />
@@ -1116,10 +1321,10 @@
         <!-- svelte-ignore a11y-click-events-have-key-events -->
         <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
         <button
-          class="activity-item {$workspaceStore.activeSidebarTab === 'debug'
+          class="activity-item {$workspaceStore.activeSidebarTab === 'debug' && showSidebar
             ? 'active'
             : ''}"
-          onclick={() => actions.setActiveSidebarTab("debug")}
+          onclick={() => handleActivityTabClick("debug")}
           title="Run & Debug"
         >
           <Bug size={18} />
@@ -1127,10 +1332,10 @@
         <!-- svelte-ignore a11y-click-events-have-key-events -->
         <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
         <button
-          class="activity-item {$workspaceStore.activeSidebarTab === 'rag'
+          class="activity-item {$workspaceStore.activeSidebarTab === 'rag' && showSidebar
             ? 'active'
             : ''}"
-          onclick={() => actions.setActiveSidebarTab("rag")}
+          onclick={() => handleActivityTabClick("rag")}
           title="RAG Knowledge Docs"
         >
           <Database size={18} />
@@ -1138,10 +1343,10 @@
         <!-- svelte-ignore a11y-click-events-have-key-events -->
         <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
         <button
-          class="activity-item {$workspaceStore.activeSidebarTab === 'boards'
+          class="activity-item {$workspaceStore.activeSidebarTab === 'boards' && showSidebar
             ? 'active'
             : ''}"
-          onclick={() => actions.setActiveSidebarTab("boards")}
+          onclick={() => handleActivityTabClick("boards")}
           title="Target Config"
         >
           <Settings size={18} />
@@ -1149,10 +1354,10 @@
         <!-- svelte-ignore a11y-click-events-have-key-events -->
         <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
         <button
-          class="activity-item {$workspaceStore.activeSidebarTab === 'libraries'
+          class="activity-item {$workspaceStore.activeSidebarTab === 'libraries' && showSidebar
             ? 'active'
             : ''}"
-          onclick={() => actions.setActiveSidebarTab("libraries")}
+          onclick={() => handleActivityTabClick("libraries")}
           title="Library Manager"
         >
           <Package size={18} />
@@ -1160,10 +1365,11 @@
       </nav>
 
       <!-- Sidebar Panel Column -->
-      <aside
-        class="workspace-panel sidebar-panel"
-        style="width: {sidebarWidth}px;"
-      >
+      {#if showSidebar}
+        <aside
+          class="workspace-panel sidebar-panel"
+          style="width: {sidebarWidth}px;"
+        >
         {#if $workspaceStore.activeSidebarTab === "explorer"}
           <div
             class="panel-header"
@@ -1266,6 +1472,7 @@
                       placeholder: "e.g. src/main.c",
                       value: "",
                       actionType: "file",
+                      folderPath: "",
                     };
                   }}
                 >
@@ -1282,6 +1489,7 @@
                       placeholder: "e.g. src/components",
                       value: "",
                       actionType: "folder",
+                      folderPath: "",
                     };
                   }}
                 >
@@ -1304,57 +1512,84 @@
                     class="file-item folder"
                     onclick={() => {
                       showConfigurator = true;
-                      aiOpen = true;
                     }}
                   >
                     <Blocks size={14} style="color: var(--accent-violet);" />
                     <span>Embedded Configurator</span>
                   </div>
-                  <div class="folder-contents">
-                    {#each $workspaceStore.fileTree as cat}
-                      {@const render = renderFileNode(cat)}
-                      {#if render.isFolder}
-                        <div style="margin-bottom: 2px;">
-                          <div class="file-item folder">
+                  
+                  {#snippet fileNodeSnippet(item)}
+                    {#if item.isFolder}
+                      <div style="margin-bottom: 2px;">
+                        <div class="file-item folder" style="display: flex; align-items: center; justify-content: space-between; width: 100%; padding-right: 8px;">
+                          <div style="display: flex; align-items: center; gap: 6px;">
                             <Folder
                               size={14}
                               style="color: var(--accent-violet);"
                             />
-                            <span>{render.item.name}</span>
+                            <span>{item.name}</span>
                           </div>
-                          <div class="folder-contents">
-                            {#each render.children as child}
-                              <!-- svelte-ignore a11y-click-events-have-key-events -->
-                              <!-- svelte-ignore a11y-no-static-element-interactions -->
-                              <div
-                                class="file-item {$workspaceStore.activeFile ===
-                                child.path
-                                  ? 'active'
-                                  : ''}"
-                                onclick={() =>
-                                  actions.setActiveFile(child.path)}
-                              >
-                                <FileCode
-                                  size={14}
-                                  style="color: var(--accent-violet-hover);"
-                                />
-                                <span>{child.name}</span>
-                              </div>
-                            {/each}
+                          <div class="folder-actions">
+                            <button
+                              type="button"
+                              class="folder-action-btn"
+                              title="New File in folder"
+                              onclick={(e) => {
+                                e.stopPropagation();
+                                inputPromptModal = {
+                                  show: true,
+                                  title: `Create New File in ${item.name}`,
+                                  placeholder: "filename.c",
+                                  value: "",
+                                  actionType: "file",
+                                  folderPath: item.path.replace(/^\//, "")
+                                };
+                              }}
+                            >
+                              <Plus size={11} />
+                            </button>
+                            <button
+                              type="button"
+                              class="folder-action-btn"
+                              title="New Folder in folder"
+                              onclick={(e) => {
+                                e.stopPropagation();
+                                inputPromptModal = {
+                                  show: true,
+                                  title: `Create New Folder in ${item.name}`,
+                                  placeholder: "foldername",
+                                  value: "",
+                                  actionType: "folder",
+                                  folderPath: item.path.replace(/^\//, "")
+                                };
+                              }}
+                            >
+                              <FolderOpen size={10} />
+                            </button>
                           </div>
                         </div>
-                      {:else}
-                        <!-- svelte-ignore a11y-click-events-have-key-events -->
-                        <!-- svelte-ignore a11y-no-static-element-interactions -->
-                        <div
-                          class="file-item {render.isActive ? 'active' : ''}"
-                          onclick={() =>
-                            actions.setActiveFile(render.item.path)}
-                        >
-                          <File size={14} style="color: var(--text-muted);" />
-                          <span>{render.item.name}</span>
+                        <div class="folder-contents" style="padding-left: 12px; border-left: 1px solid var(--border-color); margin-left: 6px;">
+                          {#each item.children || [] as child}
+                            {@render fileNodeSnippet(child)}
+                          {/each}
                         </div>
-                      {/if}
+                      </div>
+                    {:else}
+                      <!-- svelte-ignore a11y-click-events-have-key-events -->
+                      <!-- svelte-ignore a11y-no-static-element-interactions -->
+                      <div
+                        class="file-item {$workspaceStore.activeFile === item.path ? 'active' : ''}"
+                        onclick={() => actions.setActiveFile(item.path)}
+                      >
+                        <File size={14} style="color: var(--text-muted);" />
+                        <span>{item.name}</span>
+                      </div>
+                    {/if}
+                  {/snippet}
+
+                  <div class="folder-contents">
+                    {#each $workspaceStore.fileTree as item}
+                      {@render fileNodeSnippet(item)}
                     {/each}
                   </div>
                 </div>
@@ -1765,6 +2000,7 @@
         }}
         style="left: {sidebarWidth + 52}px;"
       ></div>
+      {/if}
 
       <!-- Center Workspace Area (Editor + Bottom Drawer) -->
       <main class="center-editor-panel editor-container">
@@ -1836,7 +2072,6 @@
                     class="action-card"
                     onclick={() => {
                       showConfigurator = true;
-                      aiOpen = true;
                     }}
                   >
                     <Settings size={24} style="color: var(--accent-orange);" />
@@ -1911,15 +2146,7 @@
                 >
                   <span>SERIAL TERMINAL</span>
                 </button>
-                <button
-                  class="drawer-tab {$workspaceStore.activeBottomTab ===
-                  'plotter'
-                    ? 'active'
-                    : ''}"
-                  onclick={() => actions.setBottomTab("plotter")}
-                >
-                  <span>TELEMETRY PLOTTER</span>
-                </button>
+
                 <button
                   class="drawer-tab {$workspaceStore.activeBottomTab ===
                   'registers'
@@ -2009,34 +2236,7 @@
                 </div>
               {/if}
 
-              {#if $workspaceStore.activeBottomTab === "plotter"}
-                <div class="plotter-panel">
-                  <div class="plot-stats-overlay">
-                    <div class="stat-lbl">
-                      <span class="stat-dot temp"></span>TEMP:
-                      <span class="stat-val"
-                        >{$workspaceStore.analogSensors.temp.toFixed(1)} °C</span
-                      >
-                    </div>
-                    <div class="stat-lbl">
-                      <span class="stat-dot volt"></span>VDD:
-                      <span class="stat-val"
-                        >{$workspaceStore.analogSensors.voltage.toFixed(2)} V</span
-                      >
-                    </div>
-                    <div class="stat-lbl">
-                      <span class="stat-dot curr"></span>IDD:
-                      <span class="stat-val"
-                        >{$workspaceStore.analogSensors.current.toFixed(1)} mA</span
-                      >
-                    </div>
-                  </div>
-                  <div class="plotter-canvas-container">
-                    <canvas bind:this={canvasEl} class="telemetry-canvas"
-                    ></canvas>
-                  </div>
-                </div>
-              {/if}
+
 
               {#if $workspaceStore.activeBottomTab === "registers"}
                 <div class="registers-panel">
@@ -2128,7 +2328,7 @@
 
       <!-- Right Panel Resizer Handle -->
       <!-- svelte-ignore a11y-no-static-element-interactions -->
-      {#if aiOpen}
+      {#if showConfigurator || showCopilot}
         <div
           class="resize-handle vertical-handle"
           onmousedown={() => {
@@ -2142,40 +2342,13 @@
       <!-- Right AI Panel Column -->
       <aside
         class="split-sidebar-right right-ai-panel"
-        style="width: {rightSidebarWidth}px; display: {aiOpen
-          ? 'flex'
-          : 'none'};"
+        style="width: {rightSidebarWidth}px; display: {(showConfigurator || showCopilot) ? 'flex' : 'none'};"
       >
-        <div class="panel-mode-switch">
-          <select
-            onchange={(e) => {
-              const v = (e.target as HTMLSelectElement).value;
 
-              if (v === "both") {
-                showConfigurator = true;
-                showCopilot = true;
-              }
-
-              if (v === "config") {
-                showConfigurator = true;
-                showCopilot = false;
-              }
-
-              if (v === "copilot") {
-                showConfigurator = false;
-                showCopilot = true;
-              }
-            }}
-          >
-            <option value="both">Both</option>
-            <option value="config">Configurator</option>
-            <option value="copilot">Copilot</option>
-          </select>
-        </div>
         {#if showConfigurator}
           <section
             class="sidebar-right-pane embedded-configurator-pane"
-            style={`height:${showCopilot ? rightPaneSplit : 100}%`}
+            style={showCopilot ? `flex: ${rightPaneSplit} ${rightPaneSplit} 0%;` : "flex: 1 1 0%;"}
           >
             <EmbeddedConfigurator
               selectedBoard={$workspaceStore.selectedBoard}
@@ -2190,10 +2363,11 @@
           <div class="right-pane-resizer" onmousedown={startRightResize} />
         {/if}
 
+        {#if showCopilot}
         <section
           class="sidebar-right-pane ai-copilot-pane"
           class:expanded={!showConfigurator}
-          style={`height:${showConfigurator ? 100 - rightPaneSplit : 100}%`}
+          style={showConfigurator ? `flex: ${100 - rightPaneSplit} ${100 - rightPaneSplit} 0%;` : "flex: 1 1 0%;"}
         >
           <!-- Chat Header -->
           <div class="ai-chat-header">
@@ -2221,7 +2395,7 @@
               {/if}
               <button
                 class="close-ai-btn"
-                onclick={() => (aiOpen = false)}
+                onclick={() => (showCopilot = false)}
                 title="Minimize panel"
               >
                 <X size={13} />
@@ -2787,7 +2961,27 @@
           </div>
 
           <!-- Input Box -->
-          <div class="chat-input-zone">
+          <div class="chat-input-zone" style="position: relative;">
+            {#if showFileTagDropdown}
+              {@const filtered = projectFilesList.filter(f => f.toLowerCase().includes(fileTagFilter))}
+              {#if filtered.length > 0}
+                <div class="file-tag-autocomplete">
+                  <div class="autocomplete-header">Tag Project Files</div>
+                  {#each filtered as file, i}
+                    <!-- svelte-ignore a11y-click-events-have-key-events -->
+                    <!-- svelte-ignore a11y-no-static-element-interactions -->
+                    <div
+                      class="autocomplete-item {i === fileTagIndex ? 'selected' : ''}"
+                      onclick={() => insertFileTag(file)}
+                      onmouseenter={() => (fileTagIndex = i)}
+                    >
+                      <FileCode size={12} style="color: var(--accent-violet);" />
+                      <span>{file}</span>
+                    </div>
+                  {/each}
+                </div>
+              {/if}
+            {/if}
             {#if activeAgentStreaming}
               <div
                 class="chat-stop-generating-row"
@@ -2833,6 +3027,9 @@
                   ? "Type a follow-up while HARDCOREAI works..."
                   : "Ask about registers, RAG docs, or request a code fix..."}
                 bind:value={aiInput}
+                bind:this={fileTagInputRef}
+                oninput={handleChatInput}
+                onkeydown={handleChatInputKeyDown}
               />
               <button
                 type="submit"
@@ -2847,24 +3044,41 @@
             <div class="chat-input-hint">
               {activeAgentStreaming
                 ? "Agent running · next prompt will send as a follow-up"
-                : "Press Enter to send"}
+                : "Press Enter to send · Press @ to select files"}
             </div>
           </div>
         </section>
+        {/if}
       </aside>
 
       <!-- AI Panel Collapsed Sidebar Strip -->
-      {#if !aiOpen}
-        <!-- svelte-ignore a11y-click-events-have-key-events -->
-        <!-- svelte-ignore a11y-no-static-element-interactions -->
-        <div
-          class="ai-collapsed-strip"
-          onclick={() => (aiOpen = true)}
-          title="Open AI Copilot"
-        >
-          <div class="ai-collapsed-icon"><Sparkles size={14} /></div>
-          <div class="ai-collapsed-label">AI COPILOT</div>
-          <div class="ai-collapsed-dot"></div>
+      {#if !showConfigurator || !showCopilot}
+        <div class="right-collapsed-strips-wrapper">
+          {#if !showConfigurator}
+            <!-- svelte-ignore a11y-click-events-have-key-events -->
+            <!-- svelte-ignore a11y-no-static-element-interactions -->
+            <div
+              class="ai-collapsed-strip"
+              onclick={() => (showConfigurator = true)}
+              title="Open Configurator"
+            >
+              <div class="ai-collapsed-icon"><Sliders size={14} /></div>
+              <div class="ai-collapsed-label">CONFIGURATOR</div>
+            </div>
+          {/if}
+          {#if !showCopilot}
+            <!-- svelte-ignore a11y-click-events-have-key-events -->
+            <!-- svelte-ignore a11y-no-static-element-interactions -->
+            <div
+              class="ai-collapsed-strip"
+              onclick={() => (showCopilot = true)}
+              title="Open AI Copilot"
+            >
+              <div class="ai-collapsed-icon"><Sparkles size={14} /></div>
+              <div class="ai-collapsed-label">AI COPILOT</div>
+              <div class="ai-collapsed-dot"></div>
+            </div>
+          {/if}
         </div>
       {/if}
     </div>
@@ -2914,7 +3128,6 @@
           type="button"
           onclick={() => {
             showConfigurator = true;
-            aiOpen = true;
           }}
           title="Open target configurator"
         >
@@ -3105,7 +3318,7 @@
                 if (val) {
                   inputPromptModal.show = false;
                   if (inputPromptModal.actionType === "file") {
-                    actions.createFile(val);
+                    actions.createFile(val, inputPromptModal.folderPath);
                   } else if (inputPromptModal.actionType === "project") {
                     (async () => {
                       try {
@@ -3129,7 +3342,7 @@
                       }
                     })();
                   } else {
-                    actions.createFolder(val);
+                    actions.createFolder(val, inputPromptModal.folderPath);
                   }
                 }
               } else if (e.key === "Escape") {
@@ -3156,7 +3369,7 @@
             if (val) {
               inputPromptModal.show = false;
               if (inputPromptModal.actionType === "file") {
-                actions.createFile(val);
+                actions.createFile(val, inputPromptModal.folderPath);
               } else if (inputPromptModal.actionType === "project") {
                 (async () => {
                   try {
@@ -3180,7 +3393,7 @@
                   }
                 })();
               } else {
-                actions.createFolder(val);
+                actions.createFolder(val, inputPromptModal.folderPath);
               }
             }
           }}
