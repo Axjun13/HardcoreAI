@@ -424,23 +424,6 @@
     actions.runFlash();
   }
 
-  function handleDebugToggle() {
-    if ($workspaceStore.isDebugging) {
-      actions.stopDebugging();
-      actions.addBuildLog("Debugger disconnected.");
-    } else {
-      actions.addBuildLog("Launching GDB debug server...");
-      actions.addBuildLog(
-        `Probe: ${$workspaceStore.selectedProbe} connected to target: ${$workspaceStore.selectedBoard}`,
-      );
-      setTimeout(() => {
-        actions.startDebugging();
-        actions.addBuildLog(
-          "Debugger successfully attached. Target halted at main() -> main.c:22",
-        );
-      }, 800);
-    }
-  }
 
   function handleAiSend(e: Event) {
     e.preventDefault();
@@ -727,94 +710,15 @@
         <span>{$workspaceStore.isFlashing ? "Flashing..." : "Flash"}</span>
       </button>
 
-      <div class="divider-line"></div>
 
-      <button
-        class="capsule-btn debug {$workspaceStore.isDebugging
-          ? $workspaceStore.crashed
-            ? 'active crashed'
-            : 'active debug-running'
-          : ''}"
-        onclick={handleDebugToggle}
-        title="Toggle Debugger (OpenOCD + GDB)"
-      >
-        <Bug size={12} />
-        <span
-          >{$workspaceStore.isDebugging
-            ? $workspaceStore.crashed
-              ? "CRASHED"
-              : "Debug"
-            : "Debug"}</span
-        >
-      </button>
     </div>
 
     <!-- Connectivity Status & Controls -->
     <div class="connection-status-group">
       <div class="connection-status">
-        {#if $workspaceStore.isDebugging && !$workspaceStore.crashed}
-          <div
-            class="command-capsule"
-            style="background: rgba(6, 182, 212, 0.08); border-color: rgba(6, 182, 212, 0.3);"
-          >
-            <button
-              class="capsule-btn"
-              style="color: var(--accent-cyan); padding: 4px 8px;"
-              onclick={actions.stepOver}
-            >
-              <span>Step Over</span>
-            </button>
-            <div
-              class="divider-line"
-              style="background-color: rgba(6, 182, 212, 0.3);"
-            ></div>
-            <button
-              class="capsule-btn"
-              style="color: var(--accent-cyan); padding: 4px 8px;"
-              onclick={actions.continueExecution}
-            >
-              <span>Run</span>
-            </button>
-          </div>
-        {/if}
 
-        {#if !$workspaceStore.crashed}
-          <button
-            class="status-pill"
-            onclick={actions.triggerCrash}
-            style="border-color: rgba(239, 68, 68, 0.2); cursor: pointer;"
-            title="Trigger Heat Loop Overheat Exception"
-          >
-            <span class="status-dot" style="background-color: #EF4444;"></span>
-            <span style="color: #EF4444;">Simulate Overheat</span>
-          </button>
-        {:else}
-          <button
-            class="status-pill"
-            onclick={actions.resolveCrash}
-            style="border-color: rgba(16, 185, 129, 0.4); cursor: pointer;"
-            title="Apply Code Patch Fix"
-          >
-            <span class="status-dot active"></span>
-            <span style="color: #10B981;">Apply AI Patch</span>
-          </button>
-        {/if}
 
-        <button
-          class="status-pill"
-          onclick={actions.toggleSerialConnection}
-          style="cursor: pointer;"
-          title="Toggle UART Serial Port Connection"
-        >
-          <span
-            class="status-dot {$workspaceStore.serialConnected ? 'active' : ''}"
-          ></span>
-          <span
-            >{$workspaceStore.serialConnected
-              ? `UART COM4: ${$workspaceStore.baudRate}`
-              : "UART Offline"}</span
-          >
-        </button>
+
 
         <button
           class="status-pill"
@@ -1074,9 +978,7 @@
   {:else}
     <!-- 2. Main Workspace Layout -->
     <div
-      class="helix-main-workspace {$workspaceStore.isDebugging
-        ? 'debug-active'
-        : ''} {aiOpen ? 'ai-open' : ''}"
+      class="helix-main-workspace {aiOpen ? 'ai-open' : ''}"
     >
       <!-- Leftmost Activity Bar -->
       <nav class="activity-bar">
@@ -1113,17 +1015,7 @@
         >
           <GitBranch size={18} />
         </button>
-        <!-- svelte-ignore a11y-click-events-have-key-events -->
-        <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
-        <button
-          class="activity-item {$workspaceStore.activeSidebarTab === 'debug'
-            ? 'active'
-            : ''}"
-          onclick={() => actions.setActiveSidebarTab("debug")}
-          title="Run & Debug"
-        >
-          <Bug size={18} />
-        </button>
+
         <!-- svelte-ignore a11y-click-events-have-key-events -->
         <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
         <button
@@ -1649,45 +1541,7 @@
           </div>
         {/if}
 
-        {#if $workspaceStore.activeSidebarTab === "debug"}
-          <div class="panel-header">
-            <div class="panel-title">Run & Debug GDB</div>
-          </div>
-          <div class="panel-body">
-            <div class="sidebar-debug-panel">
-              <div
-                style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 12px;"
-              >
-                <strong style="display: block; margin-bottom: 4px;"
-                  >Call Stack</strong
-                >
-                <div
-                  style="font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted);"
-                >
-                  {$workspaceStore.callStack[0]}
-                </div>
-                <div
-                  style="font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-dark);"
-                >
-                  {$workspaceStore.callStack[1]}
-                </div>
-              </div>
-              <div style="font-size: 0.75rem; color: var(--text-muted);">
-                <strong style="display: block; margin-bottom: 4px;"
-                  >Active Breakpoints</strong
-                >
-                <div
-                  style="padding: 2px 0; display: flex; align-items: center; gap: 6px;"
-                >
-                  <span
-                    style="width: 6px; height: 6px; border-radius: 50%; background-color: var(--accent-error);"
-                  ></span>
-                  <span>main.c: Line 24</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        {/if}
+
 
         {#if $workspaceStore.activeSidebarTab === "rag"}
           <RagUploadPanel />
@@ -1856,28 +1710,7 @@
               </div>
             {/if}
 
-            {#if $workspaceStore.crashed}
-              <div class="crash-overlay">
-                <div class="crash-icon-box">
-                  <AlertTriangle size={24} />
-                </div>
-                <div class="crash-details">
-                  <h3>HARDWARE EXCEPTION (Core halted in HardFault_Handler)</h3>
-                  <p>{$workspaceStore.crashReason}</p>
-                  <span
-                    >Line 45: *crash_trigger = 0xDEADC0DE; (Dereferenced Null
-                    Pointer PC: 0x08001A4E)</span
-                  >
-                </div>
-                <button
-                  class="crash-resolve-btn"
-                  onclick={actions.resolveCrash}
-                >
-                  <Sparkles size={13} />
-                  Apply AI Hotpatch Fix
-                </button>
-              </div>
-            {/if}
+
           </div>
         </section>
 
@@ -2265,17 +2098,7 @@
                     <span>Fix errors</span>
                   </button>
 
-                  <button
-                    type="button"
-                    class="copilot-shortcut-card"
-                    onclick={() =>
-                      actions.sendAiMessage(
-                        "Help me debug this issue in the project.",
-                      )}
-                  >
-                    <Bug size={14} class="shortcut-card-icon" />
-                    <span>Debug this issue</span>
-                  </button>
+
 
                   <button
                     type="button"
@@ -2880,24 +2703,7 @@
           <GitBranch size={13} />
           <span class="branch-name">main*</span>
         </button>
-        <button
-          class="status-bar-item"
-          type="button"
-          onclick={() => actions.setActiveSidebarTab("debug")}
-          title="Open diagnostics"
-        >
-          <Bug size={13} />
-          <span>0</span>
-        </button>
-        <button
-          class="status-bar-item"
-          type="button"
-          onclick={() => actions.setActiveSidebarTab("debug")}
-          title="Warnings"
-        >
-          <AlertTriangle size={13} />
-          <span>0</span>
-        </button>
+
         <button
           class="status-bar-item probe-status {$workspaceStore.serialConnected
             ? 'connected'
@@ -3223,90 +3029,6 @@
     background-color: var(--accent-violet);
   }
 
-  .crash-overlay {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(18, 12, 16, 0.9);
-    backdrop-filter: blur(8px);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-    padding: 24px;
-    z-index: 99;
-  }
-
-  .crash-icon-box {
-    width: 50px;
-    height: 50px;
-    border-radius: 50%;
-    background: rgba(239, 68, 68, 0.1);
-    border: 1px solid var(--accent-error);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--accent-error);
-    margin-bottom: 16px;
-    box-shadow: 0 0 20px rgba(239, 68, 68, 0.3);
-    animation: pulseGlow 1.5s infinite alternate;
-  }
-
-  @keyframes pulseGlow {
-    from {
-      box-shadow: 0 0 10px rgba(239, 68, 68, 0.2);
-    }
-    to {
-      box-shadow: 0 0 25px rgba(239, 68, 68, 0.5);
-    }
-  }
-
-  .crash-details h3 {
-    margin: 0 0 8px 0;
-    font-size: 0.95rem;
-    color: var(--accent-error);
-    font-weight: 700;
-    letter-spacing: 0.5px;
-  }
-
-  .crash-details p {
-    margin: 0 0 8px 0;
-    font-size: 0.8rem;
-    color: var(--text-bright);
-    font-family: var(--font-mono);
-  }
-
-  .crash-details span {
-    display: block;
-    font-size: 0.7rem;
-    color: var(--text-muted);
-    font-family: var(--font-mono);
-    margin-bottom: 20px;
-  }
-
-  .crash-resolve-btn {
-    background: var(--accent-success);
-    border: none;
-    border-radius: var(--radius-sm);
-    color: white;
-    font-size: 0.78rem;
-    font-weight: 600;
-    padding: 8px 18px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
-    transition: all 0.2s ease;
-  }
-
-  .crash-resolve-btn:hover {
-    background: var(--accent-success-hover);
-    transform: translateY(-1px);
-  }
 
   .configurator-toggle-tab {
     background: none;

@@ -341,10 +341,5 @@ async def run_wiring_phase(*args, **kwargs):
 
 
 async def run_coding_phase(*args, **kwargs):
-    """Deprecated \u2014 use run_agent_phase instead."""
-    raise NotImplementedError("Use run_agent_phase instead.")
-
-
-async def run_debugging_phase(*args, **kwargs):
-    """Deprecated \u2014 use run_agent_phase instead."""
+    """Deprecated — use run_agent_phase instead."""
     raise NotImplementedError("Use run_agent_phase instead.")
