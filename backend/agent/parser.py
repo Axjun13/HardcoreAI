@@ -407,6 +407,15 @@ async def run_phase(
     messages = [{"role": "system", "content": system_prompt}] + messages + [
         {"role": "user", "content": user_prompt},
     ]
+    # Add a temporary property on the toolbox to check if the last user reply confirmed the action
+    import re
+    answered_yes = False
+    match = re.search(r'The user answered:\s*"([^"]*)"', user_prompt, flags=re.IGNORECASE)
+    if match:
+        answered_yes = match.group(1).strip().lower() in ("yes", "y", "approve", "confirm")
+    else:
+        answered_yes = user_prompt.strip().lower() in ("yes", "y", "approve", "confirm")
+    toolbox.user_confirmed = answered_yes
         
     trace = AgentTrace(phase=phase)
 

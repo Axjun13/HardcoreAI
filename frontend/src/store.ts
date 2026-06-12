@@ -583,6 +583,81 @@ export const actions = {
     }
   },
 
+  deleteFile: async (path: string) => {
+    let projectId: string | null = null;
+    workspaceStore.update(s => {
+      projectId = s.activeProjectId;
+      const fileContents = { ...s.fileContents };
+      delete fileContents[path];
+      const openFiles = s.openFiles.filter(f => f !== path);
+      let activeFile = s.activeFile;
+      if (activeFile === path) {
+        activeFile = openFiles.length > 0 ? openFiles[openFiles.length - 1] : null;
+      }
+      return {
+        ...s,
+        fileContents,
+        openFiles,
+        activeFile
+      };
+    });
+    if (projectId) {
+      try {
+        const relPath = path.startsWith('/') ? path.substring(1) : path;
+        await api.deleteFile(projectId, relPath);
+        await actions.refreshProjectFiles(projectId);
+        await actions.loadGitStatus();
+      } catch (e) {
+        console.error("Failed to delete file on backend", e);
+        alert("Failed to delete file: " + (e instanceof Error ? e.message : String(e)));
+      }
+    }
+  },
+
+  deleteFolder: async (folderPath: string) => {
+    let projectId: string | null = null;
+    let filesToDelete: string[] = [];
+    workspaceStore.update(s => {
+      projectId = s.activeProjectId;
+      const folderPathWithSlash = folderPath.endsWith('/') ? folderPath : folderPath + '/';
+      
+      // Find all file paths starting with the folder path
+      filesToDelete = Object.keys(s.fileContents).filter(path => 
+        path.startsWith(folderPathWithSlash) || path === folderPath
+      );
+
+      const fileContents = { ...s.fileContents };
+      filesToDelete.forEach(path => delete fileContents[path]);
+
+      const openFiles = s.openFiles.filter(f => !filesToDelete.includes(f));
+      let activeFile = s.activeFile;
+      if (activeFile && filesToDelete.includes(activeFile)) {
+        activeFile = openFiles.length > 0 ? openFiles[openFiles.length - 1] : null;
+      }
+
+      return {
+        ...s,
+        fileContents,
+        openFiles,
+        activeFile
+      };
+    });
+
+    if (projectId && filesToDelete.length > 0) {
+      try {
+        for (const file of filesToDelete) {
+          const relPath = file.startsWith('/') ? file.substring(1) : file;
+          await api.deleteFile(projectId, relPath);
+        }
+        await actions.refreshProjectFiles(projectId);
+        await actions.loadGitStatus();
+      } catch (e) {
+        console.error("Failed to delete folder files on backend", e);
+        alert("Failed to delete folder content completely: " + (e instanceof Error ? e.message : String(e)));
+      }
+    }
+  },
+
   setCompiling: (val: boolean) => {
     workspaceStore.update(s => ({ ...s, isCompiling: val }));
   },

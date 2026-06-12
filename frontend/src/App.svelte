@@ -36,6 +36,7 @@
     Check,
     Package,
     Camera,
+    ArrowDown,
   } from "lucide-svelte";
 
   let aiInput = "";
@@ -69,6 +70,46 @@
     projectName: "",
     isActiveProject: false,
   };
+
+  // Delete file/folder confirmation modal state
+  let fileDeleteConfirmModal = {
+    show: false,
+    path: "",
+    isFolder: false,
+  };
+
+  // Chat scrolling state and handlers
+  let chatContentEl: HTMLDivElement | null = null;
+  let showScrollToBottom = false;
+
+  function handleChatScroll() {
+    if (!chatContentEl) return;
+    const { scrollTop, scrollHeight, clientHeight } = chatContentEl;
+    showScrollToBottom = scrollHeight - scrollTop - clientHeight > 150;
+  }
+
+  function scrollToBottom() {
+    if (chatContentEl) {
+      chatContentEl.scrollTo({
+        top: chatContentEl.scrollHeight,
+        behavior: "smooth"
+      });
+    }
+  }
+
+  // Auto-scroll to bottom when messages change
+  $: if ($workspaceStore.aiMessages && chatContentEl) {
+    tick().then(() => {
+      if (!chatContentEl) return;
+      const { scrollTop, scrollHeight, clientHeight } = chatContentEl;
+      if (scrollHeight - scrollTop - clientHeight < 300) {
+        chatContentEl.scrollTo({
+          top: chatContentEl.scrollHeight,
+          behavior: "smooth"
+        });
+      }
+    });
+  }
 
   // Decoupled panel states
   let showSidebar = true;
@@ -1532,7 +1573,7 @@
                           <div class="folder-actions">
                             <button
                               type="button"
-                              class="folder-action-btn"
+                              class="folder-action-btn create-file-btn"
                               title="New File in folder"
                               onclick={(e) => {
                                 e.stopPropagation();
@@ -1550,7 +1591,7 @@
                             </button>
                             <button
                               type="button"
-                              class="folder-action-btn"
+                              class="folder-action-btn create-folder-btn"
                               title="New Folder in folder"
                               onclick={(e) => {
                                 e.stopPropagation();
@@ -1566,6 +1607,21 @@
                             >
                               <FolderOpen size={10} />
                             </button>
+                            <button
+                              type="button"
+                              class="folder-action-btn delete-hover"
+                              title="Delete Folder"
+                              onclick={(e) => {
+                                e.stopPropagation();
+                                fileDeleteConfirmModal = {
+                                  show: true,
+                                  path: item.path,
+                                  isFolder: true
+                                };
+                              }}
+                            >
+                              <Trash2 size={10} />
+                            </button>
                           </div>
                         </div>
                         <div class="folder-contents" style="padding-left: 12px; border-left: 1px solid var(--border-color); margin-left: 6px;">
@@ -1580,9 +1636,29 @@
                       <div
                         class="file-item {$workspaceStore.activeFile === item.path ? 'active' : ''}"
                         onclick={() => actions.setActiveFile(item.path)}
+                        style="display: flex; align-items: center; justify-content: space-between; width: 100%; padding-right: 8px;"
                       >
-                        <File size={14} style="color: var(--text-muted);" />
-                        <span>{item.name}</span>
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                          <File size={14} style="color: var(--text-muted);" />
+                          <span>{item.name}</span>
+                        </div>
+                        <div class="file-actions">
+                          <button
+                            type="button"
+                            class="file-action-btn delete-hover"
+                            title="Delete File"
+                            onclick={(e) => {
+                              e.stopPropagation();
+                              fileDeleteConfirmModal = {
+                                show: true,
+                                path: item.path,
+                                isFolder: false
+                              };
+                            }}
+                          >
+                            <Trash2 size={11} />
+                          </button>
+                        </div>
                       </div>
                     {/if}
                   {/snippet}
@@ -2404,7 +2480,11 @@
           </div>
 
           <!-- Chat messages view -->
-          <div class="ai-copilot-chat-content">
+          <div
+            class="ai-copilot-chat-content"
+            bind:this={chatContentEl}
+            onscroll={handleChatScroll}
+          >
             {#if !$workspaceStore.aiMessages.some((m) => m.sender === "user")}
               <div class="copilot-welcome-container">
                 <div class="copilot-welcome-title">
@@ -2962,6 +3042,19 @@
 
           <!-- Input Box -->
           <div class="chat-input-zone" style="position: relative;">
+            {#if showScrollToBottom}
+              <div class="scroll-to-bottom-container">
+                <button
+                  type="button"
+                  class="scroll-to-bottom-btn"
+                  onclick={scrollToBottom}
+                  title="Scroll to bottom"
+                >
+                  <ArrowDown size={12} />
+                  <span>Scroll to Bottom</span>
+                </button>
+              </div>
+            {/if}
             {#if showFileTagDropdown}
               {@const filtered = projectFilesList.filter(f => f.toLowerCase().includes(fileTagFilter))}
               {#if filtered.length > 0}
@@ -3264,6 +3357,74 @@
         >
           <Trash2 size={13} style="margin-right: 4px;" />
           Delete Workspace
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- Delete File/Folder Confirmation Modal -->
+{#if fileDeleteConfirmModal.show}
+  <!-- svelte-ignore a11y-click-events-have-key-events -->
+  <!-- svelte-ignore a11y-no-static-element-interactions -->
+  <div
+    class="delete-modal-backdrop"
+    onclick={() => (fileDeleteConfirmModal.show = false)}
+  >
+    <div class="delete-modal-card" onclick={(e) => e.stopPropagation()}>
+      <div class="delete-modal-header">
+        <div class="delete-modal-title">
+          <AlertTriangle size={16} class="delete-warning-icon" />
+          <span>Confirm File Deletion</span>
+        </div>
+        <button
+          class="delete-close-btn"
+          onclick={() => (fileDeleteConfirmModal.show = false)}
+          title="Close"
+        >
+          <X size={14} />
+        </button>
+      </div>
+
+      <div class="delete-modal-body">
+        <p class="delete-msg-main">
+          Are you sure you want to delete <strong
+            >'{fileDeleteConfirmModal.path.split('/').pop()}'</strong
+          >?
+        </p>
+        {#if fileDeleteConfirmModal.isFolder}
+          <p class="delete-msg-sub">
+            This will permanently delete the folder <strong>{fileDeleteConfirmModal.path}</strong> and all of its contents. This action cannot be undone.
+          </p>
+        {:else}
+          <p class="delete-msg-sub">
+            This will permanently delete the file <strong>{fileDeleteConfirmModal.path}</strong>. This action cannot be undone.
+          </p>
+        {/if}
+      </div>
+
+      <div class="delete-modal-footer">
+        <button
+          class="delete-btn-cancel"
+          onclick={() => (fileDeleteConfirmModal.show = false)}
+        >
+          Cancel
+        </button>
+        <button
+          class="delete-btn-confirm"
+          onclick={async () => {
+            const path = fileDeleteConfirmModal.path;
+            const isFolder = fileDeleteConfirmModal.isFolder;
+            fileDeleteConfirmModal.show = false;
+            if (isFolder) {
+              await actions.deleteFolder(path);
+            } else {
+              await actions.deleteFile(path);
+            }
+          }}
+        >
+          <Trash2 size={13} style="margin-right: 4px;" />
+          Delete
         </button>
       </div>
     </div>
@@ -4163,5 +4324,40 @@
   }
   .proposal-btn.reject:hover {
     background: rgba(239, 68, 68, 0.22);
+  }
+
+  /* Scroll to bottom button styling */
+  .scroll-to-bottom-container {
+    position: absolute;
+    top: -38px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1000;
+    pointer-events: none;
+  }
+
+  .scroll-to-bottom-btn {
+    pointer-events: auto;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    color: var(--text-active);
+    padding: 5px 12px;
+    border-radius: 16px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4), 0 0 10px rgba(139, 92, 246, 0.1);
+    transition: all 0.2s ease-in-out;
+  }
+
+  .scroll-to-bottom-btn:hover {
+    background: var(--bg-secondary);
+    border-color: var(--accent-violet);
+    color: var(--accent-violet-hover);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5), 0 0 14px rgba(139, 92, 246, 0.2);
   }
 </style>

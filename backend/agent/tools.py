@@ -565,10 +565,11 @@ class CodingToolbox(Toolbox):
         if path not in self.files:
             return f"ERROR: File '{path}' not found."
             
-        if not confirmed:
+        is_confirmed = confirmed or getattr(self, "user_confirmed", False)
+        if not is_confirmed:
             raise AskUserException(
                 question=f"Are you sure you want to delete the file '{path}'? This action cannot be undone.",
-                options="Yes, No"
+                options=["Yes", "No"]
             )
             
         del self.files[path]

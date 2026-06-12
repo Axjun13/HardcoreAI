@@ -3353,33 +3353,65 @@ body.dragging-col {
   color: var(--text-active);
 }
 
-/* Folder actions styling */
-.folder-actions {
+/* Folder & File actions styling */
+.folder-actions, .file-actions {
   display: flex;
   gap: 4px;
-  opacity: 0;
+  opacity: 1;
   transition: opacity 0.15s ease;
 }
 
-.file-item.folder:hover .folder-actions {
-  opacity: 1;
-}
-
-.folder-action-btn {
+/* Base styling for all file/folder action buttons */
+.folder-action-btn, .file-action-btn {
   background: transparent;
   border: none;
-  color: var(--text-muted);
   cursor: pointer;
   padding: 2px;
   display: flex;
   align-items: center;
   border-radius: 2px;
-  transition: background-color 0.15s, color 0.15s;
+  opacity: 0.6;
+  transition: all 0.15s ease-in-out;
 }
 
-.folder-action-btn:hover {
-  background-color: rgba(255, 255, 255, 0.08);
-  color: var(--text-active);
+/* Button specific default colors (visible even when unhovered) */
+.folder-action-btn.create-file-btn {
+  color: var(--accent-success) !important;
+}
+
+.folder-action-btn.create-folder-btn {
+  color: var(--accent-violet) !important;
+}
+
+.folder-action-btn.delete-hover,
+.file-action-btn.delete-hover {
+  color: var(--accent-error) !important;
+}
+
+/* Make buttons more prominent on hover */
+.folder-action-btn.create-file-btn:hover {
+  opacity: 1;
+  background-color: rgba(16, 185, 129, 0.12);
+  transform: scale(1.1);
+}
+
+.folder-action-btn.create-folder-btn:hover {
+  opacity: 1;
+  background-color: rgba(139, 92, 246, 0.12);
+  transform: scale(1.1);
+}
+
+.folder-action-btn.delete-hover:hover,
+.file-action-btn.delete-hover:hover {
+  opacity: 1;
+  background-color: rgba(239, 68, 68, 0.15);
+  transform: scale(1.1);
+}
+
+/* Symmetrical parent hover state */
+.file-item:hover .folder-action-btn:not(:hover),
+.file-item:hover .file-action-btn:not(:hover) {
+  opacity: 0.8;
 }
 
 /* Multiple collapsed strips side by side or stacked */
