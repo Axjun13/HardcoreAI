@@ -710,26 +710,7 @@
         <span>{$workspaceStore.isFlashing ? "Flashing..." : "Flash"}</span>
       </button>
 
-      <div class="divider-line"></div>
 
-      <button
-        class="capsule-btn debug {$workspaceStore.isDebugging
-          ? $workspaceStore.crashed
-            ? 'active crashed'
-            : 'active debug-running'
-          : ''}"
-        onclick={handleDebugToggle}
-        title="Toggle Debugger (OpenOCD + GDB)"
-      >
-        <Bug size={12} />
-        <span
-          >{$workspaceStore.isDebugging
-            ? $workspaceStore.crashed
-              ? "CRASHED"
-              : "Debug"
-            : "Debug"}</span
-        >
-      </button>
     </div>
 
     <!-- Connectivity Status & Controls -->
