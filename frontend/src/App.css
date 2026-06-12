@@ -210,13 +210,7 @@ input, button, select, textarea {
   background-color: rgba(16, 185, 129, 0.12);
 }
 
-.capsule-btn.debug {
-  color: var(--accent-cyan);
-}
-.capsule-btn.debug:hover {
-  color: #67e8f9;
-  background-color: var(--accent-cyan-muted);
-}
+
 
 
 .divider-line {
@@ -2400,7 +2394,6 @@ input, button, select, textarea {
 /* Sidebar panel shared input/select theming */
 .sidebar-search-panel,
 .sidebar-git-panel,
-.sidebar-debug-panel,
 .boards-config-panel {
   display: flex;
   flex-direction: column;

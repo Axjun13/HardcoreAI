@@ -1011,9 +1011,7 @@
   {:else}
     <!-- 2. Main Workspace Layout -->
     <div
-      class="helix-main-workspace {$workspaceStore.isDebugging
-        ? 'debug-active'
-        : ''} {aiOpen ? 'ai-open' : ''}"
+      class="helix-main-workspace {aiOpen ? 'ai-open' : ''}"
     >
       <!-- Leftmost Activity Bar -->
       <nav class="activity-bar">
@@ -1050,17 +1048,7 @@
         >
           <GitBranch size={18} />
         </button>
-        <!-- svelte-ignore a11y-click-events-have-key-events -->
-        <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
-        <button
-          class="activity-item {$workspaceStore.activeSidebarTab === 'debug'
-            ? 'active'
-            : ''}"
-          onclick={() => actions.setActiveSidebarTab("debug")}
-          title="Run & Debug"
-        >
-          <Bug size={18} />
-        </button>
+
         <!-- svelte-ignore a11y-click-events-have-key-events -->
         <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
         <button
@@ -1586,45 +1574,7 @@
           </div>
         {/if}
 
-        {#if $workspaceStore.activeSidebarTab === "debug"}
-          <div class="panel-header">
-            <div class="panel-title">Run & Debug GDB</div>
-          </div>
-          <div class="panel-body">
-            <div class="sidebar-debug-panel">
-              <div
-                style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 12px;"
-              >
-                <strong style="display: block; margin-bottom: 4px;"
-                  >Call Stack</strong
-                >
-                <div
-                  style="font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted);"
-                >
-                  {$workspaceStore.callStack[0]}
-                </div>
-                <div
-                  style="font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-dark);"
-                >
-                  {$workspaceStore.callStack[1]}
-                </div>
-              </div>
-              <div style="font-size: 0.75rem; color: var(--text-muted);">
-                <strong style="display: block; margin-bottom: 4px;"
-                  >Active Breakpoints</strong
-                >
-                <div
-                  style="padding: 2px 0; display: flex; align-items: center; gap: 6px;"
-                >
-                  <span
-                    style="width: 6px; height: 6px; border-radius: 50%; background-color: var(--accent-error);"
-                  ></span>
-                  <span>main.c: Line 24</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        {/if}
+
 
         {#if $workspaceStore.activeSidebarTab === "rag"}
           <RagUploadPanel />
@@ -1793,28 +1743,7 @@
               </div>
             {/if}
 
-            {#if $workspaceStore.crashed}
-              <div class="crash-overlay">
-                <div class="crash-icon-box">
-                  <AlertTriangle size={24} />
-                </div>
-                <div class="crash-details">
-                  <h3>HARDWARE EXCEPTION (Core halted in HardFault_Handler)</h3>
-                  <p>{$workspaceStore.crashReason}</p>
-                  <span
-                    >Line 45: *crash_trigger = 0xDEADC0DE; (Dereferenced Null
-                    Pointer PC: 0x08001A4E)</span
-                  >
-                </div>
-                <button
-                  class="crash-resolve-btn"
-                  onclick={actions.resolveCrash}
-                >
-                  <Sparkles size={13} />
-                  Apply AI Hotpatch Fix
-                </button>
-              </div>
-            {/if}
+
           </div>
         </section>
 
@@ -2202,17 +2131,7 @@
                     <span>Fix errors</span>
                   </button>
 
-                  <button
-                    type="button"
-                    class="copilot-shortcut-card"
-                    onclick={() =>
-                      actions.sendAiMessage(
-                        "Help me debug this issue in the project.",
-                      )}
-                  >
-                    <Bug size={14} class="shortcut-card-icon" />
-                    <span>Debug this issue</span>
-                  </button>
+
 
                   <button
                     type="button"
@@ -2817,24 +2736,7 @@
           <GitBranch size={13} />
           <span class="branch-name">main*</span>
         </button>
-        <button
-          class="status-bar-item"
-          type="button"
-          onclick={() => actions.setActiveSidebarTab("debug")}
-          title="Open diagnostics"
-        >
-          <Bug size={13} />
-          <span>0</span>
-        </button>
-        <button
-          class="status-bar-item"
-          type="button"
-          onclick={() => actions.setActiveSidebarTab("debug")}
-          title="Warnings"
-        >
-          <AlertTriangle size={13} />
-          <span>0</span>
-        </button>
+
         <button
           class="status-bar-item probe-status {$workspaceStore.serialConnected
             ? 'connected'
