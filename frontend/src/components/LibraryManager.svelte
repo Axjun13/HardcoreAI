@@ -12,12 +12,10 @@
     ExternalLink,
     AlertCircle,
     CheckCircle2,
-    Clock,
     Loader,
     Tag,
     Cpu,
     User,
-    Star,
   } from "lucide-svelte";
 
   // Reactive state from store

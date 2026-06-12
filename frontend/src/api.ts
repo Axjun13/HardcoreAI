@@ -15,16 +15,25 @@ export const api = {
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
+  async pickFolder(): Promise<string | null> {
+  const res = await fetch(`${BACKEND_URL}/api/pick-folder`, {
+    method: "POST",
+    headers: { "Authorization": "Bearer TEST_TOKEN" }
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const data = await res.json();
+  return data.path;
+},
 
-  async createProject(name: string, description: string = "") {
-    const res = await fetch(`${BACKEND_URL}/api/projects`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": "Bearer TEST_TOKEN" },
-      body: JSON.stringify({ name, description })
-    });
-    if (!res.ok) throw new Error(await res.text());
-    return res.json();
-  },
+async createProject(name: string, description: string = "", path: string | null = null) {
+  const res = await fetch(`${BACKEND_URL}/api/projects`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": "Bearer TEST_TOKEN" },
+    body: JSON.stringify({ name, description, path })
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+},
 
   async deleteProject(id: string) {
     const res = await fetch(`${BACKEND_URL}/api/projects/${id}`, {

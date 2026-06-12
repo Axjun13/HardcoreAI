@@ -6,7 +6,8 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends
 from sqlmodel import select
-
+import threading
+from fastapi import HTTPException
 from core.config import now_utc
 from core.security import get_current_user_id
 from db.models import CodeFileRow, ProjectRow
@@ -17,6 +18,25 @@ from services.projects import default_files, get_project_or_404, project_out
 router = APIRouter()
 
 
+@router.post("/api/pick-folder")
+def pick_folder(user_id: str = Depends(get_current_user_id)) -> dict[str, str | None]:
+    """Open a native OS folder picker on the server machine and return the chosen path."""
+    result: dict[str, str | None] = {"path": None}
+
+    def _show_dialog():
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        result["path"] = filedialog.askdirectory(title="Choose project location") or None
+        root.destroy()
+
+    t = threading.Thread(target=_show_dialog)
+    t.start()
+    t.join()
+    return result
+
 @router.get("/api/projects", response_model=list[ProjectOut])
 def list_projects(user_id: str = Depends(get_current_user_id)) -> list[ProjectOut]:
     with db_session(user_id) as session:
@@ -26,6 +46,7 @@ def list_projects(user_id: str = Depends(get_current_user_id)) -> list[ProjectOu
         return [project_out(p) for p in projects]
 
 
+
 @router.post("/api/projects", response_model=ProjectOut)
 def create_project(payload: ProjectCreate, user_id: str = Depends(get_current_user_id)) -> ProjectOut:
     with db_session(user_id) as session:
@@ -33,15 +54,26 @@ def create_project(payload: ProjectCreate, user_id: str = Depends(get_current_us
             name=payload.name.strip(),
             description=payload.description.strip(),
             user_id=UUID(user_id),
+            path=payload.path,
         )
         session.add(project)
         session.commit()
         session.refresh(project)
 
-        for path, language, content in default_files(project.name):
+        files = default_files(project.name)
+        for path, language, content in files:
             session.add(
                 CodeFileRow(project_id=project.id, path=path, language=language, content=content)
             )
+
+        if project.path:
+            import os
+            for rel_path, _language, content in files:
+                full_path = os.path.join(project.path, rel_path)
+                os.makedirs(os.path.dirname(full_path), exist_ok=True)
+                with open(full_path, "w", encoding="utf-8") as f:
+                    f.write(content)
+
         session.commit()
         session.refresh(project)
         return project_out(project)

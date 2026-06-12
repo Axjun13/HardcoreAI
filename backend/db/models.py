@@ -62,6 +62,7 @@ class ProjectRow(SQLModel, table=True):
     name: str
     description: str = ""
     user_id: UUID | None = SQLField(default=None)
+    path: str | None = SQLField(default=None)
     viewport: dict[str, Any] = SQLField(
         default_factory=lambda: {"x": 0, "y": 0, "zoom": 1}, sa_column=Column(JSON)
     )

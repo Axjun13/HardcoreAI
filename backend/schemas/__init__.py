@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
+from sqlmodel import SQLModel
 
 from pydantic import BaseModel, Field
 
@@ -43,9 +44,10 @@ class ComponentDefinition(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class ProjectCreate(BaseModel):
-    name: str = Field(min_length=1, max_length=80)
+class ProjectCreate(SQLModel):
+    name: str
     description: str = ""
+    path: str | None = None
 
 
 class ProjectUpdate(BaseModel):
@@ -53,12 +55,13 @@ class ProjectUpdate(BaseModel):
     description: str | None = None
 
 
-class ProjectOut(BaseModel):
+class ProjectOut(SQLModel):
     id: str
     name: str
     description: str
-    created_at: datetime | None = None
-    updated_at: datetime | None = None
+    path: str | None = None
+    created_at: datetime
+    updated_at: datetime
 
 
 # ---------------------------------------------------------------------------
