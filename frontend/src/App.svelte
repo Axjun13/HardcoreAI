@@ -718,21 +718,7 @@
       <div class="connection-status">
 
 
-        <button
-          class="status-pill"
-          onclick={actions.toggleSerialConnection}
-          style="cursor: pointer;"
-          title="Toggle UART Serial Port Connection"
-        >
-          <span
-            class="status-dot {$workspaceStore.serialConnected ? 'active' : ''}"
-          ></span>
-          <span
-            >{$workspaceStore.serialConnected
-              ? `UART COM4: ${$workspaceStore.baudRate}`
-              : "UART Offline"}</span
-          >
-        </button>
+
 
         <button
           class="status-pill"
@@ -3043,90 +3029,6 @@
     background-color: var(--accent-violet);
   }
 
-  .crash-overlay {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(18, 12, 16, 0.9);
-    backdrop-filter: blur(8px);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-    padding: 24px;
-    z-index: 99;
-  }
-
-  .crash-icon-box {
-    width: 50px;
-    height: 50px;
-    border-radius: 50%;
-    background: rgba(239, 68, 68, 0.1);
-    border: 1px solid var(--accent-error);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--accent-error);
-    margin-bottom: 16px;
-    box-shadow: 0 0 20px rgba(239, 68, 68, 0.3);
-    animation: pulseGlow 1.5s infinite alternate;
-  }
-
-  @keyframes pulseGlow {
-    from {
-      box-shadow: 0 0 10px rgba(239, 68, 68, 0.2);
-    }
-    to {
-      box-shadow: 0 0 25px rgba(239, 68, 68, 0.5);
-    }
-  }
-
-  .crash-details h3 {
-    margin: 0 0 8px 0;
-    font-size: 0.95rem;
-    color: var(--accent-error);
-    font-weight: 700;
-    letter-spacing: 0.5px;
-  }
-
-  .crash-details p {
-    margin: 0 0 8px 0;
-    font-size: 0.8rem;
-    color: var(--text-bright);
-    font-family: var(--font-mono);
-  }
-
-  .crash-details span {
-    display: block;
-    font-size: 0.7rem;
-    color: var(--text-muted);
-    font-family: var(--font-mono);
-    margin-bottom: 20px;
-  }
-
-  .crash-resolve-btn {
-    background: var(--accent-success);
-    border: none;
-    border-radius: var(--radius-sm);
-    color: white;
-    font-size: 0.78rem;
-    font-weight: 600;
-    padding: 8px 18px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
-    transition: all 0.2s ease;
-  }
-
-  .crash-resolve-btn:hover {
-    background: var(--accent-success-hover);
-    transform: translateY(-1px);
-  }
 
   .configurator-toggle-tab {
     background: none;
