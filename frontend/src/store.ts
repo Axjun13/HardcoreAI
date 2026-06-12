@@ -158,12 +158,134 @@ function buildProjectFileState(files: any[]): { fileContents: Record<string, str
   return { fileContents, fileTree };
 }
 
+const isBrowser = typeof window !== 'undefined';
+
+const getInitialActiveProjectId = () => {
+  if (!isBrowser) return null;
+  try {
+    const val = localStorage.getItem("activeProjectId");
+    return val ? JSON.parse(val) : null;
+  } catch {
+    return null;
+  }
+};
+
+const getInitialActiveFile = () => {
+  if (!isBrowser) return null;
+  try {
+    const val = localStorage.getItem("activeFile");
+    return val ? JSON.parse(val) : null;
+  } catch {
+    return null;
+  }
+};
+
+const getInitialOpenFiles = () => {
+  if (!isBrowser) return [];
+  try {
+    const val = localStorage.getItem("openFiles");
+    return val ? JSON.parse(val) : [];
+  } catch {
+    return [];
+  }
+};
+
+const getInitialShowWelcomeScreen = () => {
+  if (!isBrowser) return true;
+  try {
+    const val = localStorage.getItem("showWelcomeScreen");
+    return val ? JSON.parse(val) : true;
+  } catch {
+    return true;
+  }
+};
+
+const getInitialSelectedBoard = () => {
+  if (!isBrowser) return "STM32F401";
+  try {
+    const val = localStorage.getItem("selectedBoard");
+    return val ? JSON.parse(val) : "STM32F401";
+  } catch {
+    return "STM32F401";
+  }
+};
+
+const getInitialSelectedProbe = () => {
+  if (!isBrowser) return "ST-Link V2";
+  try {
+    const val = localStorage.getItem("selectedProbe");
+    return val ? JSON.parse(val) : "ST-Link V2";
+  } catch {
+    return "ST-Link V2";
+  }
+};
+
+const getInitialToolchainPath = () => {
+  if (!isBrowser) return "/usr/bin/arm-none-eabi-gcc";
+  try {
+    const val = localStorage.getItem("toolchainPath");
+    return val ? JSON.parse(val) : "/usr/bin/arm-none-eabi-gcc";
+  } catch {
+    return "/usr/bin/arm-none-eabi-gcc";
+  }
+};
+
+const getInitialActiveSidebarTab = () => {
+  if (!isBrowser) return "explorer";
+  try {
+    const val = localStorage.getItem("activeSidebarTab");
+    return val ? JSON.parse(val) : "explorer";
+  } catch {
+    return "explorer";
+  }
+};
+
+const getInitialActiveBottomTab = () => {
+  if (!isBrowser) return "terminal";
+  try {
+    const val = localStorage.getItem("activeBottomTab");
+    return val ? JSON.parse(val) : "terminal";
+  } catch {
+    return "terminal";
+  }
+};
+
+const getInitialTerminalOpen = () => {
+  if (!isBrowser) return true;
+  try {
+    const val = localStorage.getItem("terminalOpen");
+    return val ? JSON.parse(val) : true;
+  } catch {
+    return true;
+  }
+};
+
+const getInitialPins = (initialProjId: string | null) => {
+  if (!isBrowser || !initialProjId) return initialPins;
+  try {
+    const val = localStorage.getItem(`pins_${initialProjId}`);
+    return val ? JSON.parse(val) : initialPins;
+  } catch {
+    return initialPins;
+  }
+};
+
+const getSavedPins = (projectId: string) => {
+  if (!isBrowser) return null;
+  try {
+    const val = localStorage.getItem(`pins_${projectId}`);
+    return val ? JSON.parse(val) : null;
+  } catch {
+    return null;
+  }
+};
+
 export const workspaceStore = writable({
   // Project & Files
-  activeProjectId: null as string | null,
+  activeProjectId: getInitialActiveProjectId(),
   projectsList: [] as any[],
-  activeFile: null as string | null,
-  openFiles: [] as string[],
+  activeFile: getInitialActiveFile(),
+  openFiles: getInitialOpenFiles(),
   gitChanges: [] as { path: string; status: string }[],
   fileContents: {} as Record<string, string>,
   fileTree: [] as FileItem[],
@@ -191,17 +313,17 @@ export const workspaceStore = writable({
   selectedProvider: "openrouter",
 
   // UI Tabs
-  activeBottomTab: "terminal" as "terminal" | "plotter" | "registers" | "memory",
-  terminalOpen: true,  // whether the bottom drawer (serial/build/etc.) is expanded
-  showWelcomeScreen: true,
-  activeSidebarTab: "explorer" as "explorer" | "search" | "git" | "extensions" | "boards" | "rag" | "libraries",
-  selectedBoard: "STM32F401" as "STM32F401" | "ESP32-S3" | "RP2040",
-  selectedProbe: "ST-Link V2" as "ST-Link V2" | "J-Link" | "CMSIS-DAP",
-  toolchainPath: "/usr/bin/arm-none-eabi-gcc",
+  activeBottomTab: getInitialActiveBottomTab() as "terminal" | "plotter" | "registers" | "memory",
+  terminalOpen: getInitialTerminalOpen(),  // whether the bottom drawer (serial/build/etc.) is expanded
+  showWelcomeScreen: getInitialShowWelcomeScreen(),
+  activeSidebarTab: getInitialActiveSidebarTab() as "explorer" | "search" | "git" | "debug" | "extensions" | "boards" | "rag" | "libraries",
+  selectedBoard: getInitialSelectedBoard() as "STM32F401" | "ESP32-S3" | "RP2040",
+  selectedProbe: getInitialSelectedProbe() as "ST-Link V2" | "J-Link" | "CMSIS-DAP",
+  toolchainPath: getInitialToolchainPath(),
 
   // ── NEW FEATURE STATE ──
   // Interactive Pin Configuration
-  pins: initialPins as PinConfig[],
+  pins: getInitialPins(getInitialActiveProjectId()) as PinConfig[],
   
   analogSensors: {
     temp: 24.5,
@@ -291,20 +413,42 @@ export const actions = {
         console.error("Failed to load chat history", err);
       }
 
-      workspaceStore.update(s => ({
-        ...s,
-        activeProjectId: id,
-        fileTree,
-        fileContents,
-        activeFile: files.length > 0 ? "/" + files[0].path : null,
-        openFiles: files.length > 0 ? ["/" + files[0].path] : [],
-        // Clear all session-specific state so previous project data doesn't bleed over
-        aiMessages: [],
-        buildLogs: [],
-        serialLogs: [],
+      workspaceStore.update(s => {
+        const filePaths = files.map(f => "/" + String(f.path || "").replace(/^\/+/, ""));
 
+        let activeFile = s.activeFile;
+        let openFiles = s.openFiles;
 
-      }));
+        if (!activeFile || !filePaths.includes(activeFile)) {
+          activeFile = files.length > 0 ? "/" + files[0].path : null;
+        }
+
+        openFiles = openFiles.filter(f => filePaths.includes(f));
+        if (openFiles.length === 0 && activeFile) {
+          openFiles = [activeFile];
+        }
+
+        const savedPins = getSavedPins(id) || initialPins;
+
+        return {
+          ...s,
+          activeProjectId: id,
+          fileTree,
+          fileContents,
+          activeFile,
+          openFiles,
+          aiMessages: history,
+          pins: savedPins,
+          // Clear all session-specific state so previous project data doesn't bleed over
+          buildLogs: [],
+          serialLogs: [],
+          isDebugging: false,
+          debuggerActive: false,
+          currentLine: null,
+          crashed: false,
+          crashReason: null,
+        };
+      });
       
       // Also fetch RAG documents for this project
       await actions.fetchRagDocuments();
@@ -427,6 +571,81 @@ export const actions = {
         await actions.refreshProjectFiles(projectId);
       } catch(e) {
         console.error("Failed to create folder on backend", e);
+      }
+    }
+  },
+
+  deleteFile: async (path: string) => {
+    let projectId: string | null = null;
+    workspaceStore.update(s => {
+      projectId = s.activeProjectId;
+      const fileContents = { ...s.fileContents };
+      delete fileContents[path];
+      const openFiles = s.openFiles.filter(f => f !== path);
+      let activeFile = s.activeFile;
+      if (activeFile === path) {
+        activeFile = openFiles.length > 0 ? openFiles[openFiles.length - 1] : null;
+      }
+      return {
+        ...s,
+        fileContents,
+        openFiles,
+        activeFile
+      };
+    });
+    if (projectId) {
+      try {
+        const relPath = path.startsWith('/') ? path.substring(1) : path;
+        await api.deleteFile(projectId, relPath);
+        await actions.refreshProjectFiles(projectId);
+        await actions.loadGitStatus();
+      } catch (e) {
+        console.error("Failed to delete file on backend", e);
+        alert("Failed to delete file: " + (e instanceof Error ? e.message : String(e)));
+      }
+    }
+  },
+
+  deleteFolder: async (folderPath: string) => {
+    let projectId: string | null = null;
+    let filesToDelete: string[] = [];
+    workspaceStore.update(s => {
+      projectId = s.activeProjectId;
+      const folderPathWithSlash = folderPath.endsWith('/') ? folderPath : folderPath + '/';
+      
+      // Find all file paths starting with the folder path
+      filesToDelete = Object.keys(s.fileContents).filter(path => 
+        path.startsWith(folderPathWithSlash) || path === folderPath
+      );
+
+      const fileContents = { ...s.fileContents };
+      filesToDelete.forEach(path => delete fileContents[path]);
+
+      const openFiles = s.openFiles.filter(f => !filesToDelete.includes(f));
+      let activeFile = s.activeFile;
+      if (activeFile && filesToDelete.includes(activeFile)) {
+        activeFile = openFiles.length > 0 ? openFiles[openFiles.length - 1] : null;
+      }
+
+      return {
+        ...s,
+        fileContents,
+        openFiles,
+        activeFile
+      };
+    });
+
+    if (projectId && filesToDelete.length > 0) {
+      try {
+        for (const file of filesToDelete) {
+          const relPath = file.startsWith('/') ? file.substring(1) : file;
+          await api.deleteFile(projectId, relPath);
+        }
+        await actions.refreshProjectFiles(projectId);
+        await actions.loadGitStatus();
+      } catch (e) {
+        console.error("Failed to delete folder files on backend", e);
+        alert("Failed to delete folder content completely: " + (e instanceof Error ? e.message : String(e)));
       }
     }
   },
@@ -555,7 +774,7 @@ export const actions = {
   addPlotPoint: (pt: PlotDataPoint) => {
     workspaceStore.update(s => ({ ...s, plotData: [...s.plotData, pt] }));
   },
-  setBottomTab: (tab: "terminal" | "plotter" | "registers" | "memory") => {
+  setBottomTab: (tab: "terminal" | "registers" | "memory") => {
     workspaceStore.update(s => ({ ...s, activeBottomTab: tab }));
   },
   setTerminalOpen: (open: boolean) => {
@@ -1321,3 +1540,35 @@ export const actions = {
     }
   },
 };
+
+// Subscribe to workspaceStore and persist state to localStorage
+if (typeof window !== "undefined") {
+  workspaceStore.subscribe(s => {
+    try {
+      if (s.activeProjectId) {
+        localStorage.setItem("activeProjectId", JSON.stringify(s.activeProjectId));
+        // Save project-specific pins
+        localStorage.setItem(`pins_${s.activeProjectId}`, JSON.stringify(s.pins));
+      } else {
+        localStorage.removeItem("activeProjectId");
+      }
+      if (s.activeFile) {
+        localStorage.setItem("activeFile", JSON.stringify(s.activeFile));
+      } else {
+        localStorage.removeItem("activeFile");
+      }
+      localStorage.setItem("openFiles", JSON.stringify(s.openFiles));
+      localStorage.setItem("showWelcomeScreen", JSON.stringify(s.showWelcomeScreen));
+
+      // Global UI configurations
+      localStorage.setItem("selectedBoard", JSON.stringify(s.selectedBoard));
+      localStorage.setItem("selectedProbe", JSON.stringify(s.selectedProbe));
+      localStorage.setItem("toolchainPath", JSON.stringify(s.toolchainPath));
+      localStorage.setItem("activeSidebarTab", JSON.stringify(s.activeSidebarTab));
+      localStorage.setItem("activeBottomTab", JSON.stringify(s.activeBottomTab));
+      localStorage.setItem("terminalOpen", JSON.stringify(s.terminalOpen));
+    } catch (e) {
+      console.error("Failed to sync store to localStorage:", e);
+    }
+  });
+}
