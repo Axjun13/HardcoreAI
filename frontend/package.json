@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@gitgraph/js": "^1.4.0",
     "lucide-svelte": "^0.475.0",
     "monaco-editor": "^0.52.0",
     "svelte": "^5.2.0",

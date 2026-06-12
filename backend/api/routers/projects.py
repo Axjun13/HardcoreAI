@@ -68,11 +68,28 @@ def create_project(payload: ProjectCreate, user_id: str = Depends(get_current_us
 
         if project.path:
             import os
+            import subprocess
             for rel_path, _language, content in files:
                 full_path = os.path.join(project.path, rel_path)
                 os.makedirs(os.path.dirname(full_path), exist_ok=True)
                 with open(full_path, "w", encoding="utf-8") as f:
                     f.write(content)
+
+            # Auto-initialize git and make the first commit
+            try:
+                subprocess.run(["git", "init"], cwd=project.path, check=True, capture_output=True)
+                subprocess.run(["git", "config", "user.name", "HardcoreAI Copilot"], cwd=project.path, capture_output=True)
+                subprocess.run(["git", "config", "user.email", "copilot@hardcore-ai.local"], cwd=project.path, capture_output=True)
+                subprocess.run(["git", "add", "."], cwd=project.path, capture_output=True)
+                subprocess.run(["git", "commit", "-m", "Initial commit from HardcoreAI template"], cwd=project.path, capture_output=True)
+                
+                # Fetch the commit hash and save to version_number
+                hash_res = subprocess.run(["git", "rev-parse", "HEAD"], cwd=project.path, capture_output=True, text=True)
+                if hash_res.returncode == 0:
+                    project.version_number = hash_res.stdout.strip()
+                    
+            except Exception as e:
+                print(f"Failed to auto-init git in {project.path}: {e}")
 
         session.commit()
         session.refresh(project)

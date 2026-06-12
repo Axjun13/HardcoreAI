@@ -192,11 +192,27 @@ async createProject(name: string, description: string = "", path: string | null 
     return res.json();
   },
 
+  async getGitInfo() {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/git/info`, {
+      headers: { "Authorization": "Bearer TEST_TOKEN" }
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
   async getGitStatus() {
     const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/git/status`, {
       headers: {
         "Authorization": "Bearer TEST_TOKEN"
       }
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async getGitLog(n: number = 50) {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/git/log?n=${n}`, {
+      headers: { "Authorization": "Bearer TEST_TOKEN" }
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
@@ -210,6 +226,43 @@ async createProject(name: string, description: string = "", path: string | null 
         "Authorization": "Bearer TEST_TOKEN"
       },
       body: JSON.stringify({ message })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async checkoutCommit(ref: string) {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/git/checkout`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer TEST_TOKEN" },
+      body: JSON.stringify({ ref })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async checkoutHead() {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/git/checkout-head`, {
+      method: "POST",
+      headers: { "Authorization": "Bearer TEST_TOKEN" }
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async getGitBranches() {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/git/branches`, {
+      headers: { "Authorization": "Bearer TEST_TOKEN" }
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async createGitBranch(name: string) {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/git/branches`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer TEST_TOKEN" },
+      body: JSON.stringify({ name })
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();

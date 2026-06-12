@@ -20,6 +20,10 @@
     ArrowRight,
     Search,
     GitBranch,
+    GitCommit,
+    Tag,
+    RotateCcw,
+    AlertCircle,
     Blocks,
     Folder,
     Settings,
@@ -37,6 +41,7 @@
     Package,
     Camera,
     ArrowDown,
+    RefreshCw,
   } from "lucide-svelte";
 
   let aiInput = "";
@@ -88,6 +93,14 @@
     showScrollToBottom = scrollHeight - scrollTop - clientHeight > 150;
   }
 
+  // Width (px) of a commit's graph column, based on its branch/route tracks.
+  function gitColWidth(commit: any): number {
+    const trackWidths = (commit.routes || []).map(
+      (r: any) => Math.max(r.fromTrack, r.toTrack) + 1
+    );
+    return Math.max(1, ...trackWidths, (commit.track || 0) + 1) * 14;
+  }
+
   function scrollToBottom() {
     if (chatContentEl) {
       chatContentEl.scrollTo({
@@ -136,6 +149,8 @@
   let gitCommitMessage = "";
   let gitCommitting = false;
   let gitCommitFeedback = "";
+  let gitCheckoutLoading: string | null = null;  // hash being checked out
+  let gitCheckoutError: string | null = null;
 
   // Panel sizing
   let sidebarWidth = 260;
@@ -1291,9 +1306,15 @@
             ? 'active'
             : ''}"
           onclick={() => handleActivityTabClick("git")}
-          title="Source Control"
+          title="Source Control{$workspaceStore.gitInfo.is_repo ? '' : ' (no git repo)'}"
+          style="{!$workspaceStore.gitInfo.is_repo ? 'opacity: 0.45;' : ''}"
         >
-          <GitBranch size={18} />
+          <div style="position: relative; display: inline-flex;">
+            <GitBranch size={18} />
+            {#if $workspaceStore.gitChanges.length > 0}
+              <span class="git-activity-badge">{$workspaceStore.gitChanges.length}</span>
+            {/if}
+          </div>
         </button>
 
         <!-- svelte-ignore a11y-click-events-have-key-events -->
@@ -1756,134 +1777,274 @@
         {/if}
 
         {#if $workspaceStore.activeSidebarTab === "git"}
-          <div class="panel-header">
+          <!-- Panel header with refresh -->
+          <div class="panel-header" style="display:flex; align-items:center; justify-content:space-between; padding: 10px 14px; border-bottom: 1px solid var(--border-color);">
             <div class="panel-title">Source Control</div>
-          </div>
-          <div class="panel-body">
-            <div
-              class="sidebar-git-panel"
-              style="display: flex; flex-direction: column; gap: 8px; padding: 12px;"
+            <button
+              class="close-ai-btn"
+              title="Refresh"
+              onclick={() => { actions.loadGitInfo(); actions.loadGitStatus(); actions.loadGitLog(); }}
             >
-              <input
-                type="text"
-                placeholder="Commit message (Ctrl+Enter)..."
-                bind:value={gitCommitMessage}
-                disabled={gitCommitting}
-                onkeydown={async (e) => {
-                  if (e.key === "Enter" && e.ctrlKey && !gitCommitting) {
-                    const msg = gitCommitMessage.trim();
-                    if (msg) {
-                      gitCommitting = true;
-                      gitCommitFeedback = "";
-                      try {
-                        await actions.commitChanges(msg);
-                        gitCommitMessage = "";
-                        gitCommitFeedback = "Commit successful!";
-                        setTimeout(() => {
-                          gitCommitFeedback = "";
-                        }, 3000);
-                      } catch (err) {
-                        gitCommitFeedback = "Failed to commit.";
-                        setTimeout(() => {
-                          gitCommitFeedback = "";
-                        }, 4000);
-                      } finally {
-                        gitCommitting = false;
-                      }
-                    }
-                  }
-                }}
-                style="width: 100%; padding: 6px 10px; font-size: 0.76rem;"
-              />
-              <button
-                class="git-commit-btn"
-                disabled={!gitCommitMessage.trim() || gitCommitting}
-                onclick={async () => {
-                  const msg = gitCommitMessage.trim();
-                  if (msg) {
-                    gitCommitting = true;
-                    gitCommitFeedback = "";
-                    try {
-                      await actions.commitChanges(msg);
-                      gitCommitMessage = "";
-                      gitCommitFeedback = "Commit successful!";
-                      setTimeout(() => {
-                        gitCommitFeedback = "";
-                      }, 3000);
-                    } catch (err) {
-                      gitCommitFeedback = "Failed to commit.";
-                      setTimeout(() => {
-                        gitCommitFeedback = "";
-                      }, 4000);
-                    } finally {
-                      gitCommitting = false;
-                    }
-                  }
-                }}
-                style="width: 100%; margin-top: 4px;"
-              >
-                {gitCommitting ? "Committing..." : "Commit Changes"}
-              </button>
+              <RefreshCw size={12} />
+            </button>
+          </div>
 
-              {#if gitCommitFeedback}
-                <div
-                  style="font-size: 0.72rem; text-align: center; margin-top: 2px; font-weight: 500;
-                  {gitCommitFeedback.includes('Failed')
-                    ? 'color: var(--accent-error);'
-                    : 'color: var(--accent-success);'}"
-                >
-                  {gitCommitFeedback}
+          {#if !$workspaceStore.gitInfo.is_repo}
+            <!-- No-repo state -->
+            <div class="git-no-repo">
+              <GitBranch size={32} style="color: var(--text-dark); opacity: 0.3; margin-bottom: 12px;" />
+              <p style="font-size: 0.78rem; color: var(--text-dark); text-align: center; line-height: 1.6; margin: 0;">
+                No Git repository detected.<br/>
+                <span style="font-size: 0.7rem; opacity: 0.6;">Open a folder containing a <code>.git</code> directory.</span>
+              </p>
+            </div>
+          {:else}
+            <div class="panel-body" style="overflow-y: auto; padding: 0;">
+              <div class="sidebar-git-panel">
+
+                <!-- Branch row -->
+                <div class="git-branch-row">
+                  <GitBranch size={12} style="color: var(--accent-violet); flex-shrink:0;" />
+                  {#if $workspaceStore.gitInfo.detached}
+                    <span class="git-detached-badge" style="cursor: pointer" title="Create branch from here" onclick={async () => {
+                        const name = prompt("Enter new branch name to save this detached state:");
+                        if (name && name.trim()) {
+                          try {
+                            await actions.createGitBranch(name.trim());
+                          } catch (err: any) {
+                            gitCheckoutError = err?.message ?? "Failed to create branch";
+                          }
+                        }
+                    }}>
+                      DETACHED @ {$workspaceStore.gitInfo.short_hash ?? '???'}
+                      <span style="opacity: 0.6; margin-left: 4px;">(+ Branch)</span>
+                    </span>
+                  {:else}
+                    <select
+                      class="git-branch-select"
+                      value={$workspaceStore.gitInfo.branch ?? ''}
+                      onchange={async (e) => {
+                        const val = (e.target as HTMLSelectElement).value;
+                        if (val === '___CREATE_NEW___') {
+                          // reset select visual
+                          (e.target as HTMLSelectElement).value = $workspaceStore.gitInfo.branch ?? '';
+                          const name = prompt("Enter new branch name:");
+                          if (name && name.trim()) {
+                            try {
+                              await actions.createGitBranch(name.trim());
+                            } catch (err: any) {
+                              gitCheckoutError = err?.message ?? "Failed to create branch";
+                            }
+                          }
+                        } else if (val) {
+                          try {
+                            await actions.checkoutCommit(val);
+                          } catch (err: any) {
+                            gitCheckoutError = err?.message ?? "Failed to checkout branch";
+                          }
+                        }
+                      }}
+                    >
+                      {#each $workspaceStore.gitBranches as b}
+                        <option value={b}>{b}</option>
+                      {/each}
+                      <option disabled>──────────</option>
+                      <option value="___CREATE_NEW___">+ Create new branch...</option>
+                    </select>
+                  {/if}
                 </div>
-              {/if}
 
-              <div
-                style="font-size: 0.75rem; color: var(--text-muted); margin-top: 12px; border-top: 1px solid var(--border-color); padding-top: 8px;"
-              >
-                <strong style="display: block; margin-bottom: 6px;">
-                  Changed Files ({$workspaceStore.gitChanges.length})
-                </strong>
-
-                <div
-                  style="max-height: 250px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;"
-                >
-                  {#each $workspaceStore.gitChanges as change}
-                    <div
-                      style="display: flex; justify-content: space-between; align-items: center; padding: 4px 8px; background: rgba(255,255,255,0.02); border-radius: 3px; font-family: var(--font-mono); font-size: 0.7rem;"
+                <!-- Detached HEAD warning -->
+                {#if $workspaceStore.gitInfo.detached}
+                  <div class="git-detached-warning">
+                    <AlertCircle size={12} style="flex-shrink:0;" />
+                    <span>You are in detached HEAD state.</span>
+                    <button
+                      class="git-return-head-btn"
+                      onclick={async () => {
+                        try { await actions.checkoutHead(); }
+                        catch (e: any) { gitCheckoutError = e?.message ?? "Failed"; }
+                      }}
                     >
-                      <span
-                        style="text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 180px; color: var(--text-active);"
-                        title={change.path}
-                      >
-                        {change.path}
-                      </span>
-                      <span
-                        style="font-weight: 700; font-size: 0.65rem; padding: 1px 4px; border-radius: 2px;
-                        {change.status.includes('M')
-                          ? 'color: var(--accent-warning); background: rgba(245,158,11,0.1);'
-                          : change.status.includes('?')
-                            ? 'color: var(--accent-cyan); background: rgba(6,182,212,0.1);'
-                            : change.status.includes('A')
-                              ? 'color: var(--accent-success); background: rgba(16,185,129,0.1);'
-                              : change.status.includes('D')
-                                ? 'color: var(--accent-error); background: rgba(239,68,68,0.1);'
-                                : 'color: var(--text-muted);'}"
-                      >
-                        {change.status}
-                      </span>
-                    </div>
-                  {/each}
+                      <RotateCcw size={10} />
+                      Return to HEAD
+                    </button>
+                  </div>
+                {/if}
 
-                  {#if $workspaceStore.gitChanges.length === 0}
-                    <div
-                      style="font-size: 0.7rem; color: var(--text-dark); padding: 8px 0; font-style: italic;"
-                    >
-                      No staged or unstaged changes.
+                <!-- Checkout error banner -->
+                {#if gitCheckoutError}
+                  <div style="background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 4px; padding: 6px 10px; font-size: 0.7rem; color: var(--accent-error); display:flex; align-items:center; gap:6px; margin: 0 12px;">
+                    <AlertCircle size={11} />
+                    <span style="flex:1;">{gitCheckoutError}</span>
+                    <button onclick={() => gitCheckoutError = null} style="background:none; border:none; color:inherit; cursor:pointer; padding:0;"><X size={10} /></button>
+                  </div>
+                {/if}
+
+                <!-- Commit section -->
+                <div class="git-commit-section">
+                  <input
+                    type="text"
+                    class="git-msg-input"
+                    placeholder="Commit message (Ctrl+Enter)..."
+                    bind:value={gitCommitMessage}
+                    disabled={gitCommitting}
+                    onkeydown={async (e) => {
+                      if (e.key === "Enter" && e.ctrlKey && !gitCommitting) {
+                        const msg = gitCommitMessage.trim();
+                        if (msg) {
+                          gitCommitting = true; gitCommitFeedback = "";
+                          try {
+                            await actions.commitChanges(msg);
+                            gitCommitMessage = "";
+                            gitCommitFeedback = "✓ Commit successful!";
+                            await actions.loadGitLog();
+                            setTimeout(() => { gitCommitFeedback = ""; }, 3000);
+                          } catch (err) {
+                            gitCommitFeedback = "Failed to commit.";
+                            setTimeout(() => { gitCommitFeedback = ""; }, 4000);
+                          } finally { gitCommitting = false; }
+                        }
+                      }
+                    }}
+                  />
+                  <button
+                    class="git-commit-btn"
+                    disabled={!gitCommitMessage.trim() || gitCommitting}
+                    onclick={async () => {
+                      const msg = gitCommitMessage.trim();
+                      if (msg) {
+                        gitCommitting = true; gitCommitFeedback = "";
+                        try {
+                          await actions.commitChanges(msg);
+                          gitCommitMessage = "";
+                          gitCommitFeedback = "✓ Commit successful!";
+                          await actions.loadGitLog();
+                          setTimeout(() => { gitCommitFeedback = ""; }, 3000);
+                        } catch (err) {
+                          gitCommitFeedback = "Failed to commit.";
+                          setTimeout(() => { gitCommitFeedback = ""; }, 4000);
+                        } finally { gitCommitting = false; }
+                      }
+                    }}
+                  >
+                    {gitCommitting ? "Committing..." : "Commit Changes"}
+                  </button>
+                  {#if gitCommitFeedback}
+                    <div class="git-commit-feedback {gitCommitFeedback.includes('Failed') ? 'error' : 'success'}">{gitCommitFeedback}</div>
+                  {/if}
+                </div>
+
+                <!-- Changed files -->
+                <div class="git-changes-section">
+                  <div class="git-section-header">Changed Files <span class="git-count-badge">{$workspaceStore.gitChanges.length}</span></div>
+                  <div class="git-file-list">
+                    {#each $workspaceStore.gitChanges as change}
+                      <div class="git-file-row">
+                        <span class="git-file-path" title={change.path}>{change.path}</span>
+                        <span class="git-status-badge {
+                          change.status === 'M' ? 'modified' :
+                          change.status === 'U' ? 'untracked' :
+                          change.status === 'A' ? 'added' :
+                          change.status === 'D' ? 'deleted' :
+                          change.status === 'R' ? 'renamed' :
+                          change.status === 'C' ? 'conflict' : ''
+                        }">{change.status}</span>
+                      </div>
+                    {/each}
+                    {#if $workspaceStore.gitChanges.length === 0}
+                      <div class="git-empty-hint">No staged or unstaged changes.</div>
+                    {/if}
+                  </div>
+                </div>
+
+                <!-- History / Git Graph -->
+                <div class="git-history-section">
+                  <div class="git-section-header">
+                    History
+                    {#if $workspaceStore.gitLogLoading}
+                      <span style="font-size:0.65rem; color:var(--text-dark); margin-left:6px; font-style:italic;">loading…</span>
+                    {/if}
+                  </div>
+
+                  {#if $workspaceStore.gitLog.length === 0 && !$workspaceStore.gitLogLoading}
+                    <div class="git-empty-hint">No commits yet.</div>
+                  {:else}
+                    <div class="git-graph-container">
+                      {#each $workspaceStore.gitLog as commit, i}
+                        {@const isHead = commit.hash === $workspaceStore.gitInfo.head_hash}
+                        {@const isExp = $workspaceStore.gitExpandedCommit === commit.hash}
+                        <!-- svelte-ignore a11y-click-events-have-key-events -->
+                        <!-- svelte-ignore a11y-no-static-element-interactions -->
+                        <div
+                          class="git-commit-row {isHead ? 'is-head' : ''} {isExp ? 'is-expanded' : ''}"
+                          onclick={() => actions.setGitExpandedCommit(commit.hash)}
+                        >
+                          <div class="git-graph-col" style="width: {commit.routes ? gitColWidth(commit) : 14}px;">
+                            {#if commit.routes}
+                              <svg class="git-graph-svg" width="100%" height="100%" style="position: absolute; top: 0; left: 0; pointer-events: none; overflow: visible;">
+                                {#each commit.routes as route}
+                                  <path
+                                    d="M {route.fromTrack * 14 + 7} 7 C {route.fromTrack * 14 + 7} 25, {route.toTrack * 14 + 7} 20, {route.toTrack * 14 + 7} 50"
+                                    stroke={route.color}
+                                    stroke-width="2"
+                                    fill="none"
+                                    vector-effect="non-scaling-stroke"
+                                    preserveAspectRatio="none"
+                                  />
+                                {/each}
+                              </svg>
+                            {/if}
+                            <div
+                              class="git-graph-dot {isHead ? 'head-dot' : ''}"
+                              style="position: absolute; top: 3px; left: {(commit.track || 0) * 14 + 2}px; border-color: {commit.color || 'var(--bg-secondary)'}; z-index: 2;"
+                            ></div>
+                          </div>
+                          <div class="git-commit-info">
+                            <div class="git-commit-top">
+                              <span class="git-commit-hash">{commit.short_hash}</span>
+                              {#each commit.refs as ref}
+                                <span class="git-ref-badge {ref === ($workspaceStore.gitInfo.branch ?? '') ? 'current-branch' : ''}">{ref}</span>
+                              {/each}
+                            </div>
+                            <div class="git-commit-subject" title={commit.subject}>{commit.subject}</div>
+                            <div class="git-commit-meta">{commit.author_name} · {commit.date_relative}</div>
+                          </div>
+                        </div>
+
+                        {#if isExp}
+                          <div class="git-commit-expanded">
+                            <div style="font-family:var(--font-mono); font-size:0.68rem; color:var(--text-muted); margin-bottom:6px; word-break:break-all;">{commit.hash}</div>
+                            <div style="font-size:0.7rem; color:var(--text-muted); margin-bottom:3px;"><strong style="color:var(--text-active);">{commit.author_name}</strong> &lt;{commit.author_email}&gt;</div>
+                            <div style="font-size:0.68rem; color:var(--text-dark); margin-bottom:10px;">{commit.date_iso.slice(0,19).replace('T',' ')}</div>
+                            {#if !isHead}
+                              <button
+                                class="git-checkout-btn"
+                                disabled={gitCheckoutLoading !== null}
+                                onclick={async (e) => {
+                                  e.stopPropagation();
+                                  gitCheckoutError = null;
+                                  gitCheckoutLoading = commit.hash;
+                                  try { await actions.checkoutCommit(commit.hash); }
+                                  catch (err: any) { gitCheckoutError = err?.message ?? "Checkout failed"; }
+                                  finally { gitCheckoutLoading = null; }
+                                }}
+                              >
+                                {gitCheckoutLoading === commit.hash ? "Checking out…" : "Checkout this commit"}
+                              </button>
+                            {:else}
+                              <div style="font-size:0.68rem; color:var(--accent-cyan); font-weight:600;">● Current HEAD</div>
+                            {/if}
+                          </div>
+                        {/if}
+                      {/each}
                     </div>
                   {/if}
                 </div>
+
               </div>
             </div>
-          </div>
+          {/if}
         {/if}
 
 
