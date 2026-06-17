@@ -17,6 +17,7 @@ backend/bin/
 backend/projects.db
 backend/app.db
 backend/test_*.py
+backend/tests/
 # Vendored flash toolchain (OpenOCD) — fetched per-platform by scripts/fetch-tools.mjs.
 # Binaries are large and OS-specific; don't commit them, but keep the README.
 backend/vendor/**
