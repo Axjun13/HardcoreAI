@@ -19,13 +19,14 @@ class GitManager:
         # If real_path is not provided, fetch it from the DB to prevent callers
         # from accidentally defaulting to the internal fallback workspace.
         if real_path is None:
-            from db.session import engine
-            from sqlmodel import Session, select
-            from db.models import ProjectRow
-            with Session(engine) as session:
-                project = session.exec(select(ProjectRow).where(ProjectRow.id == int(project_id))).first()
-                if project and project.path:
-                    real_path = project.path
+            if str(project_id).isdigit():
+                from db.session import engine
+                from sqlmodel import Session, select
+                from db.models import ProjectRow
+                with Session(engine) as session:
+                    project = session.exec(select(ProjectRow).where(ProjectRow.id == int(project_id))).first()
+                    if project and project.path:
+                        real_path = project.path
 
         # Prefer the real project folder if it already has a .git directory.
         if real_path and (Path(real_path) / ".git").exists():
@@ -83,7 +84,7 @@ class GitManager:
         """Return True only when the project's REAL folder contains a .git directory.
         The internal fallback workspace does not count — it must not appear as a repo
         in the UI (panel stays greyed-out for projects without a real git folder)."""
-        return (self.workspace_dir / ".git").exists()
+        return getattr(self, "using_real_path", False) and (self.workspace_dir / ".git").exists()
 
     def ensure_repo(self):
         """Create the workspace dir and init a bare git repo if missing."""
@@ -170,7 +171,7 @@ class GitManager:
 
         disk_files: set[str] = set()
         for root, dirs, filenames in os.walk(self.workspace_dir):
-            for ignored in [".git", ".pio", ".vscode"]:
+            for ignored in [".git", ".pio", ".vscode", "__pycache__", "node_modules", ".venv", "venv", "env", "dist", "build", ".pytest_cache", ".svelte-kit", "data", "backend/data"]:
                 if ignored in dirs:
                     dirs.remove(ignored)
             for f in filenames:
@@ -197,6 +198,8 @@ class GitManager:
 
     def sync_disk_to_db(self):
         """Read files from disk and overwrite the DB so the IDE reflects checkout changes."""
+        if not str(self.project_id).isdigit():
+            return
         from db.session import engine
         from sqlmodel import Session, select
         from db.models import CodeFileRow
@@ -204,7 +207,7 @@ class GitManager:
 
         disk_files = {}
         for root, dirs, filenames in os.walk(self.workspace_dir):
-            for ignored in [".git", ".pio", ".vscode", "__pycache__", "node_modules"]:
+            for ignored in [".git", ".pio", ".vscode", "__pycache__", "node_modules", ".venv", "venv", "env", "dist", "build", ".pytest_cache", ".svelte-kit", "data", "backend/data"]:
                 if ignored in dirs:
                     dirs.remove(ignored)
             for f in filenames:
@@ -360,6 +363,8 @@ class GitManager:
 
     def _update_db_version(self, head_hash: str | None = None):
         """Update the ProjectRow.version_number with the current commit hash."""
+        if not str(self.project_id).isdigit():
+            return
         if not head_hash:
             head_hash = self.get_current_head().get("hash")
         if not head_hash:

@@ -311,6 +311,7 @@ def test_git_tools_with_gitmanager(tmp_path, monkeypatch):
     def mock_init(self, project_id):
         self.project_id = project_id
         self.workspace_dir = tmp_path / "workspaces" / str(project_id)
+        self.using_real_path = True
         
     monkeypatch.setattr(GitManager, "__init__", mock_init)
     
