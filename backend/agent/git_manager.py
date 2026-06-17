@@ -83,7 +83,7 @@ class GitManager:
         """Return True only when the project's REAL folder contains a .git directory.
         The internal fallback workspace does not count — it must not appear as a repo
         in the UI (panel stays greyed-out for projects without a real git folder)."""
-        return self.using_real_path and (self.workspace_dir / ".git").exists()
+        return (self.workspace_dir / ".git").exists()
 
     def ensure_repo(self):
         """Create the workspace dir and init a bare git repo if missing."""
@@ -364,17 +364,26 @@ class GitManager:
             head_hash = self.get_current_head().get("hash")
         if not head_hash:
             return
-            
+
+        try:
+            project_id = int(self.project_id)
+        except (TypeError, ValueError):
+            return
+
         from db.session import engine
         from sqlmodel import Session, select
         from db.models import ProjectRow
+
         with Session(engine) as session:
-            project = session.exec(select(ProjectRow).where(ProjectRow.id == int(self.project_id))).first()
+            project = session.exec(
+                select(ProjectRow).where(ProjectRow.id == project_id)
+            ).first()
+
             if project:
                 project.version_number = head_hash
                 session.add(project)
                 session.commit()
-
+            
     def checkout_commit(self, ref: str) -> dict:
         """Checkout a specific commit or branch (detached HEAD for bare hash)."""
         if not self.is_git_repo():
