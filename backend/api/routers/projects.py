@@ -14,6 +14,7 @@ from db.models import CodeFileRow, ProjectRow
 from db.session import db_session
 from schemas import ProjectCreate, ProjectOut, ProjectUpdate
 from services.projects import default_files, get_project_or_404, project_out
+from agent.git_manager import GitManager
 
 router = APIRouter()
 
@@ -65,6 +66,18 @@ def create_project(payload: ProjectCreate, user_id: str = Depends(get_current_us
             session.add(
                 CodeFileRow(project_id=project.id, path=path, language=language, content=content)
             )
+
+        # Create backend workspace for Build/Flash
+        files_dict = {
+            path: {
+                "language": language,
+                "content": content,
+            }
+            for path, language, content in files
+        }
+
+        git_mgr = GitManager(str(project.id))
+        git_mgr.sync_db_to_disk(files_dict)
 
         if project.path:
             import os

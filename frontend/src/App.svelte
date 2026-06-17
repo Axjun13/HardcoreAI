@@ -92,7 +92,7 @@
   // Width (px) of a commit's graph column, based on its branch/route tracks.
   function gitColWidth(commit: any): number {
     const trackWidths = (commit.routes || []).map(
-      (r: any) => Math.max(r.fromTrack, r.toTrack) + 1
+      (r: any) => Math.max(r.fromTrack, r.toTrack) + 1,
     );
     return Math.max(1, ...trackWidths, (commit.track || 0) + 1) * 14;
   }
@@ -101,7 +101,7 @@
     if (chatContentEl) {
       chatContentEl.scrollTo({
         top: chatContentEl.scrollHeight,
-        behavior: "smooth"
+        behavior: "smooth",
       });
     }
   }
@@ -114,7 +114,7 @@
       if (scrollHeight - scrollTop - clientHeight < 300) {
         chatContentEl.scrollTo({
           top: chatContentEl.scrollHeight,
-          behavior: "smooth"
+          behavior: "smooth",
         });
       }
     });
@@ -145,7 +145,7 @@
   let gitCommitMessage = "";
   let gitCommitting = false;
   let gitCommitFeedback = "";
-  let gitCheckoutLoading: string | null = null;  // hash being checked out
+  let gitCheckoutLoading: string | null = null; // hash being checked out
   let gitCheckoutError: string | null = null;
 
   // Panel sizing
@@ -287,7 +287,8 @@
     await actions.loadProjects();
     if (typeof window !== "undefined") {
       const script = document.createElement("script");
-      script.src = "https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js";
+      script.src =
+        "https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js";
       script.onload = () => {
         html2canvas = (window as any).html2canvas;
       };
@@ -295,7 +296,9 @@
 
       // Auto-load project files if there is a saved activeProjectId
       let savedProjId: string | null = null;
-      workspaceStore.subscribe(s => { savedProjId = s.activeProjectId; })();
+      workspaceStore.subscribe((s) => {
+        savedProjId = s.activeProjectId;
+      })();
       if (savedProjId) {
         await actions.loadProject(savedProjId);
       }
@@ -504,7 +507,6 @@
   function handleFlash() {
     actions.runFlash();
   }
-
 
   function handleAiSend(e: Event) {
     e.preventDefault();
@@ -759,7 +761,9 @@
   }
 
   // Project files flat list for tagging autocomplete
-  $: projectFilesList = Object.keys($workspaceStore.fileContents).map(p => p.startsWith('/') ? p.substring(1) : p);
+  $: projectFilesList = Object.keys($workspaceStore.fileContents).map((p) =>
+    p.startsWith("/") ? p.substring(1) : p,
+  );
 
   function handleChatInput(e: Event) {
     const input = e.target as HTMLInputElement;
@@ -786,8 +790,8 @@
   function handleChatInputKeyDown(e: KeyboardEvent) {
     if (!showFileTagDropdown) return;
 
-    const filteredFiles = projectFilesList.filter(f => 
-      f.toLowerCase().includes(fileTagFilter)
+    const filteredFiles = projectFilesList.filter((f) =>
+      f.toLowerCase().includes(fileTagFilter),
     );
 
     if (filteredFiles.length === 0) return;
@@ -797,7 +801,8 @@
       fileTagIndex = (fileTagIndex + 1) % filteredFiles.length;
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      fileTagIndex = (fileTagIndex - 1 + filteredFiles.length) % filteredFiles.length;
+      fileTagIndex =
+        (fileTagIndex - 1 + filteredFiles.length) % filteredFiles.length;
     } else if (e.key === "Enter" || e.key === "Tab") {
       e.preventDefault();
       insertFileTag(filteredFiles[fileTagIndex]);
@@ -811,10 +816,10 @@
     if (fileTagTriggerPos === -1 || !fileTagInputRef) return;
     const value = fileTagInputRef.value;
     const cursor = fileTagInputRef.selectionStart || 0;
-    
+
     const before = value.substring(0, fileTagTriggerPos);
     const after = value.substring(cursor);
-    
+
     aiInput = before + "@" + filePath + " " + after;
     showFileTagDropdown = false;
     fileTagTriggerPos = -1;
@@ -852,6 +857,25 @@
       alert("Failed to capture screenshot: " + err);
     }
   }
+
+  async function handleHalFilesGenerated(
+    files: { path: string; content: string }[],
+  ) {
+    const projectId = $workspaceStore.activeProjectId;
+    if (!projectId) return;
+    try {
+      await actions.loadProject(projectId); // re-fetches the file tree from backend
+      actions.setActiveSidebarTab("explorer"); // switches left sidebar to show files
+      if (files.length > 0) {
+        const firstPath = files[0].path.startsWith("/")
+          ? files[0].path
+          : "/" + files[0].path;
+        actions.setActiveFile(firstPath); // opens the first generated file in editor
+      }
+    } catch (e: any) {
+      actions.addBuildLog("[HAL] Failed to refresh project: " + e.message);
+    }
+  }
 </script>
 
 <svelte:window
@@ -860,7 +884,7 @@
   onkeydown={handleKeyDown}
   onclick={(e) => {
     const target = e.target as HTMLElement;
-    if (showViewDropdown && !target.closest('.view-menu-container')) {
+    if (showViewDropdown && !target.closest(".view-menu-container")) {
       showViewDropdown = false;
     }
   }}
@@ -898,15 +922,11 @@
         <Zap size={12} />
         <span>{$workspaceStore.isFlashing ? "Flashing..." : "Flash"}</span>
       </button>
-
-
     </div>
 
     <!-- Connectivity Status & Controls -->
     <div class="connection-status-group">
       <div class="connection-status">
-
-
         <button
           class="status-pill"
           onclick={() => actions.setActiveSidebarTab("rag")}
@@ -919,7 +939,10 @@
       </div>
 
       <!-- Quick Access Right -->
-      <div class="tauri-controls-group" style="display: flex; align-items: center; gap: 8px;">
+      <div
+        class="tauri-controls-group"
+        style="display: flex; align-items: center; gap: 8px;"
+      >
         <!-- Take SS Button -->
         <button
           type="button"
@@ -953,7 +976,7 @@
               onclick={() => (showViewDropdown = false)}
             >
               <div class="dropdown-header">Toggle Panels</div>
-              
+
               <button
                 type="button"
                 class="dropdown-item"
@@ -963,7 +986,12 @@
                 }}
               >
                 <span>Left Sidebar</span>
-                <span class="check-icon" style="color: {showSidebar ? 'var(--accent-violet)' : 'var(--text-dark)'}">{showSidebar ? "✓" : "○"}</span>
+                <span
+                  class="check-icon"
+                  style="color: {showSidebar
+                    ? 'var(--accent-violet)'
+                    : 'var(--text-dark)'}">{showSidebar ? "✓" : "○"}</span
+                >
               </button>
 
               <button
@@ -975,7 +1003,13 @@
                 }}
               >
                 <span>Bottom Terminal</span>
-                <span class="check-icon" style="color: {$workspaceStore.terminalOpen ? 'var(--accent-violet)' : 'var(--text-dark)'}">{$workspaceStore.terminalOpen ? "✓" : "○"}</span>
+                <span
+                  class="check-icon"
+                  style="color: {$workspaceStore.terminalOpen
+                    ? 'var(--accent-violet)'
+                    : 'var(--text-dark)'}"
+                  >{$workspaceStore.terminalOpen ? "✓" : "○"}</span
+                >
               </button>
 
               <button
@@ -987,7 +1021,12 @@
                 }}
               >
                 <span>Embedded Configurator</span>
-                <span class="check-icon" style="color: {showConfigurator ? 'var(--accent-violet)' : 'var(--text-dark)'}">{showConfigurator ? "✓" : "○"}</span>
+                <span
+                  class="check-icon"
+                  style="color: {showConfigurator
+                    ? 'var(--accent-violet)'
+                    : 'var(--text-dark)'}">{showConfigurator ? "✓" : "○"}</span
+                >
               </button>
 
               <button
@@ -999,7 +1038,12 @@
                 }}
               >
                 <span>AI Copilot Chat</span>
-                <span class="check-icon" style="color: {showCopilot ? 'var(--accent-violet)' : 'var(--text-dark)'}">{showCopilot ? "✓" : "○"}</span>
+                <span
+                  class="check-icon"
+                  style="color: {showCopilot
+                    ? 'var(--accent-violet)'
+                    : 'var(--text-dark)'}">{showCopilot ? "✓" : "○"}</span
+                >
               </button>
             </div>
           {/if}
@@ -1250,14 +1294,17 @@
   {:else}
     <!-- 2. Main Workspace Layout -->
     <div
-      class="helix-main-workspace {(showConfigurator || showCopilot) ? 'ai-open' : ''}"
+      class="helix-main-workspace {showConfigurator || showCopilot
+        ? 'ai-open'
+        : ''}"
     >
       <!-- Leftmost Activity Bar -->
       <nav class="activity-bar">
         <!-- svelte-ignore a11y-click-events-have-key-events -->
         <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
         <button
-          class="activity-item {$workspaceStore.activeSidebarTab === 'explorer' && showSidebar
+          class="activity-item {$workspaceStore.activeSidebarTab ===
+            'explorer' && showSidebar
             ? 'active'
             : ''}"
           onclick={() => handleActivityTabClick("explorer")}
@@ -1268,7 +1315,8 @@
         <!-- svelte-ignore a11y-click-events-have-key-events -->
         <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
         <button
-          class="activity-item {$workspaceStore.activeSidebarTab === 'search' && showSidebar
+          class="activity-item {$workspaceStore.activeSidebarTab === 'search' &&
+          showSidebar
             ? 'active'
             : ''}"
           onclick={() => handleActivityTabClick("search")}
@@ -1279,17 +1327,22 @@
         <!-- svelte-ignore a11y-click-events-have-key-events -->
         <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
         <button
-          class="activity-item {$workspaceStore.activeSidebarTab === 'git' && showSidebar
+          class="activity-item {$workspaceStore.activeSidebarTab === 'git' &&
+          showSidebar
             ? 'active'
             : ''}"
           onclick={() => handleActivityTabClick("git")}
-          title="Source Control{$workspaceStore.gitInfo.is_repo ? '' : ' (no git repo)'}"
-          style="{!$workspaceStore.gitInfo.is_repo ? 'opacity: 0.45;' : ''}"
+          title="Source Control{$workspaceStore.gitInfo.is_repo
+            ? ''
+            : ' (no git repo)'}"
+          style={!$workspaceStore.gitInfo.is_repo ? "opacity: 0.45;" : ""}
         >
           <div style="position: relative; display: inline-flex;">
             <GitBranch size={18} />
             {#if $workspaceStore.gitChanges.length > 0}
-              <span class="git-activity-badge">{$workspaceStore.gitChanges.length}</span>
+              <span class="git-activity-badge"
+                >{$workspaceStore.gitChanges.length}</span
+              >
             {/if}
           </div>
         </button>
@@ -1297,7 +1350,8 @@
         <!-- svelte-ignore a11y-click-events-have-key-events -->
         <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
         <button
-          class="activity-item {$workspaceStore.activeSidebarTab === 'rag' && showSidebar
+          class="activity-item {$workspaceStore.activeSidebarTab === 'rag' &&
+          showSidebar
             ? 'active'
             : ''}"
           onclick={() => handleActivityTabClick("rag")}
@@ -1308,7 +1362,8 @@
         <!-- svelte-ignore a11y-click-events-have-key-events -->
         <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
         <button
-          class="activity-item {$workspaceStore.activeSidebarTab === 'boards' && showSidebar
+          class="activity-item {$workspaceStore.activeSidebarTab === 'boards' &&
+          showSidebar
             ? 'active'
             : ''}"
           onclick={() => handleActivityTabClick("boards")}
@@ -1319,7 +1374,8 @@
         <!-- svelte-ignore a11y-click-events-have-key-events -->
         <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
         <button
-          class="activity-item {$workspaceStore.activeSidebarTab === 'libraries' && showSidebar
+          class="activity-item {$workspaceStore.activeSidebarTab ===
+            'libraries' && showSidebar
             ? 'active'
             : ''}"
           onclick={() => handleActivityTabClick("libraries")}
@@ -1335,23 +1391,36 @@
           class="workspace-panel sidebar-panel"
           style="width: {sidebarWidth}px;"
         >
-        {#if $workspaceStore.activeSidebarTab === "explorer"}
-          <div
-            class="panel-header"
-            style="height: auto; padding: 10px 14px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; border-bottom: 1px solid var(--border-color);"
-          >
-            {#if $workspaceStore.activeProjectId && activeProject}
-              <div
-                class="active-project-manager"
-                style="display: flex; align-items: center; justify-content: space-between; width: 100%; border-bottom: 1px solid var(--border-color); padding-bottom: 8px; margin-bottom: 4px;"
-              >
-                {#if editingProjectNameId === $workspaceStore.activeProjectId}
-                  <input
-                    type="text"
-                    class="project-rename-input"
-                    bind:value={renamingName}
-                    onkeydown={async (e) => {
-                      if (e.key === "Enter") {
+          {#if $workspaceStore.activeSidebarTab === "explorer"}
+            <div
+              class="panel-header"
+              style="height: auto; padding: 10px 14px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; border-bottom: 1px solid var(--border-color);"
+            >
+              {#if $workspaceStore.activeProjectId && activeProject}
+                <div
+                  class="active-project-manager"
+                  style="display: flex; align-items: center; justify-content: space-between; width: 100%; border-bottom: 1px solid var(--border-color); padding-bottom: 8px; margin-bottom: 4px;"
+                >
+                  {#if editingProjectNameId === $workspaceStore.activeProjectId}
+                    <input
+                      type="text"
+                      class="project-rename-input"
+                      bind:value={renamingName}
+                      onkeydown={async (e) => {
+                        if (e.key === "Enter") {
+                          const val = renamingName.trim();
+                          if (val) {
+                            await actions.renameProject(
+                              $workspaceStore.activeProjectId!,
+                              val,
+                            );
+                          }
+                          editingProjectNameId = null;
+                        } else if (e.key === "Escape") {
+                          editingProjectNameId = null;
+                        }
+                      }}
+                      onblur={async () => {
                         const val = renamingName.trim();
                         if (val) {
                           await actions.renameProject(
@@ -1360,749 +1429,895 @@
                           );
                         }
                         editingProjectNameId = null;
-                      } else if (e.key === "Escape") {
-                        editingProjectNameId = null;
-                      }
-                    }}
-                    onblur={async () => {
-                      const val = renamingName.trim();
-                      if (val) {
-                        await actions.renameProject(
-                          $workspaceStore.activeProjectId!,
-                          val,
-                        );
-                      }
-                      editingProjectNameId = null;
-                    }}
-                    use:focusElement
-                  />
-                {:else}
-                  <!-- svelte-ignore a11y-click-events-have-key-events -->
-                  <!-- svelte-ignore a11y-no-static-element-interactions -->
-                  <div
-                    class="project-title-clickable"
-                    title="Click to rename project"
-                    onclick={() => {
-                      editingProjectNameId = $workspaceStore.activeProjectId;
-                      renamingName = activeProject.name;
-                    }}
-                    style="font-size: 0.72rem; font-weight: 700; color: var(--text-active); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 130px; cursor: pointer; display: flex; align-items: center; gap: 6px;"
-                  >
-                    <Cpu size={12} style="color: var(--accent-violet);" />
-                    <span>{activeProject.name}</span>
-                  </div>
-                {/if}
+                      }}
+                      use:focusElement
+                    />
+                  {:else}
+                    <!-- svelte-ignore a11y-click-events-have-key-events -->
+                    <!-- svelte-ignore a11y-no-static-element-interactions -->
+                    <div
+                      class="project-title-clickable"
+                      title="Click to rename project"
+                      onclick={() => {
+                        editingProjectNameId = $workspaceStore.activeProjectId;
+                        renamingName = activeProject.name;
+                      }}
+                      style="font-size: 0.72rem; font-weight: 700; color: var(--text-active); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 130px; cursor: pointer; display: flex; align-items: center; gap: 6px;"
+                    >
+                      <Cpu size={12} style="color: var(--accent-violet);" />
+                      <span>{activeProject.name}</span>
+                    </div>
+                  {/if}
 
-                <div style="display: flex; align-items: center; gap: 4px;">
+                  <div style="display: flex; align-items: center; gap: 4px;">
+                    <button
+                      class="project-control-btn"
+                      title="Rename Project"
+                      onclick={() => {
+                        editingProjectNameId = $workspaceStore.activeProjectId;
+                        renamingName = activeProject.name;
+                      }}
+                    >
+                      <Sliders size={12} />
+                    </button>
+                    <button
+                      class="project-control-btn delete-hover"
+                      title="Delete Project"
+                      onclick={() => {
+                        deleteConfirmModal = {
+                          show: true,
+                          projectId: $workspaceStore.activeProjectId!,
+                          projectName: activeProject.name,
+                          isActiveProject: true,
+                        };
+                      }}
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                </div>
+              {/if}
+              <div
+                style="display: flex; align-items: center; justify-content: space-between; width: 100%;"
+              >
+                <div class="panel-title">PROJECT EXPLORER</div>
+                <div
+                  class="pane-header-actions"
+                  style="display: flex; gap: 6px;"
+                >
                   <button
-                    class="project-control-btn"
-                    title="Rename Project"
+                    type="button"
+                    class="close-ai-btn"
+                    title="New File"
                     onclick={() => {
-                      editingProjectNameId = $workspaceStore.activeProjectId;
-                      renamingName = activeProject.name;
-                    }}
-                  >
-                    <Sliders size={12} />
-                  </button>
-                  <button
-                    class="project-control-btn delete-hover"
-                    title="Delete Project"
-                    onclick={() => {
-                      deleteConfirmModal = {
+                      inputPromptModal = {
                         show: true,
-                        projectId: $workspaceStore.activeProjectId!,
-                        projectName: activeProject.name,
-                        isActiveProject: true,
+                        title: "Create New File",
+                        placeholder: "e.g. src/main.c",
+                        value: "",
+                        actionType: "file",
+                        folderPath: "",
                       };
                     }}
                   >
-                    <Trash2 size={12} />
+                    <Plus size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    class="close-ai-btn"
+                    title="New Folder"
+                    onclick={() => {
+                      inputPromptModal = {
+                        show: true,
+                        title: "Create New Folder",
+                        placeholder: "e.g. src/components",
+                        value: "",
+                        actionType: "folder",
+                        folderPath: "",
+                      };
+                    }}
+                  >
+                    <FolderOpen size={12} />
                   </button>
                 </div>
               </div>
-            {/if}
-            <div
-              style="display: flex; align-items: center; justify-content: space-between; width: 100%;"
-            >
-              <div class="panel-title">PROJECT EXPLORER</div>
-              <div class="pane-header-actions" style="display: flex; gap: 6px;">
-                <button
-                  type="button"
-                  class="close-ai-btn"
-                  title="New File"
-                  onclick={() => {
-                    inputPromptModal = {
-                      show: true,
-                      title: "Create New File",
-                      placeholder: "e.g. src/main.c",
-                      value: "",
-                      actionType: "file",
-                      folderPath: "",
-                    };
-                  }}
-                >
-                  <Plus size={13} />
-                </button>
-                <button
-                  type="button"
-                  class="close-ai-btn"
-                  title="New Folder"
-                  onclick={() => {
-                    inputPromptModal = {
-                      show: true,
-                      title: "Create New Folder",
-                      placeholder: "e.g. src/components",
-                      value: "",
-                      actionType: "folder",
-                      folderPath: "",
-                    };
-                  }}
-                >
-                  <FolderOpen size={12} />
-                </button>
-              </div>
             </div>
-          </div>
 
-          <div
-            class="panel-body flex-container-explorer"
-            style="display: flex; flex-direction: column; gap: 16px;"
-          >
-            <div class="explorer-section">
-              <div class="file-list">
-                <div style="margin-bottom: 2px;">
-                  <!-- svelte-ignore a11y-click-events-have-key-events -->
-                  <!-- svelte-ignore a11y-no-static-element-interactions -->
-                  <div
-                    class="file-item folder"
-                    onclick={() => {
-                      showConfigurator = true;
-                    }}
-                  >
-                    <Blocks size={14} style="color: var(--accent-violet);" />
-                    <span>Embedded Configurator</span>
-                  </div>
-                  
-                  {#snippet fileNodeSnippet(item: FileItem)}
-                    {#if item.isFolder}
-                      <div style="margin-bottom: 2px;">
-                        <div class="file-item folder" style="display: flex; align-items: center; justify-content: space-between; width: 100%; padding-right: 8px;">
-                          <div style="display: flex; align-items: center; gap: 6px;">
-                            <Folder
-                              size={14}
-                              style="color: var(--accent-violet);"
-                            />
+            <div
+              class="panel-body flex-container-explorer"
+              style="display: flex; flex-direction: column; gap: 16px;"
+            >
+              <div class="explorer-section">
+                <div class="file-list">
+                  <div style="margin-bottom: 2px;">
+                    <!-- svelte-ignore a11y-click-events-have-key-events -->
+                    <!-- svelte-ignore a11y-no-static-element-interactions -->
+                    <div
+                      class="file-item folder"
+                      onclick={() => {
+                        showConfigurator = true;
+                      }}
+                    >
+                      <Blocks size={14} style="color: var(--accent-violet);" />
+                      <span>Embedded Configurator</span>
+                    </div>
+
+                    {#snippet fileNodeSnippet(item: FileItem)}
+                      {#if item.isFolder}
+                        <div style="margin-bottom: 2px;">
+                          <div
+                            class="file-item folder"
+                            style="display: flex; align-items: center; justify-content: space-between; width: 100%; padding-right: 8px;"
+                          >
+                            <div
+                              style="display: flex; align-items: center; gap: 6px;"
+                            >
+                              <Folder
+                                size={14}
+                                style="color: var(--accent-violet);"
+                              />
+                              <span>{item.name}</span>
+                            </div>
+                            <div class="folder-actions">
+                              <button
+                                type="button"
+                                class="folder-action-btn create-file-btn"
+                                title="New File in folder"
+                                onclick={(e) => {
+                                  e.stopPropagation();
+                                  inputPromptModal = {
+                                    show: true,
+                                    title: `Create New File in ${item.name}`,
+                                    placeholder: "filename.c",
+                                    value: "",
+                                    actionType: "file",
+                                    folderPath: item.path.replace(/^\//, ""),
+                                  };
+                                }}
+                              >
+                                <Plus size={11} />
+                              </button>
+                              <button
+                                type="button"
+                                class="folder-action-btn create-folder-btn"
+                                title="New Folder in folder"
+                                onclick={(e) => {
+                                  e.stopPropagation();
+                                  inputPromptModal = {
+                                    show: true,
+                                    title: `Create New Folder in ${item.name}`,
+                                    placeholder: "foldername",
+                                    value: "",
+                                    actionType: "folder",
+                                    folderPath: item.path.replace(/^\//, ""),
+                                  };
+                                }}
+                              >
+                                <FolderOpen size={10} />
+                              </button>
+                              <button
+                                type="button"
+                                class="folder-action-btn delete-hover"
+                                title="Delete Folder"
+                                onclick={(e) => {
+                                  e.stopPropagation();
+                                  fileDeleteConfirmModal = {
+                                    show: true,
+                                    path: item.path,
+                                    isFolder: true,
+                                  };
+                                }}
+                              >
+                                <Trash2 size={10} />
+                              </button>
+                            </div>
+                          </div>
+                          <div
+                            class="folder-contents"
+                            style="padding-left: 12px; border-left: 1px solid var(--border-color); margin-left: 6px;"
+                          >
+                            {#each item.children || [] as child}
+                              {@render fileNodeSnippet(child)}
+                            {/each}
+                          </div>
+                        </div>
+                      {:else}
+                        <!-- svelte-ignore a11y-click-events-have-key-events -->
+                        <!-- svelte-ignore a11y-no-static-element-interactions -->
+                        <div
+                          class="file-item {$workspaceStore.activeFile ===
+                          item.path
+                            ? 'active'
+                            : ''}"
+                          onclick={() => actions.setActiveFile(item.path)}
+                          style="display: flex; align-items: center; justify-content: space-between; width: 100%; padding-right: 8px;"
+                        >
+                          <div
+                            style="display: flex; align-items: center; gap: 6px;"
+                          >
+                            <File size={14} style="color: var(--text-muted);" />
                             <span>{item.name}</span>
                           </div>
-                          <div class="folder-actions">
+                          <div class="file-actions">
                             <button
                               type="button"
-                              class="folder-action-btn create-file-btn"
-                              title="New File in folder"
-                              onclick={(e) => {
-                                e.stopPropagation();
-                                inputPromptModal = {
-                                  show: true,
-                                  title: `Create New File in ${item.name}`,
-                                  placeholder: "filename.c",
-                                  value: "",
-                                  actionType: "file",
-                                  folderPath: item.path.replace(/^\//, "")
-                                };
-                              }}
-                            >
-                              <Plus size={11} />
-                            </button>
-                            <button
-                              type="button"
-                              class="folder-action-btn create-folder-btn"
-                              title="New Folder in folder"
-                              onclick={(e) => {
-                                e.stopPropagation();
-                                inputPromptModal = {
-                                  show: true,
-                                  title: `Create New Folder in ${item.name}`,
-                                  placeholder: "foldername",
-                                  value: "",
-                                  actionType: "folder",
-                                  folderPath: item.path.replace(/^\//, "")
-                                };
-                              }}
-                            >
-                              <FolderOpen size={10} />
-                            </button>
-                            <button
-                              type="button"
-                              class="folder-action-btn delete-hover"
-                              title="Delete Folder"
+                              class="file-action-btn delete-hover"
+                              title="Delete File"
                               onclick={(e) => {
                                 e.stopPropagation();
                                 fileDeleteConfirmModal = {
                                   show: true,
                                   path: item.path,
-                                  isFolder: true
+                                  isFolder: false,
                                 };
                               }}
                             >
-                              <Trash2 size={10} />
+                              <Trash2 size={11} />
                             </button>
                           </div>
                         </div>
-                        <div class="folder-contents" style="padding-left: 12px; border-left: 1px solid var(--border-color); margin-left: 6px;">
-                          {#each item.children || [] as child}
-                            {@render fileNodeSnippet(child)}
-                          {/each}
-                        </div>
-                      </div>
-                    {:else}
-                      <!-- svelte-ignore a11y-click-events-have-key-events -->
-                      <!-- svelte-ignore a11y-no-static-element-interactions -->
-                      <div
-                        class="file-item {$workspaceStore.activeFile === item.path ? 'active' : ''}"
-                        onclick={() => actions.setActiveFile(item.path)}
-                        style="display: flex; align-items: center; justify-content: space-between; width: 100%; padding-right: 8px;"
-                      >
-                        <div style="display: flex; align-items: center; gap: 6px;">
-                          <File size={14} style="color: var(--text-muted);" />
-                          <span>{item.name}</span>
-                        </div>
-                        <div class="file-actions">
-                          <button
-                            type="button"
-                            class="file-action-btn delete-hover"
-                            title="Delete File"
-                            onclick={(e) => {
-                              e.stopPropagation();
-                              fileDeleteConfirmModal = {
-                                show: true,
-                                path: item.path,
-                                isFolder: false
-                              };
-                            }}
-                          >
-                            <Trash2 size={11} />
-                          </button>
-                        </div>
-                      </div>
-                    {/if}
-                  {/snippet}
+                      {/if}
+                    {/snippet}
 
-                  <div class="folder-contents">
-                    {#each $workspaceStore.fileTree as item}
-                      {@render fileNodeSnippet(item)}
-                    {/each}
+                    <div class="folder-contents">
+                      {#each $workspaceStore.fileTree as item}
+                        {@render fileNodeSnippet(item)}
+                      {/each}
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
 
-            <!-- QUICK ACCESS section -->
-            <div class="explorer-sub-section">
-              <div class="explorer-sub-header">QUICK ACCESS</div>
+              <!-- QUICK ACCESS section -->
+              <div class="explorer-sub-section">
+                <div class="explorer-sub-header">QUICK ACCESS</div>
 
-              <button
-                type="button"
-                class="quick-access-item"
-                onclick={() => {
-                  inputPromptModal = {
-                    show: true,
-                    title: "Create New Project",
-                    placeholder: "e.g. Blinky Project",
-                    value: "",
-                    actionType: "project",
-                    folderPath: "",
-                  };
-                }}
-              >
-                <div style="display: flex; align-items: center; gap: 8px;">
-                  <Plus size={13} style="color: var(--accent-violet);" />
-                  <span>New Project</span>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                class="quick-access-item"
-                onclick={() => actions.setShowWelcomeScreen(true)}
-              >
-                <div style="display: flex; align-items: center; gap: 8px;">
-                  <FolderOpen size={13} style="color: var(--accent-violet);" />
-                  <span>Open Folder...</span>
-                </div>
-                <span class="shortcut-tag">Ctrl+O</span>
-              </button>
-
-              <button
-                type="button"
-                class="quick-access-item"
-                onclick={() => actions.setShowWelcomeScreen(true)}
-              >
-                <div style="display: flex; align-items: center; gap: 8px;">
-                  <Blocks size={13} style="color: var(--accent-violet);" />
-                  <span>Open Workspace...</span>
-                </div>
-                <span class="shortcut-tag">Ctrl+K Ctrl+O</span>
-              </button>
-
-              <button
-                type="button"
-                class="quick-access-item"
-                onclick={() =>
-                  (recentProjectsExpanded = !recentProjectsExpanded)}
-              >
-                <div style="display: flex; align-items: center; gap: 8px;">
-                  <Sliders size={13} style="color: var(--accent-violet);" />
-                  <span>Recent Projects</span>
-                </div>
-                <span class="shortcut-tag"
-                  >{recentProjectsExpanded ? "▼" : "▶"}</span
-                >
-              </button>
-
-              {#if recentProjectsExpanded}
-                <div
-                  class="recent-projects-list"
-                  style="padding-left: 16px; display: flex; flex-direction: column; gap: 4px; margin-top: 4px;"
-                >
-                  {#each $workspaceStore.projectsList as project}
-                    <button
-                      type="button"
-                      class="quick-access-item"
-                      style="padding: 4px 8px; font-size: 0.7rem; justify-content: flex-start; gap: 6px;"
-                      onclick={async () => {
-                        await actions.loadProject(project.id);
-                        recentProjectsExpanded = false;
-                      }}
-                    >
-                      <Cpu size={11} style="color: var(--text-dark);" />
-                      <span
-                        style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
-                        >{project.name}</span
-                      >
-                    </button>
-                  {/each}
-                  {#if $workspaceStore.projectsList.length === 0}
-                    <div
-                      style="font-size: 0.65rem; color: var(--text-dark); padding: 4px 8px; font-style: italic;"
-                    >
-                      No recent projects
-                    </div>
-                  {/if}
-                </div>
-              {/if}
-            </div>
-
-            <!-- RAG Context indicator shortcut inside explorer -->
-            <div class="explorer-sub-section">
-              <div class="explorer-sub-header">RAG DATABASES CONTEXT</div>
-              {#each $workspaceStore.ragDocuments as doc}
                 <button
                   type="button"
                   class="quick-access-item"
-                  onclick={() => actions.setActiveSidebarTab("rag")}
-                  style="cursor: pointer; display: flex; align-items: center; justify-content: space-between;"
+                  onclick={() => {
+                    inputPromptModal = {
+                      show: true,
+                      title: "Create New Project",
+                      placeholder: "e.g. Blinky Project",
+                      value: "",
+                      actionType: "project",
+                      folderPath: "",
+                    };
+                  }}
+                >
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <Plus size={13} style="color: var(--accent-violet);" />
+                    <span>New Project</span>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  class="quick-access-item"
+                  onclick={() => actions.setShowWelcomeScreen(true)}
+                >
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <FolderOpen
+                      size={13}
+                      style="color: var(--accent-violet);"
+                    />
+                    <span>Open Folder...</span>
+                  </div>
+                  <span class="shortcut-tag">Ctrl+O</span>
+                </button>
+
+                <button
+                  type="button"
+                  class="quick-access-item"
+                  onclick={() => actions.setShowWelcomeScreen(true)}
+                >
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <Blocks size={13} style="color: var(--accent-violet);" />
+                    <span>Open Workspace...</span>
+                  </div>
+                  <span class="shortcut-tag">Ctrl+K Ctrl+O</span>
+                </button>
+
+                <button
+                  type="button"
+                  class="quick-access-item"
+                  onclick={() =>
+                    (recentProjectsExpanded = !recentProjectsExpanded)}
+                >
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <Sliders size={13} style="color: var(--accent-violet);" />
+                    <span>Recent Projects</span>
+                  </div>
+                  <span class="shortcut-tag"
+                    >{recentProjectsExpanded ? "▼" : "▶"}</span
+                  >
+                </button>
+
+                {#if recentProjectsExpanded}
+                  <div
+                    class="recent-projects-list"
+                    style="padding-left: 16px; display: flex; flex-direction: column; gap: 4px; margin-top: 4px;"
+                  >
+                    {#each $workspaceStore.projectsList as project}
+                      <button
+                        type="button"
+                        class="quick-access-item"
+                        style="padding: 4px 8px; font-size: 0.7rem; justify-content: flex-start; gap: 6px;"
+                        onclick={async () => {
+                          await actions.loadProject(project.id);
+                          recentProjectsExpanded = false;
+                        }}
+                      >
+                        <Cpu size={11} style="color: var(--text-dark);" />
+                        <span
+                          style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                          >{project.name}</span
+                        >
+                      </button>
+                    {/each}
+                    {#if $workspaceStore.projectsList.length === 0}
+                      <div
+                        style="font-size: 0.65rem; color: var(--text-dark); padding: 4px 8px; font-style: italic;"
+                      >
+                        No recent projects
+                      </div>
+                    {/if}
+                  </div>
+                {/if}
+              </div>
+
+              <!-- RAG Context indicator shortcut inside explorer -->
+              <div class="explorer-sub-section">
+                <div class="explorer-sub-header">RAG DATABASES CONTEXT</div>
+                {#each $workspaceStore.ragDocuments as doc}
+                  <button
+                    type="button"
+                    class="quick-access-item"
+                    onclick={() => actions.setActiveSidebarTab("rag")}
+                    style="cursor: pointer; display: flex; align-items: center; justify-content: space-between;"
+                  >
+                    <span
+                      style="font-family: var(--font-mono); font-size: 0.65rem; color: var(--accent-cyan); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px;"
+                      >{doc.name}</span
+                    >
+                    <span class="shortcut-tag">{doc.size}</span>
+                  </button>
+                {/each}
+              </div>
+
+              <!-- Live hardware connection status -->
+              <div class="explorer-sub-section">
+                <div class="explorer-sub-header">HARDWARE STATUS</div>
+                <div
+                  class="workspace-item-row"
+                  style="display: flex; align-items: center; justify-content: space-between; font-size: 0.65rem;"
+                  title={$workspaceStore.deviceStatus.detail}
                 >
                   <span
-                    style="font-family: var(--font-mono); font-size: 0.65rem; color: var(--accent-cyan); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px;"
-                    >{doc.name}</span
+                    >{$workspaceStore.deviceStatus.target ||
+                      "STM32 Target"}:</span
                   >
-                  <span class="shortcut-tag">{doc.size}</span>
-                </button>
-              {/each}
-            </div>
-
-            <!-- Live hardware connection status -->
-            <div class="explorer-sub-section">
-              <div class="explorer-sub-header">HARDWARE STATUS</div>
-              <div
-                class="workspace-item-row"
-                style="display: flex; align-items: center; justify-content: space-between; font-size: 0.65rem;"
-                title={$workspaceStore.deviceStatus.detail}
-              >
-                <span
-                  >{$workspaceStore.deviceStatus.target ||
-                    "STM32 Target"}:</span
-                >
-                <span
-                  style="color: {$workspaceStore.deviceStatus.connected
-                    ? 'var(--accent-success)'
-                    : 'var(--text-dark)'}; font-weight: bold;"
-                >
-                  {$workspaceStore.deviceStatus.connected
-                    ? `CONNECTED (${$workspaceStore.deviceStatus.probe || "ST-Link"})`
-                    : "NO DEVICE"}
-                </span>
+                  <span
+                    style="color: {$workspaceStore.deviceStatus.connected
+                      ? 'var(--accent-success)'
+                      : 'var(--text-dark)'}; font-weight: bold;"
+                  >
+                    {$workspaceStore.deviceStatus.connected
+                      ? `CONNECTED (${$workspaceStore.deviceStatus.probe || "ST-Link"})`
+                      : "NO DEVICE"}
+                  </span>
+                </div>
               </div>
             </div>
-          </div>
-        {/if}
+          {/if}
 
-        {#if $workspaceStore.activeSidebarTab === "search"}
-          <div class="panel-header">
-            <div class="panel-title">Search Workspace</div>
-          </div>
-          <div class="panel-body">
-            <div class="sidebar-search-panel">
-              <input type="text" placeholder="Search string..." />
-              <input type="text" placeholder="Files to include (e.g. *.c)" />
-              <div
-                style="font-size: 0.75rem; color: var(--text-dark); margin-top: 10px;"
-              >
-                No active search results. Press Enter to search.
+          {#if $workspaceStore.activeSidebarTab === "search"}
+            <div class="panel-header">
+              <div class="panel-title">Search Workspace</div>
+            </div>
+            <div class="panel-body">
+              <div class="sidebar-search-panel">
+                <input type="text" placeholder="Search string..." />
+                <input type="text" placeholder="Files to include (e.g. *.c)" />
+                <div
+                  style="font-size: 0.75rem; color: var(--text-dark); margin-top: 10px;"
+                >
+                  No active search results. Press Enter to search.
+                </div>
               </div>
             </div>
-          </div>
-        {/if}
+          {/if}
 
-        {#if $workspaceStore.activeSidebarTab === "git"}
-          <!-- Panel header with refresh -->
-          <div class="panel-header" style="display:flex; align-items:center; justify-content:space-between; padding: 10px 14px; border-bottom: 1px solid var(--border-color);">
-            <div class="panel-title">Source Control</div>
-            <button
-              class="close-ai-btn"
-              title="Refresh"
-              onclick={() => { actions.loadGitInfo(); actions.loadGitStatus(); actions.loadGitLog(); }}
+          {#if $workspaceStore.activeSidebarTab === "git"}
+            <!-- Panel header with refresh -->
+            <div
+              class="panel-header"
+              style="display:flex; align-items:center; justify-content:space-between; padding: 10px 14px; border-bottom: 1px solid var(--border-color);"
             >
-              <RefreshCw size={12} />
-            </button>
-          </div>
-
-          {#if !$workspaceStore.gitInfo.is_repo}
-            <!-- No-repo state -->
-            <div class="git-no-repo">
-              <GitBranch size={32} style="color: var(--text-dark); opacity: 0.3; margin-bottom: 12px;" />
-              <p style="font-size: 0.78rem; color: var(--text-dark); text-align: center; line-height: 1.6; margin: 0;">
-                No Git repository detected.<br/>
-                <span style="font-size: 0.7rem; opacity: 0.6;">Open a folder containing a <code>.git</code> directory.</span>
-              </p>
+              <div class="panel-title">Source Control</div>
+              <button
+                class="close-ai-btn"
+                title="Refresh"
+                onclick={() => {
+                  actions.loadGitInfo();
+                  actions.loadGitStatus();
+                  actions.loadGitLog();
+                }}
+              >
+                <RefreshCw size={12} />
+              </button>
             </div>
-          {:else}
-            <div class="panel-body" style="overflow-y: auto; padding: 0;">
-              <div class="sidebar-git-panel">
 
-                <!-- Branch row -->
-                <div class="git-branch-row">
-                  <GitBranch size={12} style="color: var(--accent-violet); flex-shrink:0;" />
-                  {#if $workspaceStore.gitInfo.detached}
-                    <button type="button" class="git-detached-badge" style="cursor: pointer; background: none; border: none; padding: 0; margin: 0; font: inherit; color: inherit; display: inline-flex; align-items: center;" title="Create branch from here" onclick={async () => {
-                        const name = prompt("Enter new branch name to save this detached state:");
-                        if (name && name.trim()) {
-                          try {
-                            await actions.createGitBranch(name.trim());
-                          } catch (err: any) {
-                            gitCheckoutError = err?.message ?? "Failed to create branch";
-                          }
-                        }
-                    }}>
-                      DETACHED @ {$workspaceStore.gitInfo.short_hash ?? '???'}
-                      <span style="opacity: 0.6; margin-left: 4px;">(+ Branch)</span>
-                    </button>
-                  {:else}
-                    <select
-                      class="git-branch-select"
-                      value={$workspaceStore.gitInfo.branch ?? ''}
-                      onchange={async (e) => {
-                        const val = (e.target as HTMLSelectElement).value;
-                        if (val === '___CREATE_NEW___') {
-                          // reset select visual
-                          (e.target as HTMLSelectElement).value = $workspaceStore.gitInfo.branch ?? '';
-                          const name = prompt("Enter new branch name:");
+            {#if !$workspaceStore.gitInfo.is_repo}
+              <!-- No-repo state -->
+              <div class="git-no-repo">
+                <GitBranch
+                  size={32}
+                  style="color: var(--text-dark); opacity: 0.3; margin-bottom: 12px;"
+                />
+                <p
+                  style="font-size: 0.78rem; color: var(--text-dark); text-align: center; line-height: 1.6; margin: 0;"
+                >
+                  No Git repository detected.<br />
+                  <span style="font-size: 0.7rem; opacity: 0.6;"
+                    >Open a folder containing a <code>.git</code> directory.</span
+                  >
+                </p>
+              </div>
+            {:else}
+              <div class="panel-body" style="overflow-y: auto; padding: 0;">
+                <div class="sidebar-git-panel">
+                  <!-- Branch row -->
+                  <div class="git-branch-row">
+                    <GitBranch
+                      size={12}
+                      style="color: var(--accent-violet); flex-shrink:0;"
+                    />
+                    {#if $workspaceStore.gitInfo.detached}
+                      <button
+                        type="button"
+                        class="git-detached-badge"
+                        style="cursor: pointer; background: none; border: none; padding: 0; margin: 0; font: inherit; color: inherit; display: inline-flex; align-items: center;"
+                        title="Create branch from here"
+                        onclick={async () => {
+                          const name = prompt(
+                            "Enter new branch name to save this detached state:",
+                          );
                           if (name && name.trim()) {
                             try {
                               await actions.createGitBranch(name.trim());
                             } catch (err: any) {
-                              gitCheckoutError = err?.message ?? "Failed to create branch";
+                              gitCheckoutError =
+                                err?.message ?? "Failed to create branch";
                             }
                           }
-                        } else if (val) {
+                        }}
+                      >
+                        DETACHED @ {$workspaceStore.gitInfo.short_hash ?? "???"}
+                        <span style="opacity: 0.6; margin-left: 4px;"
+                          >(+ Branch)</span
+                        >
+                      </button>
+                    {:else}
+                      <select
+                        class="git-branch-select"
+                        value={$workspaceStore.gitInfo.branch ?? ""}
+                        onchange={async (e) => {
+                          const val = (e.target as HTMLSelectElement).value;
+                          if (val === "___CREATE_NEW___") {
+                            // reset select visual
+                            (e.target as HTMLSelectElement).value =
+                              $workspaceStore.gitInfo.branch ?? "";
+                            const name = prompt("Enter new branch name:");
+                            if (name && name.trim()) {
+                              try {
+                                await actions.createGitBranch(name.trim());
+                              } catch (err: any) {
+                                gitCheckoutError =
+                                  err?.message ?? "Failed to create branch";
+                              }
+                            }
+                          } else if (val) {
+                            try {
+                              await actions.checkoutCommit(val);
+                            } catch (err: any) {
+                              gitCheckoutError =
+                                err?.message ?? "Failed to checkout branch";
+                            }
+                          }
+                        }}
+                      >
+                        {#each $workspaceStore.gitBranches as b}
+                          <option value={b}>{b}</option>
+                        {/each}
+                        <option disabled>──────────</option>
+                        <option value="___CREATE_NEW___"
+                          >+ Create new branch...</option
+                        >
+                      </select>
+                    {/if}
+                  </div>
+
+                  <!-- Detached HEAD warning -->
+                  {#if $workspaceStore.gitInfo.detached}
+                    <div class="git-detached-warning">
+                      <AlertCircle size={12} style="flex-shrink:0;" />
+                      <span>You are in detached HEAD state.</span>
+                      <button
+                        class="git-return-head-btn"
+                        onclick={async () => {
                           try {
-                            await actions.checkoutCommit(val);
-                          } catch (err: any) {
-                            gitCheckoutError = err?.message ?? "Failed to checkout branch";
+                            await actions.checkoutHead();
+                          } catch (e: any) {
+                            gitCheckoutError = e?.message ?? "Failed";
+                          }
+                        }}
+                      >
+                        <RotateCcw size={10} />
+                        Return to HEAD
+                      </button>
+                    </div>
+                  {/if}
+
+                  <!-- Checkout error banner -->
+                  {#if gitCheckoutError}
+                    <div
+                      style="background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 4px; padding: 6px 10px; font-size: 0.7rem; color: var(--accent-error); display:flex; align-items:center; gap:6px; margin: 0 12px;"
+                    >
+                      <AlertCircle size={11} />
+                      <span style="flex:1;">{gitCheckoutError}</span>
+                      <button
+                        onclick={() => (gitCheckoutError = null)}
+                        style="background:none; border:none; color:inherit; cursor:pointer; padding:0;"
+                        ><X size={10} /></button
+                      >
+                    </div>
+                  {/if}
+
+                  <!-- Commit section -->
+                  <div class="git-commit-section">
+                    <input
+                      type="text"
+                      class="git-msg-input"
+                      placeholder="Commit message (Ctrl+Enter)..."
+                      bind:value={gitCommitMessage}
+                      disabled={gitCommitting}
+                      onkeydown={async (e) => {
+                        if (e.key === "Enter" && e.ctrlKey && !gitCommitting) {
+                          const msg = gitCommitMessage.trim();
+                          if (msg) {
+                            gitCommitting = true;
+                            gitCommitFeedback = "";
+                            try {
+                              await actions.commitChanges(msg);
+                              gitCommitMessage = "";
+                              gitCommitFeedback = "✓ Commit successful!";
+                              await actions.loadGitLog();
+                              setTimeout(() => {
+                                gitCommitFeedback = "";
+                              }, 3000);
+                            } catch (err) {
+                              gitCommitFeedback = "Failed to commit.";
+                              setTimeout(() => {
+                                gitCommitFeedback = "";
+                              }, 4000);
+                            } finally {
+                              gitCommitting = false;
+                            }
                           }
                         }
                       }}
-                    >
-                      {#each $workspaceStore.gitBranches as b}
-                        <option value={b}>{b}</option>
-                      {/each}
-                      <option disabled>──────────</option>
-                      <option value="___CREATE_NEW___">+ Create new branch...</option>
-                    </select>
-                  {/if}
-                </div>
-
-                <!-- Detached HEAD warning -->
-                {#if $workspaceStore.gitInfo.detached}
-                  <div class="git-detached-warning">
-                    <AlertCircle size={12} style="flex-shrink:0;" />
-                    <span>You are in detached HEAD state.</span>
+                    />
                     <button
-                      class="git-return-head-btn"
+                      class="git-commit-btn"
+                      disabled={!gitCommitMessage.trim() || gitCommitting}
                       onclick={async () => {
-                        try { await actions.checkoutHead(); }
-                        catch (e: any) { gitCheckoutError = e?.message ?? "Failed"; }
-                      }}
-                    >
-                      <RotateCcw size={10} />
-                      Return to HEAD
-                    </button>
-                  </div>
-                {/if}
-
-                <!-- Checkout error banner -->
-                {#if gitCheckoutError}
-                  <div style="background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); border-radius: 4px; padding: 6px 10px; font-size: 0.7rem; color: var(--accent-error); display:flex; align-items:center; gap:6px; margin: 0 12px;">
-                    <AlertCircle size={11} />
-                    <span style="flex:1;">{gitCheckoutError}</span>
-                    <button onclick={() => gitCheckoutError = null} style="background:none; border:none; color:inherit; cursor:pointer; padding:0;"><X size={10} /></button>
-                  </div>
-                {/if}
-
-                <!-- Commit section -->
-                <div class="git-commit-section">
-                  <input
-                    type="text"
-                    class="git-msg-input"
-                    placeholder="Commit message (Ctrl+Enter)..."
-                    bind:value={gitCommitMessage}
-                    disabled={gitCommitting}
-                    onkeydown={async (e) => {
-                      if (e.key === "Enter" && e.ctrlKey && !gitCommitting) {
                         const msg = gitCommitMessage.trim();
                         if (msg) {
-                          gitCommitting = true; gitCommitFeedback = "";
+                          gitCommitting = true;
+                          gitCommitFeedback = "";
                           try {
                             await actions.commitChanges(msg);
                             gitCommitMessage = "";
                             gitCommitFeedback = "✓ Commit successful!";
                             await actions.loadGitLog();
-                            setTimeout(() => { gitCommitFeedback = ""; }, 3000);
+                            setTimeout(() => {
+                              gitCommitFeedback = "";
+                            }, 3000);
                           } catch (err) {
                             gitCommitFeedback = "Failed to commit.";
-                            setTimeout(() => { gitCommitFeedback = ""; }, 4000);
-                          } finally { gitCommitting = false; }
+                            setTimeout(() => {
+                              gitCommitFeedback = "";
+                            }, 4000);
+                          } finally {
+                            gitCommitting = false;
+                          }
                         }
-                      }
-                    }}
-                  />
-                  <button
-                    class="git-commit-btn"
-                    disabled={!gitCommitMessage.trim() || gitCommitting}
-                    onclick={async () => {
-                      const msg = gitCommitMessage.trim();
-                      if (msg) {
-                        gitCommitting = true; gitCommitFeedback = "";
-                        try {
-                          await actions.commitChanges(msg);
-                          gitCommitMessage = "";
-                          gitCommitFeedback = "✓ Commit successful!";
-                          await actions.loadGitLog();
-                          setTimeout(() => { gitCommitFeedback = ""; }, 3000);
-                        } catch (err) {
-                          gitCommitFeedback = "Failed to commit.";
-                          setTimeout(() => { gitCommitFeedback = ""; }, 4000);
-                        } finally { gitCommitting = false; }
-                      }
-                    }}
-                  >
-                    {gitCommitting ? "Committing..." : "Commit Changes"}
-                  </button>
-                  {#if gitCommitFeedback}
-                    <div class="git-commit-feedback {gitCommitFeedback.includes('Failed') ? 'error' : 'success'}">{gitCommitFeedback}</div>
-                  {/if}
-                </div>
-
-                <!-- Changed files -->
-                <div class="git-changes-section">
-                  <div class="git-section-header">Changed Files <span class="git-count-badge">{$workspaceStore.gitChanges.length}</span></div>
-                  <div class="git-file-list">
-                    {#each $workspaceStore.gitChanges as change}
-                      <div class="git-file-row">
-                        <span class="git-file-path" title={change.path}>{change.path}</span>
-                        <span class="git-status-badge {
-                          change.status === 'M' ? 'modified' :
-                          change.status === 'U' ? 'untracked' :
-                          change.status === 'A' ? 'added' :
-                          change.status === 'D' ? 'deleted' :
-                          change.status === 'R' ? 'renamed' :
-                          change.status === 'C' ? 'conflict' : ''
-                        }">{change.status}</span>
+                      }}
+                    >
+                      {gitCommitting ? "Committing..." : "Commit Changes"}
+                    </button>
+                    {#if gitCommitFeedback}
+                      <div
+                        class="git-commit-feedback {gitCommitFeedback.includes(
+                          'Failed',
+                        )
+                          ? 'error'
+                          : 'success'}"
+                      >
+                        {gitCommitFeedback}
                       </div>
-                    {/each}
-                    {#if $workspaceStore.gitChanges.length === 0}
-                      <div class="git-empty-hint">No staged or unstaged changes.</div>
-                    {/if}
-                  </div>
-                </div>
-
-                <!-- History / Git Graph -->
-                <div class="git-history-section">
-                  <div class="git-section-header">
-                    History
-                    {#if $workspaceStore.gitLogLoading}
-                      <span style="font-size:0.65rem; color:var(--text-dark); margin-left:6px; font-style:italic;">loading…</span>
                     {/if}
                   </div>
 
-                  {#if $workspaceStore.gitLog.length === 0 && !$workspaceStore.gitLogLoading}
-                    <div class="git-empty-hint">No commits yet.</div>
-                  {:else}
-                    <div class="git-graph-container">
-                      {#each $workspaceStore.gitLog as commit}
-                        {@const isHead = commit.hash === $workspaceStore.gitInfo.head_hash}
-                        {@const isExp = $workspaceStore.gitExpandedCommit === commit.hash}
-                        <!-- svelte-ignore a11y-click-events-have-key-events -->
-                        <!-- svelte-ignore a11y-no-static-element-interactions -->
-                        <div
-                          class="git-commit-row {isHead ? 'is-head' : ''} {isExp ? 'is-expanded' : ''}"
-                          onclick={() => actions.setGitExpandedCommit(commit.hash)}
-                        >
-                          <div class="git-graph-col" style="width: {commit.routes ? gitColWidth(commit) : 14}px;">
-                            {#if commit.routes}
-                              <svg class="git-graph-svg" width="100%" height="100%" style="position: absolute; top: 0; left: 0; pointer-events: none; overflow: visible;">
-                                {#each commit.routes as route}
-                                  <path
-                                    d="M {route.fromTrack * 14 + 7} 7 C {route.fromTrack * 14 + 7} 25, {route.toTrack * 14 + 7} 20, {route.toTrack * 14 + 7} 50"
-                                    stroke={route.color}
-                                    stroke-width="2"
-                                    fill="none"
-                                    vector-effect="non-scaling-stroke"
-                                    preserveAspectRatio="none"
-                                  />
-                                {/each}
-                              </svg>
-                            {/if}
-                            <div
-                              class="git-graph-dot {isHead ? 'head-dot' : ''}"
-                              style="position: absolute; top: 3px; left: {(commit.track || 0) * 14 + 2}px; border-color: {commit.color || 'var(--bg-secondary)'}; z-index: 2;"
-                            ></div>
-                          </div>
-                          <div class="git-commit-info">
-                            <div class="git-commit-top">
-                              <span class="git-commit-hash">{commit.short_hash}</span>
-                              {#each commit.refs as ref}
-                                <span class="git-ref-badge {ref === ($workspaceStore.gitInfo.branch ?? '') ? 'current-branch' : ''}">{ref}</span>
-                              {/each}
-                            </div>
-                            <div class="git-commit-subject" title={commit.subject}>{commit.subject}</div>
-                            <div class="git-commit-meta">{commit.author_name} · {commit.date_relative}</div>
-                          </div>
-                        </div>
-
-                        {#if isExp}
-                          <div class="git-commit-expanded">
-                            <div style="font-family:var(--font-mono); font-size:0.68rem; color:var(--text-muted); margin-bottom:6px; word-break:break-all;">{commit.hash}</div>
-                            <div style="font-size:0.7rem; color:var(--text-muted); margin-bottom:3px;"><strong style="color:var(--text-active);">{commit.author_name}</strong> &lt;{commit.author_email}&gt;</div>
-                            <div style="font-size:0.68rem; color:var(--text-dark); margin-bottom:10px;">{commit.date_iso.slice(0,19).replace('T',' ')}</div>
-                            {#if !isHead}
-                              <button
-                                class="git-checkout-btn"
-                                disabled={gitCheckoutLoading !== null}
-                                onclick={async (e) => {
-                                  e.stopPropagation();
-                                  gitCheckoutError = null;
-                                  gitCheckoutLoading = commit.hash;
-                                  try { await actions.checkoutCommit(commit.hash); }
-                                  catch (err: any) { gitCheckoutError = err?.message ?? "Checkout failed"; }
-                                  finally { gitCheckoutLoading = null; }
-                                }}
-                              >
-                                {gitCheckoutLoading === commit.hash ? "Checking out…" : "Checkout this commit"}
-                              </button>
-                            {:else}
-                              <div style="font-size:0.68rem; color:var(--accent-cyan); font-weight:600;">● Current HEAD</div>
-                            {/if}
-                          </div>
-                        {/if}
-                      {/each}
+                  <!-- Changed files -->
+                  <div class="git-changes-section">
+                    <div class="git-section-header">
+                      Changed Files <span class="git-count-badge"
+                        >{$workspaceStore.gitChanges.length}</span
+                      >
                     </div>
-                  {/if}
-                </div>
+                    <div class="git-file-list">
+                      {#each $workspaceStore.gitChanges as change}
+                        <div class="git-file-row">
+                          <span class="git-file-path" title={change.path}
+                            >{change.path}</span
+                          >
+                          <span
+                            class="git-status-badge {change.status === 'M'
+                              ? 'modified'
+                              : change.status === 'U'
+                                ? 'untracked'
+                                : change.status === 'A'
+                                  ? 'added'
+                                  : change.status === 'D'
+                                    ? 'deleted'
+                                    : change.status === 'R'
+                                      ? 'renamed'
+                                      : change.status === 'C'
+                                        ? 'conflict'
+                                        : ''}">{change.status}</span
+                          >
+                        </div>
+                      {/each}
+                      {#if $workspaceStore.gitChanges.length === 0}
+                        <div class="git-empty-hint">
+                          No staged or unstaged changes.
+                        </div>
+                      {/if}
+                    </div>
+                  </div>
 
+                  <!-- History / Git Graph -->
+                  <div class="git-history-section">
+                    <div class="git-section-header">
+                      History
+                      {#if $workspaceStore.gitLogLoading}
+                        <span
+                          style="font-size:0.65rem; color:var(--text-dark); margin-left:6px; font-style:italic;"
+                          >loading…</span
+                        >
+                      {/if}
+                    </div>
+
+                    {#if $workspaceStore.gitLog.length === 0 && !$workspaceStore.gitLogLoading}
+                      <div class="git-empty-hint">No commits yet.</div>
+                    {:else}
+                      <div class="git-graph-container">
+                        {#each $workspaceStore.gitLog as commit}
+                          {@const isHead =
+                            commit.hash === $workspaceStore.gitInfo.head_hash}
+                          {@const isExp =
+                            $workspaceStore.gitExpandedCommit === commit.hash}
+                          <!-- svelte-ignore a11y-click-events-have-key-events -->
+                          <!-- svelte-ignore a11y-no-static-element-interactions -->
+                          <div
+                            class="git-commit-row {isHead
+                              ? 'is-head'
+                              : ''} {isExp ? 'is-expanded' : ''}"
+                            onclick={() =>
+                              actions.setGitExpandedCommit(commit.hash)}
+                          >
+                            <div
+                              class="git-graph-col"
+                              style="width: {commit.routes
+                                ? gitColWidth(commit)
+                                : 14}px;"
+                            >
+                              {#if commit.routes}
+                                <svg
+                                  class="git-graph-svg"
+                                  width="100%"
+                                  height="100%"
+                                  style="position: absolute; top: 0; left: 0; pointer-events: none; overflow: visible;"
+                                >
+                                  {#each commit.routes as route}
+                                    <path
+                                      d="M {route.fromTrack * 14 +
+                                        7} 7 C {route.fromTrack * 14 +
+                                        7} 25, {route.toTrack * 14 +
+                                        7} 20, {route.toTrack * 14 + 7} 50"
+                                      stroke={route.color}
+                                      stroke-width="2"
+                                      fill="none"
+                                      vector-effect="non-scaling-stroke"
+                                      preserveAspectRatio="none"
+                                    />
+                                  {/each}
+                                </svg>
+                              {/if}
+                              <div
+                                class="git-graph-dot {isHead ? 'head-dot' : ''}"
+                                style="position: absolute; top: 3px; left: {(commit.track ||
+                                  0) *
+                                  14 +
+                                  2}px; border-color: {commit.color ||
+                                  'var(--bg-secondary)'}; z-index: 2;"
+                              ></div>
+                            </div>
+                            <div class="git-commit-info">
+                              <div class="git-commit-top">
+                                <span class="git-commit-hash"
+                                  >{commit.short_hash}</span
+                                >
+                                {#each commit.refs as ref}
+                                  <span
+                                    class="git-ref-badge {ref ===
+                                    ($workspaceStore.gitInfo.branch ?? '')
+                                      ? 'current-branch'
+                                      : ''}">{ref}</span
+                                  >
+                                {/each}
+                              </div>
+                              <div
+                                class="git-commit-subject"
+                                title={commit.subject}
+                              >
+                                {commit.subject}
+                              </div>
+                              <div class="git-commit-meta">
+                                {commit.author_name} · {commit.date_relative}
+                              </div>
+                            </div>
+                          </div>
+
+                          {#if isExp}
+                            <div class="git-commit-expanded">
+                              <div
+                                style="font-family:var(--font-mono); font-size:0.68rem; color:var(--text-muted); margin-bottom:6px; word-break:break-all;"
+                              >
+                                {commit.hash}
+                              </div>
+                              <div
+                                style="font-size:0.7rem; color:var(--text-muted); margin-bottom:3px;"
+                              >
+                                <strong style="color:var(--text-active);"
+                                  >{commit.author_name}</strong
+                                >
+                                &lt;{commit.author_email}&gt;
+                              </div>
+                              <div
+                                style="font-size:0.68rem; color:var(--text-dark); margin-bottom:10px;"
+                              >
+                                {commit.date_iso.slice(0, 19).replace("T", " ")}
+                              </div>
+                              {#if !isHead}
+                                <button
+                                  class="git-checkout-btn"
+                                  disabled={gitCheckoutLoading !== null}
+                                  onclick={async (e) => {
+                                    e.stopPropagation();
+                                    gitCheckoutError = null;
+                                    gitCheckoutLoading = commit.hash;
+                                    try {
+                                      await actions.checkoutCommit(commit.hash);
+                                    } catch (err: any) {
+                                      gitCheckoutError =
+                                        err?.message ?? "Checkout failed";
+                                    } finally {
+                                      gitCheckoutLoading = null;
+                                    }
+                                  }}
+                                >
+                                  {gitCheckoutLoading === commit.hash
+                                    ? "Checking out…"
+                                    : "Checkout this commit"}
+                                </button>
+                              {:else}
+                                <div
+                                  style="font-size:0.68rem; color:var(--accent-cyan); font-weight:600;"
+                                >
+                                  ● Current HEAD
+                                </div>
+                              {/if}
+                            </div>
+                          {/if}
+                        {/each}
+                      </div>
+                    {/if}
+                  </div>
+                </div>
+              </div>
+            {/if}
+          {/if}
+
+          {#if $workspaceStore.activeSidebarTab === "rag"}
+            <RagUploadPanel />
+          {/if}
+
+          {#if $workspaceStore.activeSidebarTab === "boards"}
+            <div class="panel-header">
+              <div class="panel-title">Target Config</div>
+            </div>
+            <div class="panel-body">
+              <div class="boards-config-panel">
+                <div class="config-group">
+                  <!-- svelte-ignore a11y-label-has-associated-control -->
+                  <label>MCU Board Target</label>
+                  <select
+                    class="config-select"
+                    value={$workspaceStore.selectedBoard}
+                    onchange={(e) =>
+                      actions.setSelectedBoard(e.currentTarget.value as any)}
+                  >
+                    <option value="STM32F401">STM32F401 (Cortex-M4)</option>
+                    <option value="ESP32-S3">ESP32-S3 (Xtensa LX7)</option>
+                    <option value="RP2040">RP2040 (Cortex-M0+)</option>
+                  </select>
+                </div>
+                <div class="config-group">
+                  <!-- svelte-ignore a11y-label-has-associated-control -->
+                  <label>Debugger Probe</label>
+                  <select
+                    class="config-select"
+                    value={$workspaceStore.selectedProbe}
+                    onchange={(e) =>
+                      actions.setSelectedProbe(e.currentTarget.value as any)}
+                  >
+                    <option value="ST-Link V2">ST-Link V2 (SWD)</option>
+                    <option value="J-Link">J-Link (SWD/JTAG)</option>
+                    <option value="CMSIS-DAP">CMSIS-DAP (SWD)</option>
+                  </select>
+                </div>
+                <div class="config-group">
+                  <!-- svelte-ignore a11y-label-has-associated-control -->
+                  <label>Toolchain compiler Path</label>
+                  <div class="path-input-wrapper">
+                    <input
+                      type="text"
+                      class="config-input"
+                      value={$workspaceStore.toolchainPath}
+                      onchange={(e) =>
+                        actions.setToolchainPath(e.currentTarget.value)}
+                    />
+                    <button
+                      class="browse-btn"
+                      onclick={() =>
+                        actions.setToolchainPath("/usr/bin/arm-none-eabi-gcc")}
+                      >Reset</button
+                    >
+                  </div>
+                </div>
               </div>
             </div>
           {/if}
-        {/if}
 
+          {#if $workspaceStore.activeSidebarTab === "libraries"}
+            <LibraryManager />
+          {/if}
+        </aside>
 
-
-        {#if $workspaceStore.activeSidebarTab === "rag"}
-          <RagUploadPanel />
-        {/if}
-
-        {#if $workspaceStore.activeSidebarTab === "boards"}
-          <div class="panel-header">
-            <div class="panel-title">Target Config</div>
-          </div>
-          <div class="panel-body">
-            <div class="boards-config-panel">
-              <div class="config-group">
-                <!-- svelte-ignore a11y-label-has-associated-control -->
-                <label>MCU Board Target</label>
-                <select
-                  class="config-select"
-                  value={$workspaceStore.selectedBoard}
-                  onchange={(e) =>
-                    actions.setSelectedBoard(e.currentTarget.value as any)}
-                >
-                  <option value="STM32F401">STM32F401 (Cortex-M4)</option>
-                  <option value="ESP32-S3">ESP32-S3 (Xtensa LX7)</option>
-                  <option value="RP2040">RP2040 (Cortex-M0+)</option>
-                </select>
-              </div>
-              <div class="config-group">
-                <!-- svelte-ignore a11y-label-has-associated-control -->
-                <label>Debugger Probe</label>
-                <select
-                  class="config-select"
-                  value={$workspaceStore.selectedProbe}
-                  onchange={(e) =>
-                    actions.setSelectedProbe(e.currentTarget.value as any)}
-                >
-                  <option value="ST-Link V2">ST-Link V2 (SWD)</option>
-                  <option value="J-Link">J-Link (SWD/JTAG)</option>
-                  <option value="CMSIS-DAP">CMSIS-DAP (SWD)</option>
-                </select>
-              </div>
-              <div class="config-group">
-                <!-- svelte-ignore a11y-label-has-associated-control -->
-                <label>Toolchain compiler Path</label>
-                <div class="path-input-wrapper">
-                  <input
-                    type="text"
-                    class="config-input"
-                    value={$workspaceStore.toolchainPath}
-                    onchange={(e) =>
-                      actions.setToolchainPath(e.currentTarget.value)}
-                  />
-                  <button
-                    class="browse-btn"
-                    onclick={() =>
-                      actions.setToolchainPath("/usr/bin/arm-none-eabi-gcc")}
-                    >Reset</button
-                  >
-                </div>
-              </div>
-            </div>
-          </div>
-        {/if}
-
-        {#if $workspaceStore.activeSidebarTab === "libraries"}
-          <LibraryManager />
-        {/if}
-      </aside>
-
-      <!-- Sidebar Drag Handle -->
-      <!-- svelte-ignore a11y-no-static-element-interactions -->
-      <div
-        class="resize-handle vertical-handle"
-        onmousedown={() => {
-          isDraggingLeft = true;
-          document.body.classList.add("dragging-col");
-        }}
-        style="left: {sidebarWidth + 52}px;"
-      ></div>
+        <!-- Sidebar Drag Handle -->
+        <!-- svelte-ignore a11y-no-static-element-interactions -->
+        <div
+          class="resize-handle vertical-handle"
+          onmousedown={() => {
+            isDraggingLeft = true;
+            document.body.classList.add("dragging-col");
+          }}
+          style="left: {sidebarWidth + 52}px;"
+        ></div>
       {/if}
 
       <!-- Center Workspace Area (Editor + Bottom Drawer) -->
@@ -2193,8 +2408,6 @@
                 </div>
               </div>
             {/if}
-
-
           </div>
         </section>
 
@@ -2318,8 +2531,6 @@
                 </div>
               {/if}
 
-
-
               {#if $workspaceStore.activeBottomTab === "registers"}
                 <div class="registers-panel">
                   <div class="peripheral-list">
@@ -2424,19 +2635,24 @@
       <!-- Right AI Panel Column -->
       <aside
         class="split-sidebar-right right-ai-panel"
-        style="width: {rightSidebarWidth}px; display: {(showConfigurator || showCopilot) ? 'flex' : 'none'};"
+        style="width: {rightSidebarWidth}px; display: {showConfigurator ||
+        showCopilot
+          ? 'flex'
+          : 'none'};"
       >
-
         {#if showConfigurator}
           <section
             class="sidebar-right-pane embedded-configurator-pane"
-            style={showCopilot ? `flex: ${rightPaneSplit} ${rightPaneSplit} 0%;` : "flex: 1 1 0%;"}
+            style={showCopilot
+              ? `flex: ${rightPaneSplit} ${rightPaneSplit} 0%;`
+              : "flex: 1 1 0%;"}
           >
             <EmbeddedConfigurator
               selectedBoard={$workspaceStore.selectedBoard}
               onClose={() => (showConfigurator = false)}
               isDetached={false}
               onDetach={() => (showConfigurator = false)}
+              onFilesGenerated={handleHalFilesGenerated}
             />
           </section>
         {/if}
@@ -2447,697 +2663,709 @@
         {/if}
 
         {#if showCopilot}
-        <section
-          class="sidebar-right-pane ai-copilot-pane"
-          class:expanded={!showConfigurator}
-          style={showConfigurator ? `flex: ${100 - rightPaneSplit} ${100 - rightPaneSplit} 0%;` : "flex: 1 1 0%;"}
-        >
-          <!-- Chat Header -->
-          <div class="ai-chat-header">
-            <div class="ai-chat-header-info">
-              <div class="ai-avatar-badge">
-                <Sparkles size={12} />
-              </div>
-              <div>
-                <div class="ai-chat-title">HARDCOREAI COPILOT</div>
-                <div class="ai-chat-subtitle">
-                  Embedded AI Assistant · Online
+          <section
+            class="sidebar-right-pane ai-copilot-pane"
+            class:expanded={!showConfigurator}
+            style={showConfigurator
+              ? `flex: ${100 - rightPaneSplit} ${100 - rightPaneSplit} 0%;`
+              : "flex: 1 1 0%;"}
+          >
+            <!-- Chat Header -->
+            <div class="ai-chat-header">
+              <div class="ai-chat-header-info">
+                <div class="ai-avatar-badge">
+                  <Sparkles size={12} />
+                </div>
+                <div>
+                  <div class="ai-chat-title">HARDCOREAI COPILOT</div>
+                  <div class="ai-chat-subtitle">
+                    Embedded AI Assistant · Online
+                  </div>
                 </div>
               </div>
-            </div>
-            <div style="display: flex; gap: 6px;">
-              {#if $workspaceStore.activeProjectId}
+              <div style="display: flex; gap: 6px;">
+                {#if $workspaceStore.activeProjectId}
+                  <button
+                    class="close-ai-btn"
+                    onclick={() =>
+                      actions.clearChat($workspaceStore.activeProjectId!)}
+                    title="Clear Conversation History"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                {/if}
                 <button
                   class="close-ai-btn"
-                  onclick={() =>
-                    actions.clearChat($workspaceStore.activeProjectId!)}
-                  title="Clear Conversation History"
+                  onclick={() => (showCopilot = false)}
+                  title="Minimize panel"
                 >
-                  <Trash2 size={13} />
+                  <X size={13} />
                 </button>
-              {/if}
-              <button
-                class="close-ai-btn"
-                onclick={() => (showCopilot = false)}
-                title="Minimize panel"
-              >
-                <X size={13} />
-              </button>
-            </div>
-          </div>
-
-          <!-- Chat messages view -->
-          <div
-            class="ai-copilot-chat-content"
-            bind:this={chatContentEl}
-            onscroll={handleChatScroll}
-          >
-            {#if !$workspaceStore.aiMessages.some((m) => m.sender === "user")}
-              <div class="copilot-welcome-container">
-                <div class="copilot-welcome-title">
-                  Hello! I'm HardcoreAI Copilot
-                </div>
-                <div class="copilot-welcome-subtitle">
-                  Ask me anything about your embedded project.
-                </div>
-
-                <div class="copilot-welcome-grid">
-                  <button
-                    type="button"
-                    class="copilot-shortcut-card"
-                    onclick={() =>
-                      actions.sendAiMessage(
-                        "Explain the code in the active file.",
-                      )}
-                  >
-                    <FileCode size={14} class="shortcut-card-icon" />
-                    <span>Explain this code</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    class="copilot-shortcut-card"
-                    onclick={() =>
-                      actions.sendAiMessage(
-                        "Fix any errors in the current code.",
-                      )}
-                  >
-                    <AlertTriangle size={14} class="shortcut-card-icon" />
-                    <span>Fix errors</span>
-                  </button>
-
-
-
-                  <button
-                    type="button"
-                    class="copilot-shortcut-card"
-                    onclick={() =>
-                      actions.sendAiMessage(
-                        "Optimize the performance of this code.",
-                      )}
-                  >
-                    <Cpu size={14} class="shortcut-card-icon" />
-                    <span>Optimize this code</span>
-                  </button>
-                </div>
               </div>
-            {:else}
-              {#each $workspaceStore.aiMessages as msg}
-                <div class="chat-row {msg.sender}">
-                  {#if msg.sender === "ai"}
-                    <div class="chat-avatar ai-avatar">
-                      <Sparkles size={9} />
-                    </div>
-                  {:else}
-                    <div class="chat-avatar user-avatar">DEV</div>
-                  {/if}
-                  <div class="chat-msg-block {msg.sender}">
-                    <div class="chat-msg-meta">
-                      <span class="chat-msg-sender"
-                        >{msg.sender === "ai" ? "HARDCOREAI" : "You"}</span
-                      >
-                      <span class="chat-msg-time">{msg.timestamp}</span>
-                    </div>
-                    <div class="chat-msg-bubble {msg.sender}">
-                      <!-- Live agent trace: thinking, function-call cards, code cards -->
-                      {#if msg.steps && msg.steps.length > 0}
-                        <div class="agent-trace">
-                          {#each msg.steps as step}
-                            {#if step.kind === "think"}
-                              <div class="agent-think-step">
-                                <span class="agent-think-icon">💭</span>
-                                <span class="agent-think-text-inline"
-                                  >{step.text}</span
-                                >
-                              </div>
-                            {:else if step.kind === "call"}
-                              <div class="agent-call-card">
-                                <span class="agent-call-icon"
-                                  ><Sparkles size={11} /></span
-                                >
-                                <span class="agent-call-name">{step.name}</span>
-                                <span class="agent-call-args"
-                                  >({step.args
-                                    ? Object.entries(step.args)
-                                        .map(
-                                          ([k, v]) =>
-                                            `${k}: ${JSON.stringify(v)}`,
-                                        )
-                                        .join(", ")
-                                    : ""})</span
-                                >
-                              </div>
-                            {:else if step.kind === "code"}
-                              <div class="agent-code-card">
-                                <div class="agent-code-head">
-                                  <span class="agent-code-file"
-                                    >{step.path}</span
-                                  >
-                                  <span class="agent-code-badge">generated</span
+            </div>
+
+            <!-- Chat messages view -->
+            <div
+              class="ai-copilot-chat-content"
+              bind:this={chatContentEl}
+              onscroll={handleChatScroll}
+            >
+              {#if !$workspaceStore.aiMessages.some((m) => m.sender === "user")}
+                <div class="copilot-welcome-container">
+                  <div class="copilot-welcome-title">
+                    Hello! I'm HardcoreAI Copilot
+                  </div>
+                  <div class="copilot-welcome-subtitle">
+                    Ask me anything about your embedded project.
+                  </div>
+
+                  <div class="copilot-welcome-grid">
+                    <button
+                      type="button"
+                      class="copilot-shortcut-card"
+                      onclick={() =>
+                        actions.sendAiMessage(
+                          "Explain the code in the active file.",
+                        )}
+                    >
+                      <FileCode size={14} class="shortcut-card-icon" />
+                      <span>Explain this code</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      class="copilot-shortcut-card"
+                      onclick={() =>
+                        actions.sendAiMessage(
+                          "Fix any errors in the current code.",
+                        )}
+                    >
+                      <AlertTriangle size={14} class="shortcut-card-icon" />
+                      <span>Fix errors</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      class="copilot-shortcut-card"
+                      onclick={() =>
+                        actions.sendAiMessage(
+                          "Optimize the performance of this code.",
+                        )}
+                    >
+                      <Cpu size={14} class="shortcut-card-icon" />
+                      <span>Optimize this code</span>
+                    </button>
+                  </div>
+                </div>
+              {:else}
+                {#each $workspaceStore.aiMessages as msg}
+                  <div class="chat-row {msg.sender}">
+                    {#if msg.sender === "ai"}
+                      <div class="chat-avatar ai-avatar">
+                        <Sparkles size={9} />
+                      </div>
+                    {:else}
+                      <div class="chat-avatar user-avatar">DEV</div>
+                    {/if}
+                    <div class="chat-msg-block {msg.sender}">
+                      <div class="chat-msg-meta">
+                        <span class="chat-msg-sender"
+                          >{msg.sender === "ai" ? "HARDCOREAI" : "You"}</span
+                        >
+                        <span class="chat-msg-time">{msg.timestamp}</span>
+                      </div>
+                      <div class="chat-msg-bubble {msg.sender}">
+                        <!-- Live agent trace: thinking, function-call cards, code cards -->
+                        {#if msg.steps && msg.steps.length > 0}
+                          <div class="agent-trace">
+                            {#each msg.steps as step}
+                              {#if step.kind === "think"}
+                                <div class="agent-think-step">
+                                  <span class="agent-think-icon">💭</span>
+                                  <span class="agent-think-text-inline"
+                                    >{step.text}</span
                                   >
                                 </div>
-                                <pre class="agent-code-body"><code
-                                    >{step.code}</code
-                                  ></pre>
-                              </div>
-                            {:else if step.kind === "proposal"}
-                              <div
-                                class="agent-proposal-card"
-                                class:allowed={step.decision === "allowed"}
-                                class:rejected={step.decision === "rejected"}
-                              >
-                                <div class="agent-proposal-head">
-                                  <span class="agent-proposal-file"
-                                    >{step.deleted
-                                      ? "🗑 "
-                                      : ""}{step.path}</span
+                              {:else if step.kind === "call"}
+                                <div class="agent-call-card">
+                                  <span class="agent-call-icon"
+                                    ><Sparkles size={11} /></span
                                   >
-                                  <span
-                                    class="agent-proposal-badge {step.decision}"
+                                  <span class="agent-call-name"
+                                    >{step.name}</span
                                   >
-                                    {step.decision === "allowed"
-                                      ? "✓ Applied"
-                                      : step.decision === "rejected"
-                                        ? "✕ Rejected"
-                                        : "Proposed change"}
-                                  </span>
+                                  <span class="agent-call-args"
+                                    >({step.args
+                                      ? Object.entries(step.args)
+                                          .map(
+                                            ([k, v]) =>
+                                              `${k}: ${JSON.stringify(v)}`,
+                                          )
+                                          .join(", ")
+                                      : ""})</span
+                                  >
                                 </div>
-                                <pre class="agent-diff-body"><code
-                                    >{#each computeProposalDiff(step.old || "", step.deleted ? "" : step.code || "") as line}<span
-                                        class="diff-line {line.type}"
-                                        >{line.text}</span
-                                      >{"\n"}{/each}</code
-                                  ></pre>
-                                {#if (step.decision || "pending") === "pending"}
-                                  <div class="agent-proposal-actions">
-                                    <button
-                                      class="proposal-btn allow"
-                                      onclick={() =>
-                                        actions.approveProposal(
-                                          msg.id,
-                                          step.path || "",
-                                        )}>Allow</button
+                              {:else if step.kind === "code"}
+                                <div class="agent-code-card">
+                                  <div class="agent-code-head">
+                                    <span class="agent-code-file"
+                                      >{step.path}</span
                                     >
-                                    <button
-                                      class="proposal-btn reject"
-                                      onclick={() =>
-                                        actions.rejectProposal(
-                                          msg.id,
-                                          step.path || "",
-                                        )}>Reject</button
+                                    <span class="agent-code-badge"
+                                      >generated</span
                                     >
                                   </div>
-                                {/if}
-                              </div>
-                            {:else if step.kind === "result"}
-                              {#if step.result && step.result.includes("=== Unified Diff ===")}
-                                <div class="agent-result-line">
-                                  ↳ Code edits applied:
+                                  <pre class="agent-code-body"><code
+                                      >{step.code}</code
+                                    ></pre>
                                 </div>
-                                <div class="agent-diff-card">
+                              {:else if step.kind === "proposal"}
+                                <div
+                                  class="agent-proposal-card"
+                                  class:allowed={step.decision === "allowed"}
+                                  class:rejected={step.decision === "rejected"}
+                                >
+                                  <div class="agent-proposal-head">
+                                    <span class="agent-proposal-file"
+                                      >{step.deleted
+                                        ? "🗑 "
+                                        : ""}{step.path}</span
+                                    >
+                                    <span
+                                      class="agent-proposal-badge {step.decision}"
+                                    >
+                                      {step.decision === "allowed"
+                                        ? "✓ Applied"
+                                        : step.decision === "rejected"
+                                          ? "✕ Rejected"
+                                          : "Proposed change"}
+                                    </span>
+                                  </div>
                                   <pre class="agent-diff-body"><code
-                                      >{#each parseDiff(step.result) as line}<span
+                                      >{#each computeProposalDiff(step.old || "", step.deleted ? "" : step.code || "") as line}<span
                                           class="diff-line {line.type}"
                                           >{line.text}</span
                                         >{"\n"}{/each}</code
                                     ></pre>
+                                  {#if (step.decision || "pending") === "pending"}
+                                    <div class="agent-proposal-actions">
+                                      <button
+                                        class="proposal-btn allow"
+                                        onclick={() =>
+                                          actions.approveProposal(
+                                            msg.id,
+                                            step.path || "",
+                                          )}>Allow</button
+                                      >
+                                      <button
+                                        class="proposal-btn reject"
+                                        onclick={() =>
+                                          actions.rejectProposal(
+                                            msg.id,
+                                            step.path || "",
+                                          )}>Reject</button
+                                      >
+                                    </div>
+                                  {/if}
                                 </div>
-                              {:else}
-                                <div class="agent-result-line">
-                                  ↳ {step.result}
+                              {:else if step.kind === "result"}
+                                {#if step.result && step.result.includes("=== Unified Diff ===")}
+                                  <div class="agent-result-line">
+                                    ↳ Code edits applied:
+                                  </div>
+                                  <div class="agent-diff-card">
+                                    <pre class="agent-diff-body"><code
+                                        >{#each parseDiff(step.result) as line}<span
+                                            class="diff-line {line.type}"
+                                            >{line.text}</span
+                                          >{"\n"}{/each}</code
+                                      ></pre>
+                                  </div>
+                                {:else}
+                                  <div class="agent-result-line">
+                                    ↳ {step.result}
+                                  </div>
+                                {/if}
+                              {:else if step.kind === "note"}
+                                <div class="agent-note-line">{step.text}</div>
+                              {:else if step.kind === "error"}
+                                <div class="agent-error-line">
+                                  ⚠ {step.text}
                                 </div>
                               {/if}
-                            {:else if step.kind === "note"}
-                              <div class="agent-note-line">{step.text}</div>
-                            {:else if step.kind === "error"}
-                              <div class="agent-error-line">⚠ {step.text}</div>
-                            {/if}
-                          {/each}
-                        </div>
-                      {/if}
+                            {/each}
+                          </div>
+                        {/if}
 
-                      <!-- Collapsible streamed thinking (italic) -->
-                      {#if msg.thinking && msg.thinking.trim()}
-                        <div
-                          class="agent-think-block"
-                          class:collapsed={msg.thinkingCollapsed}
-                        >
-                          <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+                        <!-- Collapsible streamed thinking (italic) -->
+                        {#if msg.thinking && msg.thinking.trim()}
                           <div
-                            class="agent-think-header"
-                            onclick={() => {
-                              msg.thinkingCollapsed = !msg.thinkingCollapsed;
-                            }}
+                            class="agent-think-block"
+                            class:collapsed={msg.thinkingCollapsed}
                           >
-                            <span class="agent-think-caret"
-                              >{msg.thinkingCollapsed ? "▸" : "▾"}</span
-                            >
-                            <span class="agent-think-label"
-                              >{msg.thinkingDone
-                                ? "Thought"
-                                : "Thinking…"}</span
-                            >
-                          </div>
-                          {#if !msg.thinkingCollapsed}
-                            <p class="agent-think-text">{msg.thinking}</p>
-                          {/if}
-                        </div>
-                      {/if}
-
-                      {#if msg.text && msg.text.trim()}
-                        <div class="chat-markdown">
-                          {@html renderMarkdown(msg.text)}
-                        </div>
-                      {/if}
-
-                      {#if msg.streaming}
-                        <div class="agent-work-indicator" aria-live="polite">
-                          <div class="agent-work-mark">
-                            <Sparkles size={12} />
-                            <span></span>
-                          </div>
-                          <div class="agent-work-body">
-                            <div class="agent-work-label">
-                              {agentWorkingPhrase}
-                            </div>
-                            <div class="agent-work-meter"><span></span></div>
-                          </div>
-                        </div>
-                      {/if}
-
-                      {#if msg.status === "waiting_for_user" && msg.options && msg.options.length > 0}
-                        {#if msg.inputType === "radio"}
-                          <div class="chat-radio-list">
-                            {#each msg.options as option}
-                              <label
-                                class="chat-radio-item"
-                                class:disabled={msg.submitted}
-                              >
-                                <input
-                                  type="radio"
-                                  name="radio-{msg.id}"
-                                  value={option}
-                                  disabled={msg.submitted}
-                                  checked={msg.submitted
-                                    ? msg.selectedValue === option
-                                    : chatRadioSelections[msg.id] === option}
-                                  onchange={() => {
-                                    if (!msg.submitted)
-                                      chatRadioSelections[msg.id] = option;
-                                  }}
-                                />
-                                <span class="custom-radio"></span>
-                                <span class="radio-label">{option}</span>
-                              </label>
-                            {/each}
-                          </div>
-                          {#if !msg.submitted}
-                            <button
-                              class="chat-submit-choice-btn"
-                              disabled={!chatRadioSelections[msg.id]}
+                            <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+                            <div
+                              class="agent-think-header"
                               onclick={() => {
-                                const val = chatRadioSelections[msg.id];
-                                if (val) {
-                                  msg.selectedValue = val;
-                                  actions.sendAiMessage(val);
-                                }
+                                msg.thinkingCollapsed = !msg.thinkingCollapsed;
                               }}
                             >
-                              Submit Choice
-                            </button>
-                          {:else}
-                            <div class="chat-submitted-badge">
-                              Submitted: <strong
-                                >{msg.selectedValue ||
-                                  chatRadioSelections[msg.id]}</strong
+                              <span class="agent-think-caret"
+                                >{msg.thinkingCollapsed ? "▸" : "▾"}</span
+                              >
+                              <span class="agent-think-label"
+                                >{msg.thinkingDone
+                                  ? "Thought"
+                                  : "Thinking…"}</span
                               >
                             </div>
-                          {/if}
-                        {:else if msg.inputType === "checkbox"}
-                          <div class="chat-checkbox-list">
-                            {#each msg.options as option}
-                              {@const isChecked = msg.submitted
-                                ? Array.isArray(msg.selectedValue)
-                                  ? msg.selectedValue.includes(option)
-                                  : msg.selectedValue === option
-                                : (
-                                    chatCheckboxSelections[msg.id] || []
-                                  ).includes(option)}
-                              <label
-                                class="chat-checkbox-item"
-                                class:disabled={msg.submitted}
-                              >
-                                <input
-                                  type="checkbox"
-                                  value={option}
-                                  disabled={msg.submitted}
-                                  checked={isChecked}
-                                  onchange={(e) => {
-                                    if (msg.submitted) return;
-                                    const arr =
-                                      chatCheckboxSelections[msg.id] || [];
-                                    if (e.currentTarget.checked) {
-                                      chatCheckboxSelections[msg.id] = [
-                                        ...arr,
-                                        option,
-                                      ];
-                                    } else {
-                                      chatCheckboxSelections[msg.id] =
-                                        arr.filter((o) => o !== option);
-                                    }
-                                  }}
-                                />
-                                <span class="custom-checkbox"></span>
-                                <span class="checkbox-label">{option}</span>
-                              </label>
-                            {/each}
+                            {#if !msg.thinkingCollapsed}
+                              <p class="agent-think-text">{msg.thinking}</p>
+                            {/if}
                           </div>
-                          {#if !msg.submitted}
-                            <button
-                              class="chat-submit-choice-btn"
-                              disabled={!(
-                                chatCheckboxSelections[msg.id] &&
-                                chatCheckboxSelections[msg.id].length > 0
-                              )}
-                              onclick={() => {
-                                const val =
-                                  chatCheckboxSelections[msg.id] || [];
-                                msg.selectedValue = val;
-                                actions.sendAiMessage(val.join(", "));
-                              }}
-                            >
-                              Submit Selection
-                            </button>
-                          {:else}
-                            <div class="chat-submitted-badge">
-                              Submitted: <strong>
-                                {Array.isArray(msg.selectedValue)
-                                  ? msg.selectedValue.join(", ")
-                                  : msg.selectedValue}
-                              </strong>
+                        {/if}
+
+                        {#if msg.text && msg.text.trim()}
+                          <div class="chat-markdown">
+                            {@html renderMarkdown(msg.text)}
+                          </div>
+                        {/if}
+
+                        {#if msg.streaming}
+                          <div class="agent-work-indicator" aria-live="polite">
+                            <div class="agent-work-mark">
+                              <Sparkles size={12} />
+                              <span></span>
                             </div>
-                          {/if}
-                        {:else if msg.inputType === "select"}
-                          <div class="chat-select-wrapper">
-                            <select
-                              class="chat-select-dropdown"
-                              disabled={msg.submitted}
-                              value={msg.submitted
-                                ? msg.selectedValue
-                                : chatDropdownSelections[msg.id] || ""}
-                              onchange={(e) => {
-                                if (!msg.submitted)
-                                  chatDropdownSelections[msg.id] =
-                                    e.currentTarget.value;
-                              }}
-                            >
-                              <option value="" disabled
-                                >-- Select Option --</option
-                              >
+                            <div class="agent-work-body">
+                              <div class="agent-work-label">
+                                {agentWorkingPhrase}
+                              </div>
+                              <div class="agent-work-meter"><span></span></div>
+                            </div>
+                          </div>
+                        {/if}
+
+                        {#if msg.status === "waiting_for_user" && msg.options && msg.options.length > 0}
+                          {#if msg.inputType === "radio"}
+                            <div class="chat-radio-list">
                               {#each msg.options as option}
-                                <option value={option}>{option}</option>
-                              {/each}
-                            </select>
-                          </div>
-                          {#if !msg.submitted}
-                            <button
-                              class="chat-submit-choice-btn"
-                              disabled={!chatDropdownSelections[msg.id]}
-                              onclick={() => {
-                                const val = chatDropdownSelections[msg.id];
-                                if (val) {
-                                  msg.selectedValue = val;
-                                  actions.sendAiMessage(val);
-                                }
-                              }}
-                            >
-                              Submit Choice
-                            </button>
-                          {:else}
-                            <div class="chat-submitted-badge">
-                              Submitted: <strong
-                                >{msg.selectedValue ||
-                                  chatDropdownSelections[msg.id]}</strong
-                              >
-                            </div>
-                          {/if}
-                        {:else}
-                          <!-- inputType === 'buttons' or default fallback -->
-                          {#if !msg.submitted}
-                            <div class="chat-options-container">
-                              {#each msg.options as option}
-                                {#if option.toLowerCase().startsWith("other")}
-                                  <button
-                                    class="chat-option-btn chat-option-other"
-                                    onclick={() => {
-                                      chatOtherOpen[msg.id] =
-                                        !chatOtherOpen[msg.id];
-                                    }}
-                                  >
-                                    {option}
-                                  </button>
-                                {:else}
-                                  <button
-                                    class="chat-option-btn"
-                                    onclick={() => {
-                                      msg.selectedValue = option;
-                                      actions.sendAiMessage(option);
-                                    }}
-                                  >
-                                    {option}
-                                  </button>
-                                {/if}
-                              {/each}
-                            </div>
-                            {#if chatOtherOpen[msg.id]}
-                              <div class="chat-other-input-row">
-                                <input
-                                  type="text"
-                                  class="chat-other-input"
-                                  placeholder="Describe it yourself…"
-                                  bind:value={chatOtherText[msg.id]}
-                                  onkeydown={(e) => {
-                                    if (
-                                      e.key === "Enter" &&
-                                      chatOtherText[msg.id]?.trim()
-                                    ) {
-                                      msg.selectedValue =
-                                        chatOtherText[msg.id].trim();
-                                      actions.sendAiMessage(
-                                        chatOtherText[msg.id].trim(),
-                                      );
-                                    }
-                                  }}
-                                />
-                                <button
-                                  class="chat-submit-choice-btn"
-                                  disabled={!chatOtherText[msg.id]?.trim()}
-                                  onclick={() => {
-                                    const v = chatOtherText[msg.id]?.trim();
-                                    if (v) {
-                                      msg.selectedValue = v;
-                                      actions.sendAiMessage(v);
-                                    }
-                                  }}
+                                <label
+                                  class="chat-radio-item"
+                                  class:disabled={msg.submitted}
                                 >
-                                  Send
-                                </button>
+                                  <input
+                                    type="radio"
+                                    name="radio-{msg.id}"
+                                    value={option}
+                                    disabled={msg.submitted}
+                                    checked={msg.submitted
+                                      ? msg.selectedValue === option
+                                      : chatRadioSelections[msg.id] === option}
+                                    onchange={() => {
+                                      if (!msg.submitted)
+                                        chatRadioSelections[msg.id] = option;
+                                    }}
+                                  />
+                                  <span class="custom-radio"></span>
+                                  <span class="radio-label">{option}</span>
+                                </label>
+                              {/each}
+                            </div>
+                            {#if !msg.submitted}
+                              <button
+                                class="chat-submit-choice-btn"
+                                disabled={!chatRadioSelections[msg.id]}
+                                onclick={() => {
+                                  const val = chatRadioSelections[msg.id];
+                                  if (val) {
+                                    msg.selectedValue = val;
+                                    actions.sendAiMessage(val);
+                                  }
+                                }}
+                              >
+                                Submit Choice
+                              </button>
+                            {:else}
+                              <div class="chat-submitted-badge">
+                                Submitted: <strong
+                                  >{msg.selectedValue ||
+                                    chatRadioSelections[msg.id]}</strong
+                                >
+                              </div>
+                            {/if}
+                          {:else if msg.inputType === "checkbox"}
+                            <div class="chat-checkbox-list">
+                              {#each msg.options as option}
+                                {@const isChecked = msg.submitted
+                                  ? Array.isArray(msg.selectedValue)
+                                    ? msg.selectedValue.includes(option)
+                                    : msg.selectedValue === option
+                                  : (
+                                      chatCheckboxSelections[msg.id] || []
+                                    ).includes(option)}
+                                <label
+                                  class="chat-checkbox-item"
+                                  class:disabled={msg.submitted}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    value={option}
+                                    disabled={msg.submitted}
+                                    checked={isChecked}
+                                    onchange={(e) => {
+                                      if (msg.submitted) return;
+                                      const arr =
+                                        chatCheckboxSelections[msg.id] || [];
+                                      if (e.currentTarget.checked) {
+                                        chatCheckboxSelections[msg.id] = [
+                                          ...arr,
+                                          option,
+                                        ];
+                                      } else {
+                                        chatCheckboxSelections[msg.id] =
+                                          arr.filter((o) => o !== option);
+                                      }
+                                    }}
+                                  />
+                                  <span class="custom-checkbox"></span>
+                                  <span class="checkbox-label">{option}</span>
+                                </label>
+                              {/each}
+                            </div>
+                            {#if !msg.submitted}
+                              <button
+                                class="chat-submit-choice-btn"
+                                disabled={!(
+                                  chatCheckboxSelections[msg.id] &&
+                                  chatCheckboxSelections[msg.id].length > 0
+                                )}
+                                onclick={() => {
+                                  const val =
+                                    chatCheckboxSelections[msg.id] || [];
+                                  msg.selectedValue = val;
+                                  actions.sendAiMessage(val.join(", "));
+                                }}
+                              >
+                                Submit Selection
+                              </button>
+                            {:else}
+                              <div class="chat-submitted-badge">
+                                Submitted: <strong>
+                                  {Array.isArray(msg.selectedValue)
+                                    ? msg.selectedValue.join(", ")
+                                    : msg.selectedValue}
+                                </strong>
+                              </div>
+                            {/if}
+                          {:else if msg.inputType === "select"}
+                            <div class="chat-select-wrapper">
+                              <select
+                                class="chat-select-dropdown"
+                                disabled={msg.submitted}
+                                value={msg.submitted
+                                  ? msg.selectedValue
+                                  : chatDropdownSelections[msg.id] || ""}
+                                onchange={(e) => {
+                                  if (!msg.submitted)
+                                    chatDropdownSelections[msg.id] =
+                                      e.currentTarget.value;
+                                }}
+                              >
+                                <option value="" disabled
+                                  >-- Select Option --</option
+                                >
+                                {#each msg.options as option}
+                                  <option value={option}>{option}</option>
+                                {/each}
+                              </select>
+                            </div>
+                            {#if !msg.submitted}
+                              <button
+                                class="chat-submit-choice-btn"
+                                disabled={!chatDropdownSelections[msg.id]}
+                                onclick={() => {
+                                  const val = chatDropdownSelections[msg.id];
+                                  if (val) {
+                                    msg.selectedValue = val;
+                                    actions.sendAiMessage(val);
+                                  }
+                                }}
+                              >
+                                Submit Choice
+                              </button>
+                            {:else}
+                              <div class="chat-submitted-badge">
+                                Submitted: <strong
+                                  >{msg.selectedValue ||
+                                    chatDropdownSelections[msg.id]}</strong
+                                >
                               </div>
                             {/if}
                           {:else}
-                            <div class="chat-submitted-badge">
-                              Submitted: <strong>{msg.selectedValue}</strong>
-                            </div>
+                            <!-- inputType === 'buttons' or default fallback -->
+                            {#if !msg.submitted}
+                              <div class="chat-options-container">
+                                {#each msg.options as option}
+                                  {#if option.toLowerCase().startsWith("other")}
+                                    <button
+                                      class="chat-option-btn chat-option-other"
+                                      onclick={() => {
+                                        chatOtherOpen[msg.id] =
+                                          !chatOtherOpen[msg.id];
+                                      }}
+                                    >
+                                      {option}
+                                    </button>
+                                  {:else}
+                                    <button
+                                      class="chat-option-btn"
+                                      onclick={() => {
+                                        msg.selectedValue = option;
+                                        actions.sendAiMessage(option);
+                                      }}
+                                    >
+                                      {option}
+                                    </button>
+                                  {/if}
+                                {/each}
+                              </div>
+                              {#if chatOtherOpen[msg.id]}
+                                <div class="chat-other-input-row">
+                                  <input
+                                    type="text"
+                                    class="chat-other-input"
+                                    placeholder="Describe it yourself…"
+                                    bind:value={chatOtherText[msg.id]}
+                                    onkeydown={(e) => {
+                                      if (
+                                        e.key === "Enter" &&
+                                        chatOtherText[msg.id]?.trim()
+                                      ) {
+                                        msg.selectedValue =
+                                          chatOtherText[msg.id].trim();
+                                        actions.sendAiMessage(
+                                          chatOtherText[msg.id].trim(),
+                                        );
+                                      }
+                                    }}
+                                  />
+                                  <button
+                                    class="chat-submit-choice-btn"
+                                    disabled={!chatOtherText[msg.id]?.trim()}
+                                    onclick={() => {
+                                      const v = chatOtherText[msg.id]?.trim();
+                                      if (v) {
+                                        msg.selectedValue = v;
+                                        actions.sendAiMessage(v);
+                                      }
+                                    }}
+                                  >
+                                    Send
+                                  </button>
+                                </div>
+                              {/if}
+                            {:else}
+                              <div class="chat-submitted-badge">
+                                Submitted: <strong>{msg.selectedValue}</strong>
+                              </div>
+                            {/if}
                           {/if}
                         {/if}
-                      {/if}
 
-                      {#if msg.status === "waiting_for_approval"}
-                        <div class="chat-approval-gate-card">
-                          <div class="approval-gate-header">
-                            <div class="approval-icon-pulse">
-                              <Sparkles size={14} />
-                            </div>
-                            <div class="approval-header-texts">
-                              <div class="approval-gate-title">
-                                PLAN APPROVAL REQUIRED
+                        {#if msg.status === "waiting_for_approval"}
+                          <div class="chat-approval-gate-card">
+                            <div class="approval-gate-header">
+                              <div class="approval-icon-pulse">
+                                <Sparkles size={14} />
                               </div>
-                              <div class="approval-gate-subtitle">
-                                Confirm plan to execute code updates
-                              </div>
-                            </div>
-                          </div>
-
-                          {#if msg.plan}
-                            <div class="chat-plan-steps">
-                              {#each msg.plan
-                                .split("\n")
-                                .filter(Boolean) as step}
-                                <div class="plan-step-item">
-                                  <span class="plan-step-dot"></span>
-                                  <span class="plan-step-text">{step}</span>
+                              <div class="approval-header-texts">
+                                <div class="approval-gate-title">
+                                  PLAN APPROVAL REQUIRED
                                 </div>
-                              {/each}
+                                <div class="approval-gate-subtitle">
+                                  Confirm plan to execute code updates
+                                </div>
+                              </div>
                             </div>
-                          {/if}
 
-                          {#if !msg.submitted}
-                            <div class="chat-approval-actions">
-                              <button
-                                class="chat-approve-btn-premium"
-                                onclick={() => {
-                                  msg.selectedValue = "APPROVED";
-                                  actions.sendAiMessage("APPROVE");
-                                }}
-                              >
-                                Accept & Generate
-                              </button>
-                              <button
-                                class="chat-reject-btn"
-                                onclick={() => {
-                                  aiInput =
-                                    "Reject: I would like you to change...";
-                                  const inp = document.querySelector(
-                                    ".chat-input-field",
-                                  ) as HTMLInputElement;
-                                  if (inp) inp.focus();
-                                }}
-                              >
-                                Reject & Revise
-                              </button>
-                            </div>
-                          {:else}
-                            <div class="chat-submitted-badge plan-approved">
-                              <span class="status-dot active"></span>
-                              <span>Plan Approved & Executed</span>
-                            </div>
-                          {/if}
-                        </div>
-                      {/if}
+                            {#if msg.plan}
+                              <div class="chat-plan-steps">
+                                {#each msg.plan
+                                  .split("\n")
+                                  .filter(Boolean) as step}
+                                  <div class="plan-step-item">
+                                    <span class="plan-step-dot"></span>
+                                    <span class="plan-step-text">{step}</span>
+                                  </div>
+                                {/each}
+                              </div>
+                            {/if}
+
+                            {#if !msg.submitted}
+                              <div class="chat-approval-actions">
+                                <button
+                                  class="chat-approve-btn-premium"
+                                  onclick={() => {
+                                    msg.selectedValue = "APPROVED";
+                                    actions.sendAiMessage("APPROVE");
+                                  }}
+                                >
+                                  Accept & Generate
+                                </button>
+                                <button
+                                  class="chat-reject-btn"
+                                  onclick={() => {
+                                    aiInput =
+                                      "Reject: I would like you to change...";
+                                    const inp = document.querySelector(
+                                      ".chat-input-field",
+                                    ) as HTMLInputElement;
+                                    if (inp) inp.focus();
+                                  }}
+                                >
+                                  Reject & Revise
+                                </button>
+                              </div>
+                            {:else}
+                              <div class="chat-submitted-badge plan-approved">
+                                <span class="status-dot active"></span>
+                                <span>Plan Approved & Executed</span>
+                              </div>
+                            {/if}
+                          </div>
+                        {/if}
+                      </div>
                     </div>
                   </div>
-                </div>
-              {/each}
-            {/if}
+                {/each}
+              {/if}
 
-            {#if $workspaceStore.aiWaiting}
-              <div class="chat-row ai">
-                <div class="chat-avatar ai-avatar"><Sparkles size={9} /></div>
-                <div class="chat-msg-block ai">
-                  <div class="chat-msg-meta">
-                    <span class="chat-msg-sender">HARDCOREAI</span>
-                  </div>
-                  <div class="chat-msg-bubble ai waiting-bubble">
-                    <span class="dot"></span>
-                    <span class="dot"></span>
-                    <span class="dot"></span>
-                  </div>
-                </div>
-              </div>
-            {/if}
-          </div>
-
-          <!-- Input Box -->
-          <div class="chat-input-zone" style="position: relative;">
-            {#if showScrollToBottom}
-              <div class="scroll-to-bottom-container">
-                <button
-                  type="button"
-                  class="scroll-to-bottom-btn"
-                  onclick={scrollToBottom}
-                  title="Scroll to bottom"
-                >
-                  <ArrowDown size={12} />
-                  <span>Scroll to Bottom</span>
-                </button>
-              </div>
-            {/if}
-            {#if showFileTagDropdown}
-              {@const filtered = projectFilesList.filter(f => f.toLowerCase().includes(fileTagFilter))}
-              {#if filtered.length > 0}
-                <div class="file-tag-autocomplete">
-                  <div class="autocomplete-header">Tag Project Files</div>
-                  {#each filtered as file, i}
-                    <!-- svelte-ignore a11y-click-events-have-key-events -->
-                    <!-- svelte-ignore a11y-no-static-element-interactions -->
-                    <div
-                      class="autocomplete-item {i === fileTagIndex ? 'selected' : ''}"
-                      onclick={() => insertFileTag(file)}
-                      onmouseenter={() => (fileTagIndex = i)}
-                    >
-                      <FileCode size={12} style="color: var(--accent-violet);" />
-                      <span>{file}</span>
+              {#if $workspaceStore.aiWaiting}
+                <div class="chat-row ai">
+                  <div class="chat-avatar ai-avatar"><Sparkles size={9} /></div>
+                  <div class="chat-msg-block ai">
+                    <div class="chat-msg-meta">
+                      <span class="chat-msg-sender">HARDCOREAI</span>
                     </div>
-                  {/each}
+                    <div class="chat-msg-bubble ai waiting-bubble">
+                      <span class="dot"></span>
+                      <span class="dot"></span>
+                      <span class="dot"></span>
+                    </div>
+                  </div>
                 </div>
               {/if}
-            {/if}
-            {#if activeAgentStreaming}
-              <div
-                class="chat-stop-generating-row"
-                style="display: flex; justify-content: center; margin-bottom: 8px;"
-              >
-                <button
-                  type="button"
-                  class="stop-generating-btn"
-                  onclick={() => actions.cancelAiMessage()}
-                  style="display: flex; align-items: center; gap: 6px; padding: 6px 12px; font-size: 0.72rem; font-weight: 600; border-radius: var(--radius-sm); border: 1px solid var(--border-color); background: var(--bg-tertiary); color: var(--text-active); cursor: pointer; transition: all 0.2s;"
-                >
-                  <div
-                    style="width: 8px; height: 8px; background: var(--accent-error); border-radius: 1px;"
-                  ></div>
-                  <span>Stop Generating</span>
-                </button>
-              </div>
-            {/if}
-            {#if queuedAiFollowup}
-              <div class="chat-followup-queued">
-                <span class="chat-followup-dot"></span>
-                <span class="chat-followup-label">Follow-up queued</span>
-                <span class="chat-followup-text">{queuedAiFollowup}</span>
-                <button
-                  type="button"
-                  class="chat-followup-clear"
-                  title="Clear queued follow-up"
-                  onclick={() => actions.clearQueuedAiFollowup()}
-                >
-                  <X size={10} />
-                </button>
-              </div>
-            {/if}
-            <form
-              class="chat-input-form"
-              class:streaming={activeAgentStreaming}
-              onsubmit={handleAiSend}
-            >
-              <input
-                type="text"
-                class="chat-input-field"
-                placeholder={activeAgentStreaming
-                  ? "Type a follow-up while HARDCOREAI works..."
-                  : "Ask about registers, RAG docs, or request a code fix..."}
-                bind:value={aiInput}
-                bind:this={fileTagInputRef}
-                oninput={handleChatInput}
-                onkeydown={handleChatInputKeyDown}
-              />
-              <button
-                type="submit"
-                class="chat-send-btn"
-                class:followup={activeAgentStreaming}
-                disabled={!aiInput.trim()}
-                title={activeAgentStreaming ? "Queue follow-up" : "Send"}
-              >
-                <Send size={13} />
-              </button>
-            </form>
-            <div class="chat-input-hint">
-              {activeAgentStreaming
-                ? "Agent running · next prompt will send as a follow-up"
-                : "Press Enter to send · Press @ to select files"}
             </div>
-          </div>
-        </section>
+
+            <!-- Input Box -->
+            <div class="chat-input-zone" style="position: relative;">
+              {#if showScrollToBottom}
+                <div class="scroll-to-bottom-container">
+                  <button
+                    type="button"
+                    class="scroll-to-bottom-btn"
+                    onclick={scrollToBottom}
+                    title="Scroll to bottom"
+                  >
+                    <ArrowDown size={12} />
+                    <span>Scroll to Bottom</span>
+                  </button>
+                </div>
+              {/if}
+              {#if showFileTagDropdown}
+                {@const filtered = projectFilesList.filter((f) =>
+                  f.toLowerCase().includes(fileTagFilter),
+                )}
+                {#if filtered.length > 0}
+                  <div class="file-tag-autocomplete">
+                    <div class="autocomplete-header">Tag Project Files</div>
+                    {#each filtered as file, i}
+                      <!-- svelte-ignore a11y-click-events-have-key-events -->
+                      <!-- svelte-ignore a11y-no-static-element-interactions -->
+                      <div
+                        class="autocomplete-item {i === fileTagIndex
+                          ? 'selected'
+                          : ''}"
+                        onclick={() => insertFileTag(file)}
+                        onmouseenter={() => (fileTagIndex = i)}
+                      >
+                        <FileCode
+                          size={12}
+                          style="color: var(--accent-violet);"
+                        />
+                        <span>{file}</span>
+                      </div>
+                    {/each}
+                  </div>
+                {/if}
+              {/if}
+              {#if activeAgentStreaming}
+                <div
+                  class="chat-stop-generating-row"
+                  style="display: flex; justify-content: center; margin-bottom: 8px;"
+                >
+                  <button
+                    type="button"
+                    class="stop-generating-btn"
+                    onclick={() => actions.cancelAiMessage()}
+                    style="display: flex; align-items: center; gap: 6px; padding: 6px 12px; font-size: 0.72rem; font-weight: 600; border-radius: var(--radius-sm); border: 1px solid var(--border-color); background: var(--bg-tertiary); color: var(--text-active); cursor: pointer; transition: all 0.2s;"
+                  >
+                    <div
+                      style="width: 8px; height: 8px; background: var(--accent-error); border-radius: 1px;"
+                    ></div>
+                    <span>Stop Generating</span>
+                  </button>
+                </div>
+              {/if}
+              {#if queuedAiFollowup}
+                <div class="chat-followup-queued">
+                  <span class="chat-followup-dot"></span>
+                  <span class="chat-followup-label">Follow-up queued</span>
+                  <span class="chat-followup-text">{queuedAiFollowup}</span>
+                  <button
+                    type="button"
+                    class="chat-followup-clear"
+                    title="Clear queued follow-up"
+                    onclick={() => actions.clearQueuedAiFollowup()}
+                  >
+                    <X size={10} />
+                  </button>
+                </div>
+              {/if}
+              <form
+                class="chat-input-form"
+                class:streaming={activeAgentStreaming}
+                onsubmit={handleAiSend}
+              >
+                <input
+                  type="text"
+                  class="chat-input-field"
+                  placeholder={activeAgentStreaming
+                    ? "Type a follow-up while HARDCOREAI works..."
+                    : "Ask about registers, RAG docs, or request a code fix..."}
+                  bind:value={aiInput}
+                  bind:this={fileTagInputRef}
+                  oninput={handleChatInput}
+                  onkeydown={handleChatInputKeyDown}
+                />
+                <button
+                  type="submit"
+                  class="chat-send-btn"
+                  class:followup={activeAgentStreaming}
+                  disabled={!aiInput.trim()}
+                  title={activeAgentStreaming ? "Queue follow-up" : "Send"}
+                >
+                  <Send size={13} />
+                </button>
+              </form>
+              <div class="chat-input-hint">
+                {activeAgentStreaming
+                  ? "Agent running · next prompt will send as a follow-up"
+                  : "Press Enter to send · Press @ to select files"}
+              </div>
+            </div>
+          </section>
         {/if}
       </aside>
 
@@ -3369,16 +3597,20 @@
       <div class="delete-modal-body">
         <p class="delete-msg-main">
           Are you sure you want to delete <strong
-            >'{fileDeleteConfirmModal.path.split('/').pop()}'</strong
+            >'{fileDeleteConfirmModal.path.split("/").pop()}'</strong
           >?
         </p>
         {#if fileDeleteConfirmModal.isFolder}
           <p class="delete-msg-sub">
-            This will permanently delete the folder <strong>{fileDeleteConfirmModal.path}</strong> and all of its contents. This action cannot be undone.
+            This will permanently delete the folder <strong
+              >{fileDeleteConfirmModal.path}</strong
+            > and all of its contents. This action cannot be undone.
           </p>
         {:else}
           <p class="delete-msg-sub">
-            This will permanently delete the file <strong>{fileDeleteConfirmModal.path}</strong>. This action cannot be undone.
+            This will permanently delete the file <strong
+              >{fileDeleteConfirmModal.path}</strong
+            >. This action cannot be undone.
           </p>
         {/if}
       </div>
@@ -3576,7 +3808,6 @@
   .horizontal-handle:hover {
     background-color: var(--accent-violet);
   }
-
 
   .configurator-toggle-tab {
     background: none;
@@ -4245,7 +4476,9 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4), 0 0 10px rgba(139, 92, 246, 0.1);
+    box-shadow:
+      0 4px 12px rgba(0, 0, 0, 0.4),
+      0 0 10px rgba(139, 92, 246, 0.1);
     transition: all 0.2s ease-in-out;
   }
 
@@ -4254,6 +4487,8 @@
     border-color: var(--accent-violet);
     color: var(--accent-violet-hover);
     transform: translateY(-1px);
-    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5), 0 0 14px rgba(139, 92, 246, 0.2);
+    box-shadow:
+      0 6px 16px rgba(0, 0, 0, 0.5),
+      0 0 14px rgba(139, 92, 246, 0.2);
   }
 </style>
