@@ -19,6 +19,16 @@ router = APIRouter()
 def list_files(project_id: str, user_id: str = Depends(get_current_user_id)) -> list[CodeFileRead]:
     with db_session(user_id) as session:
         project = get_project_or_404(session, project_id, user_id)
+
+        # Sync disk files to DB if Git is initialized
+        try:
+            from agent.git_manager import GitManager
+            git_mgr = GitManager(project_id)
+            if git_mgr.is_git_repo():
+                git_mgr.sync_disk_to_db()
+        except Exception as e:
+            print(f"ERROR: Failed to sync disk to DB: {e}")
+
         files = session.exec(
             select(CodeFileRow)
             .where(CodeFileRow.project_id == project.id)

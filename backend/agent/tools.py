@@ -20,7 +20,7 @@ from typing import Any
 from . import editmatch
 from .parser import ToolSpec, tool
 
-def _looks_like_c(text: str) -> bool:
+def _looks_like_c(text: str, is_header: bool = False) -> bool:
     """Heuristic: does this body look like C source rather than English prose?
 
     Used by write_file to reject the failure mode where the model's explanatory
@@ -34,8 +34,11 @@ def _looks_like_c(text: str) -> bool:
     # Strong, unambiguous C signals — any one is enough.
     strong = ("#include", "int main", "void ", "HAL_", "__HAL_", "uint8_t",
               "uint16_t", "uint32_t", "while (", "while(", "GPIO_", "typedef",
-              "#define", "return ", "static ")
+              "#define", "return ", "static ", "#ifndef", "#endif")
     has_strong = any(s in t for s in strong)
+    if is_header:
+        # Header files may only contain preprocessor guards/defines, skip punctuation checks
+        return has_strong
     # Structural punctuation density: real C is full of ; { } ( ).
     braces = t.count("{") + t.count("}")
     semis = t.count(";")
@@ -469,7 +472,7 @@ class CodingToolbox(Toolbox):
 
         # Guard 2: a C/H write must actually look like C, not explanatory prose.
         # This is the core fix for 'random agent text overwrote main.c'.
-        if is_code and not _looks_like_c(content):
+        if is_code and not _looks_like_c(content, is_header=path.endswith(".h")):
             return (
                 f"ERROR: that body does not look like C source, so I did not write {path}. "
                 "If you meant to explain something, just say it in plain text (no tool call). "
