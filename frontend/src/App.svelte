@@ -39,6 +39,13 @@
     Camera,
     ArrowDown,
     RefreshCw,
+    Bug,
+    Pause,
+    Square,
+    CornerDownRight,
+    CornerRightDown,
+    CornerRightUp,
+    Circle,
   } from "lucide-svelte";
 
   let aiInput = "";
@@ -385,6 +392,7 @@
       fontFamily: "JetBrains Mono",
       fontSize: 13,
       minimap: { enabled: false },
+      glyphMargin: true,
     });
 
     const disposable = monacoEditor.onDidChangeModelContent(() => {
@@ -401,16 +409,61 @@
       currentColumn = e.position.column;
     });
 
+    const mouseDownDisposable = monacoEditor.onMouseDown((e) => {
+      if (e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN) {
+        const line = e.target.position?.lineNumber;
+        if (line && $workspaceStore.activeFile) {
+          actions.toggleBreakpoint($workspaceStore.activeFile, line);
+        }
+      }
+    });
+
     return {
       destroy() {
         disposable.dispose();
         cursorDisposable.dispose();
+        mouseDownDisposable.dispose();
         if (monacoEditor) {
           monacoEditor.dispose();
           monacoEditor = null;
         }
       },
     };
+  }
+
+  let debugDecorationsCollection: monaco.editor.IEditorDecorationsCollection | null = null;
+  $: if (monacoEditor) {
+    const decs: monaco.editor.IModelDeltaDecoration[] = [];
+    if ($workspaceStore.activeFile) {
+      for (const bp of $workspaceStore.debugBreakpoints) {
+        if (bp.file.endsWith($workspaceStore.activeFile.split('/').pop() || '')) {
+          decs.push({
+            range: new monaco.Range(bp.line, 1, bp.line, 1),
+            options: {
+              isWholeLine: false,
+              glyphMarginClassName: "gutter-breakpoint",
+            }
+          });
+        }
+      }
+      if ($workspaceStore.debugHalted && $workspaceStore.debugCurrentFile?.endsWith($workspaceStore.activeFile.split('/').pop() || '')) {
+        if ($workspaceStore.debugCurrentLine) {
+          decs.push({
+            range: new monaco.Range($workspaceStore.debugCurrentLine, 1, $workspaceStore.debugCurrentLine, 1),
+            options: {
+              isWholeLine: true,
+              className: "debug-line-highlight",
+              glyphMarginClassName: "gutter-current-line",
+            }
+          });
+        }
+      }
+    }
+    if (!debugDecorationsCollection) {
+      debugDecorationsCollection = monacoEditor.createDecorationsCollection(decs);
+    } else {
+      debugDecorationsCollection.set(decs);
+    }
   }
 
   function drawCanvas() {
@@ -922,6 +975,25 @@
         <Zap size={12} />
         <span>{$workspaceStore.isFlashing ? "Flashing..." : "Flash"}</span>
       </button>
+
+      <div class="divider-line"></div>
+
+      <button
+        class="capsule-btn debug {$workspaceStore.isDebugging ? 'active' : ''}"
+        onclick={() => {
+          if ($workspaceStore.isDebugging) actions.stopDebugging();
+          else actions.startDebugging();
+        }}
+        disabled={$workspaceStore.isCompiling || $workspaceStore.isFlashing}
+        title="Start/Stop Debugger"
+      >
+        {#if $workspaceStore.isDebugging}
+          <Square size={12} fill="currentColor" />
+        {:else}
+          <Bug size={12} />
+        {/if}
+        <span>{$workspaceStore.isDebugging ? "Stop" : "Debug"}</span>
+      </button>
     </div>
 
     <!-- Connectivity Status & Controls -->
@@ -1382,6 +1454,17 @@
           title="Library Manager"
         >
           <Package size={18} />
+        </button>
+        <!-- svelte-ignore a11y-click-events-have-key-events -->
+        <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+        <button
+          class="activity-item {$workspaceStore.activeSidebarTab === 'debug' && showSidebar
+            ? 'active'
+            : ''}"
+          onclick={() => handleActivityTabClick("debug")}
+          title="Debug (GDB)"
+        >
+          <Bug size={18} />
         </button>
       </nav>
 
@@ -2306,6 +2389,104 @@
           {#if $workspaceStore.activeSidebarTab === "libraries"}
             <LibraryManager />
           {/if}
+
+          {#if $workspaceStore.activeSidebarTab === "debug"}
+            <div class="panel-header" style="height: auto; padding: 10px 14px; border-bottom: 1px solid var(--border-color);">
+              <div class="panel-title">DEBUG & RUN</div>
+            </div>
+            <div class="panel-body flex-container-explorer" style="padding: 10px;">
+              <div class="debug-status-chip">
+                <Circle size={10} style="color: {$workspaceStore.debugHalted ? 'var(--accent-orange)' : 'var(--accent-success)'};" />
+                <span>
+                  {#if $workspaceStore.isDebugging}
+                    {#if $workspaceStore.debugHalted}
+                      Halted @ {$workspaceStore.debugCurrentFile?.split('/').pop()}:{$workspaceStore.debugCurrentLine}
+                    {:else}
+                      Running
+                    {/if}
+                  {:else}
+                    Idle
+                  {/if}
+                </span>
+              </div>
+
+              <div class="debug-toolbar">
+                <button class="debug-btn" disabled={!$workspaceStore.debugHalted} onclick={actions.continueExecution} title="Continue (F5)">
+                  <Play size={14} />
+                </button>
+                <button class="debug-btn" disabled={!$workspaceStore.debugHalted} onclick={actions.stepOver} title="Step Over (F10)">
+                  <CornerRightDown size={14} />
+                </button>
+                <button class="debug-btn" disabled={!$workspaceStore.debugHalted} onclick={actions.stepInto} title="Step Into (F11)">
+                  <CornerDownRight size={14} />
+                </button>
+                <button class="debug-btn" disabled={!$workspaceStore.debugHalted} onclick={actions.stepOut} title="Step Out (Shift+F11)">
+                  <CornerRightUp size={14} />
+                </button>
+                <button class="debug-btn stop" disabled={!$workspaceStore.isDebugging} onclick={actions.stopDebugging} title="Stop (Shift+F5)">
+                  <Square size={14} fill="currentColor" />
+                </button>
+              </div>
+
+              <div class="debug-section">
+                <div class="debug-section-title">CALL STACK</div>
+                {#if $workspaceStore.debugCallStack.length === 0}
+                  <div class="debug-empty">Not available</div>
+                {:else}
+                  {#each $workspaceStore.debugCallStack as frame}
+                    <div class="debug-item">
+                      <span class="debug-function">{frame.function}</span>
+                      {#if frame.file}
+                        <span class="debug-file">{frame.file.split('/').pop()}:{frame.line}</span>
+                      {/if}
+                    </div>
+                  {/each}
+                {/if}
+              </div>
+
+              <div class="debug-section">
+                <div class="debug-section-title">LOCALS</div>
+                {#if $workspaceStore.debugLocals.length === 0}
+                  <div class="debug-empty">No locals</div>
+                {:else}
+                  {#each $workspaceStore.debugLocals as local}
+                    <div class="debug-item">
+                      <span class="debug-name">{local.name}</span>
+                      <span class="debug-value">{local.value}</span>
+                    </div>
+                  {/each}
+                {/if}
+              </div>
+
+              <div class="debug-section">
+                <div class="debug-section-title">BREAKPOINTS</div>
+                {#if $workspaceStore.debugBreakpoints.length === 0}
+                  <div class="debug-empty">No breakpoints</div>
+                {:else}
+                  {#each $workspaceStore.debugBreakpoints as bp}
+                    <div class="debug-item bp-item">
+                      <div style="display: flex; align-items: center; gap: 6px;">
+                        <Circle size={8} fill="var(--accent-red)" style="color: var(--accent-red);" />
+                        <span>{bp.file.split('/').pop()}:{bp.line}</span>
+                      </div>
+                      <button class="remove-bp-btn" onclick={() => actions.toggleBreakpoint(bp.file, bp.line)}>
+                        <X size={12} />
+                      </button>
+                    </div>
+                  {/each}
+                {/if}
+              </div>
+
+              <div class="debug-section">
+                <div class="debug-section-title">DEBUG LOG</div>
+                <div class="debug-log-view">
+                  {#each $workspaceStore.debugLog as log}
+                    <div class="debug-log-line">{log}</div>
+                  {/each}
+                </div>
+              </div>
+            </div>
+          {/if}
         </aside>
 
         <!-- Sidebar Drag Handle -->
@@ -2533,8 +2714,21 @@
 
               {#if $workspaceStore.activeBottomTab === "registers"}
                 <div class="registers-panel">
-                  <div class="peripheral-list">
-                    {#each $workspaceStore.registers as reg}
+                  {#if $workspaceStore.isDebugging}
+                    <div class="core-registers-grid">
+                      {#each $workspaceStore.debugRegisters as reg}
+                        <div class="core-register-item">
+                          <span class="reg-name">{reg.name.toUpperCase()}</span>
+                          <span class="reg-value">{reg.value}</span>
+                        </div>
+                      {/each}
+                      {#if $workspaceStore.debugRegisters.length === 0}
+                        <div style="padding: 1rem; color: var(--text-muted); font-size: 0.8rem;">Registers unavailable. Target must be halted.</div>
+                      {/if}
+                    </div>
+                  {:else}
+                    <div class="peripheral-list">
+                      {#each $workspaceStore.registers as reg}
                       <!-- svelte-ignore a11y-click-events-have-key-events -->
                       <!-- svelte-ignore a11y-no-static-element-interactions -->
                       <div
@@ -2576,6 +2770,7 @@
                       {/if}
                     {/each}
                   </div>
+                  {/if}
                 </div>
               {/if}
 

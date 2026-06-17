@@ -16,6 +16,34 @@ export interface RegisterItem {
   bits?: { name: string; value: number; range: string; description: string }[];
 }
 
+// ── Debug interfaces ──────────────────────────────────────────────────────────
+export interface DebugBreakpointItem {
+  id: number | null;
+  file: string;
+  line: number;
+}
+
+export interface DebugRegisterItem {
+  name: string;
+  number: number;
+  value: string;
+}
+
+export interface DebugFrameItem {
+  level: number;
+  function: string;
+  file: string | null;
+  line: number | null;
+  address?: string | null;
+}
+
+export interface DebugLocalItem {
+  name: string;
+  value: string;
+  type: string;
+}
+
+
 export interface AgentStep {
   kind: "think" | "call" | "code" | "result" | "note" | "error" | "proposal";
   text?: string;            // think / note / error text
@@ -328,6 +356,20 @@ export const workspaceStore = writable({
   // Peripheral registers (shown in the bottom "registers" tab)
   registers: [] as RegisterItem[],
 
+  // ── GDB Debug Session ─────────────────────────────────────────────────────
+  isDebugging: false,
+  debuggerActive: false,
+  debugHalted: false,
+  debugCurrentFile: null as string | null,
+  debugCurrentLine: null as number | null,
+  debugStopReason: null as string | null,
+  debugBreakpoints: [] as DebugBreakpointItem[],
+  debugRegisters: [] as DebugRegisterItem[],
+  debugCallStack: [] as DebugFrameItem[],
+  debugLocals: [] as DebugLocalItem[],
+  debugLog: [] as string[],
+
+
   // Telemetry & Serial
   serialLogs: [] as string[],
   serialConnected: false,
@@ -476,6 +518,17 @@ export const actions = {
           currentLine: null,
           crashed: false,
           crashReason: null,
+          // Clear debug session state on project switch
+          debugHalted: false,
+          debugCurrentFile: null,
+          debugCurrentLine: null,
+          debugStopReason: null,
+          debugBreakpoints: [],
+          debugRegisters: [],
+          debugCallStack: [],
+          debugLocals: [],
+          debugLog: [],
+
         };
       });
       
@@ -907,7 +960,7 @@ export const actions = {
   setShowWelcomeScreen: (val: boolean) => {
     workspaceStore.update(s => ({ ...s, showWelcomeScreen: val }));
   },
-  setActiveSidebarTab: (tab: "explorer" | "search" | "git" | "extensions" | "boards" | "rag" | "libraries") => {
+  setActiveSidebarTab: (tab: "explorer" | "search" | "git" | "debug" | "extensions" | "boards" | "rag" | "libraries") => {
     workspaceStore.update(s => ({ ...s, activeSidebarTab: tab }));
     if (tab === "git") {
       actions.loadGitInfo();
@@ -1664,6 +1717,216 @@ export const actions = {
       alert("Failed to uninstall: " + e.message);
     }
   },
+
+  // ── Debug Actions ──────────────────────────────────────────────────────────
+
+  startDebugging: async () => {
+    let pid: string | null = null;
+    let board: string = "bluepill_f103c8";
+    workspaceStore.subscribe(s => {
+      pid = s.activeProjectId;
+      board = s.selectedBoard;
+    })();
+    if (!pid) return;
+
+    // Reset debug state
+    workspaceStore.update(s => ({
+      ...s,
+      isDebugging: true,
+      debugLog: ["Starting debug session..."],
+      debugHalted: false,
+      debugCurrentFile: null,
+      debugCurrentLine: null,
+      debugStopReason: null,
+      debugRegisters: [],
+      debugCallStack: [],
+      debugLocals: [],
+    }));
+
+    try {
+      const snapshot = await api.startDebug(pid, board);
+      actions.handleDebugEvent({ type: "stopped", snapshot });
+      
+      // Open stream
+      const controller = new AbortController();
+      // Store the controller somewhere if we need to abort it later, or just let stopDebugging kill the backend which will close the stream.
+      api.streamDebug(pid, (event) => actions.handleDebugEvent(event), controller.signal);
+      
+      workspaceStore.update(s => ({
+        ...s,
+        debuggerActive: true,
+        activeSidebarTab: "debug",
+        terminalOpen: true,
+      }));
+    } catch (e: any) {
+      workspaceStore.update(s => ({
+        ...s,
+        isDebugging: false,
+        debuggerActive: false,
+        debugLog: [...s.debugLog, `[Error] ${e.message}`]
+      }));
+    }
+  },
+
+  stopDebugging: async () => {
+    let pid: string | null = null;
+    workspaceStore.subscribe(s => { pid = s.activeProjectId; })();
+    if (!pid) return;
+
+    try {
+      await api.stopDebug(pid);
+    } catch (e) {
+      // Ignore
+    }
+    
+    workspaceStore.update(s => ({
+      ...s,
+      isDebugging: false,
+      debuggerActive: false,
+      debugHalted: false,
+      debugCurrentFile: null,
+      debugCurrentLine: null,
+      debugStopReason: null,
+      debugRegisters: [],
+      debugCallStack: [],
+      debugLocals: [],
+      debugLog: [...s.debugLog, "Debug session stopped."]
+    }));
+  },
+
+  toggleBreakpoint: async (file: string, line: number) => {
+    let pid: string | null = null;
+    let bps: any[] = [];
+    workspaceStore.subscribe(s => { 
+      pid = s.activeProjectId; 
+      bps = s.debugBreakpoints;
+    })();
+    if (!pid) return;
+
+    const existing = bps.find(b => b.file === file && b.line === line);
+    if (existing) {
+      // Optimistic remove
+      workspaceStore.update(s => ({
+        ...s,
+        debugBreakpoints: s.debugBreakpoints.filter(b => b !== existing)
+      }));
+      if (existing.id !== null) {
+        try {
+          await api.removeBreakpoint(pid, existing.id);
+        } catch {
+          // Revert if failed
+          workspaceStore.update(s => ({ ...s, debugBreakpoints: [...s.debugBreakpoints, existing] }));
+        }
+      }
+    } else {
+      // Optimistic add (without ID)
+      const optimistic = { id: null, file, line };
+      workspaceStore.update(s => ({
+        ...s,
+        debugBreakpoints: [...s.debugBreakpoints, optimistic]
+      }));
+      try {
+        const bp = await api.setBreakpoint(pid, file, line);
+        workspaceStore.update(s => ({
+          ...s,
+          debugBreakpoints: s.debugBreakpoints.map(b => (b.file === file && b.line === line) ? { ...b, id: bp.id } : b)
+        }));
+      } catch (e) {
+        // Revert
+        workspaceStore.update(s => ({
+          ...s,
+          debugBreakpoints: s.debugBreakpoints.filter(b => b !== optimistic)
+        }));
+      }
+    }
+  },
+
+  continueExecution: async () => {
+    let pid: string | null = null;
+    workspaceStore.subscribe(s => { pid = s.activeProjectId; })();
+    if (!pid) return;
+    workspaceStore.update(s => ({ ...s, debugHalted: false, debugCurrentLine: null }));
+    try { await api.debugContinue(pid); } catch (e) { /* handle */ }
+  },
+
+  stepOver: async () => {
+    let pid: string | null = null;
+    workspaceStore.subscribe(s => { pid = s.activeProjectId; })();
+    if (!pid) return;
+    workspaceStore.update(s => ({ ...s, debugHalted: false, debugCurrentLine: null }));
+    try { await api.debugStepOver(pid); } catch (e) { /* handle */ }
+  },
+
+  stepInto: async () => {
+    let pid: string | null = null;
+    workspaceStore.subscribe(s => { pid = s.activeProjectId; })();
+    if (!pid) return;
+    workspaceStore.update(s => ({ ...s, debugHalted: false, debugCurrentLine: null }));
+    try { await api.debugStepInto(pid); } catch (e) { /* handle */ }
+  },
+
+  stepOut: async () => {
+    let pid: string | null = null;
+    workspaceStore.subscribe(s => { pid = s.activeProjectId; })();
+    if (!pid) return;
+    workspaceStore.update(s => ({ ...s, debugHalted: false, debugCurrentLine: null }));
+    try { await api.debugStepOut(pid); } catch (e) { /* handle */ }
+  },
+
+  handleDebugEvent: (event: any) => {
+    workspaceStore.update(s => {
+      const state = { ...s };
+      if (event.type === "log" && event.text) {
+        state.debugLog = [...state.debugLog, event.text.trim()];
+      } else if (event.type === "running") {
+        state.debugHalted = false;
+        state.debugCurrentLine = null;
+      } else if (event.type === "stopped" && event.snapshot) {
+        const snap = event.snapshot;
+        state.debugHalted = snap.state.halted;
+        state.debugCurrentFile = snap.state.file;
+        state.debugCurrentLine = snap.state.line;
+        state.debugStopReason = snap.state.reason;
+        
+        if (snap.error) {
+          state.debugLog = [...state.debugLog, `[Error] ${snap.error}`];
+          state.debuggerActive = false;
+          state.isDebugging = false;
+        } else {
+          state.debuggerActive = true;
+          if (snap.registers) state.debugRegisters = snap.registers;
+          if (snap.call_stack) state.debugCallStack = snap.call_stack;
+          if (snap.locals) state.debugLocals = snap.locals;
+          if (snap.breakpoints && snap.breakpoints.length > 0) {
+            // Update known IDs
+            const bps = [...state.debugBreakpoints];
+            snap.breakpoints.forEach((b: any) => {
+              const match = bps.find(x => x.file === b.file && x.line === b.line);
+              if (match) match.id = b.id;
+              else bps.push({ id: b.id, file: b.file, line: b.line });
+            });
+            state.debugBreakpoints = bps;
+          }
+          
+          if (state.debugHalted && state.debugCurrentFile) {
+            state.debugLog = [...state.debugLog, `[Halted] ${state.debugCurrentFile}:${state.debugCurrentLine} (${state.debugStopReason || 'unknown'})`];
+            
+            // Auto-switch to file
+            const fileName = state.debugCurrentFile.split('/').pop();
+            // find path in open files if possible
+            const matchingFile = state.fileTree.find(f => f.path.endsWith(fileName!));
+            if (matchingFile) {
+              state.activeFile = matchingFile.path;
+              if (!state.openFiles.includes(matchingFile.path)) {
+                state.openFiles = [...state.openFiles, matchingFile.path];
+              }
+            }
+          }
+        }
+      }
+      return state;
+    });
+  }
 };
 
 // Subscribe to workspaceStore and persist state to localStorage
