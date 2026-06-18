@@ -39,19 +39,15 @@
     Camera,
     ArrowDown,
     RefreshCw,
-<<<<<<< feat/header-files
     ChevronRight,
     Eye,
     EyeOff,
-=======
     Bug,
-    Pause,
     Square,
     CornerDownRight,
     CornerRightDown,
     CornerRightUp,
     Circle,
->>>>>>> main
   } from "lucide-svelte";
 
   let aiInput = "";
@@ -447,7 +443,6 @@
     };
   }
 
-<<<<<<< feat/header-files
   // --- Proposal diff tabs ---------------------------------------------------
   // Resolve the active tab to its proposal (if it is a diff tab). Recomputes
   // whenever the active tab, diff-tab registry, or chat messages change so the
@@ -502,7 +497,8 @@
         modified.dispose();
       },
     };
-=======
+  }
+
   let debugDecorationsCollection: monaco.editor.IEditorDecorationsCollection | null = null;
   $: if (monacoEditor) {
     const decs: monaco.editor.IModelDeltaDecoration[] = [];
@@ -536,7 +532,6 @@
     } else {
       debugDecorationsCollection.set(decs);
     }
->>>>>>> main
   }
 
   function drawCanvas() {
