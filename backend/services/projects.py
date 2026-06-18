@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from uuid import UUID
 
 from fastapi import HTTPException
@@ -9,6 +11,65 @@ from sqlmodel import Session
 
 from db.models import ProjectRow
 from schemas import ProjectOut
+
+# Directories we never surface in the working-directory file tree.
+# Only .git is hidden — everything else (incl. .pio build artifacts) is shown so
+# the IDE reflects the real local working directory.
+_TREE_SKIP_DIRS = {".git"}
+
+# Extensions treated as binary (non-openable as text). Content for these is not
+# fetched on click; the editor shows a placeholder instead.
+_BINARY_EXTS = {
+    ".o", ".a", ".so", ".elf", ".bin", ".hex", ".map", ".d", ".obj", ".lib",
+    ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".pdf", ".zip", ".gz",
+    ".tar", ".7z", ".exe", ".dll", ".dylib", ".pyc", ".woff", ".woff2", ".ttf",
+}
+
+
+def _is_binary_path(name: str) -> bool:
+    return Path(name).suffix.lower() in _BINARY_EXTS
+
+
+def build_disk_tree(root: Path) -> list[dict]:
+    """Walk the real working directory and return a nested file tree.
+
+    Includes generated/untracked files (e.g. .pio) and binaries. Binaries are
+    marked ``isBinary`` so the frontend can avoid fetching their content. Only
+    ``.git`` is skipped. Returns folders-first, alphabetically sorted nodes.
+    """
+    if not root.exists() or not root.is_dir():
+        return []
+
+    def walk(dir_path: Path, rel_prefix: str) -> list[dict]:
+        nodes: list[dict] = []
+        try:
+            entries = sorted(
+                os.scandir(dir_path),
+                key=lambda e: (not e.is_dir(), e.name.lower()),
+            )
+        except OSError:
+            return nodes
+        for entry in entries:
+            rel = f"{rel_prefix}/{entry.name}"
+            if entry.is_dir(follow_symlinks=False):
+                if entry.name in _TREE_SKIP_DIRS:
+                    continue
+                nodes.append({
+                    "name": entry.name,
+                    "path": rel,
+                    "isFolder": True,
+                    "children": walk(Path(entry.path), rel),
+                })
+            elif entry.is_file(follow_symlinks=False):
+                nodes.append({
+                    "name": entry.name,
+                    "path": rel,
+                    "isFolder": False,
+                    "isBinary": _is_binary_path(entry.name),
+                })
+        return nodes
+
+    return walk(root, "")
 
 
 def default_files(project_name: str) -> list[tuple[str, str, str]]:
@@ -34,9 +95,31 @@ int main(void) {{
         "2. Click two pins to wire them together.\n"
         "3. Use **Generate firmware** to turn the netlist into STM32 HAL code.\n"
     )
+    gitignore = (
+        "# Build artifacts\n"
+        ".pio/\n"
+        ".pioenvs/\n"
+        ".piolibdeps/\n"
+        ".platformio/\n"
+        "build/\n"
+        "*.o\n"
+        "*.elf\n"
+        "*.bin\n"
+        "*.hex\n"
+        "\n"
+        "# Secrets / local config\n"
+        ".env\n"
+        ".env.*\n"
+        "!.env.example\n"
+        "\n"
+        "# Editor / OS\n"
+        ".vscode/\n"
+        ".DS_Store\n"
+    )
     return [
         ("src/main.c", "c", main_c),
         ("README.md", "markdown", readme),
+        (".gitignore", "ignore", gitignore),
     ]
 
 

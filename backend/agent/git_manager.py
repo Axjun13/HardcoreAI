@@ -171,11 +171,11 @@ class GitManager:
 
         disk_files: set[str] = set()
         for root, dirs, filenames in os.walk(self.workspace_dir):
-            for ignored in [".git", ".pio", ".vscode", "__pycache__", "node_modules", ".venv", "venv", "env", "dist", "build", ".pytest_cache", ".svelte-kit", "data", "backend/data"]:
+            for ignored in [".git", ".vscode", "__pycache__", "node_modules", ".venv", "venv", "env", "dist", "build", ".pytest_cache", ".svelte-kit", "data", "backend/data"]:
                 if ignored in dirs:
                     dirs.remove(ignored)
             for f in filenames:
-                if f in ["platformio.ini", ".gitignore"]:
+                if f == "platformio.ini":
                     continue
                 full_path = Path(root) / f
                 rel_path = full_path.relative_to(self.workspace_dir)
@@ -207,11 +207,11 @@ class GitManager:
 
         disk_files = {}
         for root, dirs, filenames in os.walk(self.workspace_dir):
-            for ignored in [".git", ".pio", ".vscode", "__pycache__", "node_modules", ".venv", "venv", "env", "dist", "build", ".pytest_cache", ".svelte-kit", "data", "backend/data"]:
+            for ignored in [".git", ".vscode", "__pycache__", "node_modules", ".venv", "venv", "env", "dist", "build", ".pytest_cache", ".svelte-kit", "data", "backend/data"]:
                 if ignored in dirs:
                     dirs.remove(ignored)
             for f in filenames:
-                if f in ["platformio.ini", ".gitignore", ".gitkeep"]:
+                if f in ["platformio.ini", ".gitkeep"]:
                     continue
                 full_path = Path(root) / f
                 rel_path = full_path.relative_to(self.workspace_dir).as_posix()

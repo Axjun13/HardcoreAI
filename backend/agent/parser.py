@@ -354,6 +354,8 @@ class AgentTrace:
     question: str = ""
     options: list[str] = field(default_factory=list)
     messages: list[dict] = field(default_factory=list)
+    # Set when the run paused on a build/flash approval prompt ("build" | "flash").
+    confirm_action: str = ""
 
     def log_think_call(self, step: int, thought: str, name: str, kwargs: dict, result: str) -> None:
         self.steps.append(
@@ -478,7 +480,7 @@ async def run_phase(
         # side-channel attribute the toolbox exposes, so the tool signature
         # stays a plain method the C-style parser can describe.
         toolbox.call_body = body if spec.wants_body else ""
-        from .tools import AskUserException, ProposePlanException
+        from .tools import AskUserException, ProposePlanException, ConfirmActionException
         try:
             result = spec.func(toolbox, **kwargs)
             result_str = str(result)
@@ -501,6 +503,23 @@ async def run_phase(
             messages.append({"role": "assistant", "content": raw})
             trace.messages = messages
             return trace
+        except ConfirmActionException as exc:
+            # A side-effecting action (build/flash) needs explicit approval. End the
+            # run with a yes/no question; on "yes" the next request replays history
+            # with user_confirmed/auto_approve so the action proceeds.
+            trace.status = "waiting_for_user"
+            trace.question = exc.question
+            trace.options = ["Yes", "No"]
+            trace.confirm_action = exc.action
+            await emit({
+                "type": "question",
+                "question": exc.question,
+                "options": ["Yes", "No"],
+                "confirm_action": exc.action,
+            })
+            messages.append({"role": "assistant", "content": raw})
+            trace.messages = messages
+            return trace
         except TypeError as exc:  # arity / signature mismatch from the model
             result_str = f"ERROR: bad arguments for {name}: {exc}"
         except Exception as exc:  # noqa: BLE001 — surface any tool failure to the model
@@ -514,7 +533,7 @@ async def run_phase(
         # so a Reject can restore it.
         if not result_str.startswith("ERROR:") and name in (
             "write_file", "file_edit", "sed_replace", "create_file", "delete_file",
-            "copy_file", "move_file",
+            "copy_file", "move_file", "generate_hal",
         ):
             for path in toolbox.drain_pending_changes():
                 meta = toolbox.files.get(path)

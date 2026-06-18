@@ -20,6 +20,63 @@ from typing import Any
 from . import editmatch
 from .parser import ToolSpec, tool
 
+import re as _re
+
+
+def _extract_fenced_code(body: str) -> str:
+    """Pull the file content out of a write_file body.
+
+    The model is told to put the file in a ```fence``` after the CALL line, but it
+    frequently wraps that fence in prose ("Here's the code:\n```c\n...\n```\nKey
+    changes: ..."). Earlier we only stripped a fence when the body *started* with
+    one, so a leading sentence caused the entire prose+fence blob to be saved as
+    the file — producing a markdown "C file" that never compiles.
+
+    Strategy:
+      1. If there is at least one ``` fenced block anywhere, return the contents
+         of the FIRST one (prose before/after is discarded).
+      2. Otherwise return the stripped body unchanged (a bare code body).
+    """
+    text = (body or "").strip()
+    if "```" not in text:
+        return text
+
+    # Match the first fenced block; the opening fence may carry a language tag
+    # (```c, ```cpp, ...). DOTALL so the body can span lines; non-greedy so we
+    # stop at the first closing fence.
+    m = _re.search(r"```[^\n]*\n(.*?)```", text, _re.DOTALL)
+    if m:
+        return m.group(1).strip()
+
+    # An opening fence with no closing fence: drop the opening line, keep the rest.
+    lines = text.split("\n")
+    if lines and lines[0].lstrip().startswith("```"):
+        return "\n".join(lines[1:]).strip()
+    return text
+
+
+def _extract_markdown_body(body: str) -> str:
+    """Extract a markdown file body from the call text.
+
+    Markdown READMEs commonly embed ``` code fences, so we cannot use the
+    non-greedy code extractor (it would stop at the first inner closing fence).
+    Only unwrap when the entire body is a single outer fence — i.e. it starts
+    with ``` and the only other ``` is the final line. Otherwise return the body
+    as-is, which is what the model most often emits for a README.
+    """
+    text = (body or "").strip()
+    if not text.startswith("```"):
+        return text
+    lines = text.split("\n")
+    # First line is the opening fence (maybe ```markdown / ```md).
+    rest = lines[1:]
+    # An outer fence: the LAST non-empty line is a lone closing fence and there
+    # is no other fence in between (so it isn't wrapping nested code blocks).
+    if rest and rest[-1].strip() == "```" and "```" not in "\n".join(rest[:-1]):
+        return "\n".join(rest[:-1]).strip()
+    return text
+
+
 def _looks_like_c(text: str, is_header: bool = False) -> bool:
     """Heuristic: does this body look like C source rather than English prose?
 
@@ -60,6 +117,17 @@ class ProposePlanException(Exception):
         super().__init__(plan)
         self.plan = plan
 
+class ConfirmActionException(Exception):
+    """Raised when a side-effecting action (build/flash) needs user approval.
+
+    Carries the tool name so the UI can show a specific 'Agent wants to build /
+    flash — Allow / Reject' prompt. On Allow, the frontend re-runs the agent with
+    auto_approve (or a 'yes' answer) so the same action proceeds."""
+    def __init__(self, action: str, question: str):
+        super().__init__(question)
+        self.action = action
+        self.question = question
+
 # ---------------------------------------------------------------------------
 # Base toolbox — shared inspection tools + the working workbench copy.
 # ---------------------------------------------------------------------------
@@ -84,6 +152,7 @@ class Toolbox:
         user_id: str | None = None,
         project_id: str | None = None,
         build_output: str = "",
+        auto_approve: bool = False,
     ) -> None:
         self.project_name = project_name
         self.problem = problem
@@ -97,6 +166,10 @@ class Toolbox:
         self.user_id = user_id
         self.project_id = project_id
         self.build_output = build_output or ""
+        # Session-level "auto-approve everything" toggle. When true, gated tools
+        # (build/flash/delete) run without raising for confirmation. Treated the
+        # same as a per-call user_confirmed=True.
+        self.auto_approve = auto_approve
         # Immutable snapshot of the files as they were when the run started. Used
         # to (a) render an accurate before/after diff for each proposal and (b)
         # let the agent loop detect which files a tool actually changed.
@@ -258,14 +331,22 @@ class Toolbox:
         return output
 
     @tool
-    def build(self) -> str:
+    def build(self, confirmed: bool = False) -> str:
         """Actually compile the firmware with PlatformIO (same as the Build button).
 
         Use this whenever asked to build/compile/make. Stores the full compiler
         output so a later read_build_output() returns it. Returns a short summary
-        (status + the tail of the log) for the model."""
+        (status + the tail of the log) for the model.
+
+        Requires user approval: calling with confirmed=False pauses and asks the
+        user first. Pass confirmed=True only after the user has approved."""
         if not self.project_id:
             return "ERROR: No project is associated with this run; cannot build."
+        if not (confirmed or getattr(self, "user_confirmed", False) or self.auto_approve):
+            raise ConfirmActionException(
+                action="build",
+                question="The agent wants to build (compile) the firmware. Allow the build to run?",
+            )
         from services import hardware
 
         result = hardware.build_project(self.project_id)
@@ -279,13 +360,21 @@ class Toolbox:
         return f"Build {status} in {result.duration_s}s.{fw}\n\n{tail}"
 
     @tool
-    def flash(self) -> str:
+    def flash(self, confirmed: bool = False) -> str:
         """Flash the built firmware to a connected STM32 (Blue Pill) over ST-Link.
 
         Builds first if needed. If no board is connected this returns a clear
-        'no device' message rather than failing."""
+        'no device' message rather than failing.
+
+        Requires user approval: calling with confirmed=False pauses and asks the
+        user first. Pass confirmed=True only after the user has approved."""
         if not self.project_id:
             return "ERROR: No project is associated with this run; cannot flash."
+        if not (confirmed or getattr(self, "user_confirmed", False) or self.auto_approve):
+            raise ConfirmActionException(
+                action="flash",
+                question="The agent wants to flash firmware to the connected board. Allow the flash to run?",
+            )
         from services import hardware
 
         result = hardware.flash_project(self.project_id)
@@ -294,6 +383,76 @@ class Toolbox:
         if result.reason == "no_device":
             return f"No device connected — nothing was flashed. {result.output}".strip()
         return f"Flash FAILED ({result.reason}, exit {result.returncode}).\n\n{(result.output or '').strip()[-2000:]}"
+
+    @tool
+    def generate_hal(self, board: str, peripherals: str) -> str:
+        """Generate ready-made STM32 HAL init files (src/hal/*.c and *.h) from
+        templates — the same output as the Embedded Configurator's Generate button.
+
+        Use this when the user wants the structured per-peripheral HAL setup files
+        (e.g. gpio_init.c, uart2_init.c, rcc_init.c, main_init.c) rather than a
+        single hand-written src/main.c. For a simple one-file blink demo, prefer
+        write_file("src/main.c") instead.
+
+        Args:
+          board:       one of STM32F401, STM32F103, STM32H743 (defaults applied otherwise).
+          peripherals: comma-separated peripheral ids to enable. Supported ids:
+                       rcc, gpio, usart1, usart2, spi1, i2c1, tim1, adc1, dma, nvic.
+                       Example: "rcc, gpio, usart2".
+
+        The generated files are staged as normal diff proposals for the user to
+        Allow/Reject — nothing is written until approved.
+
+        IMPORTANT — board MUST match the project's MCU family, or the generated
+        #include (e.g. stm32f4xx_hal.h) will not compile. Blue Pill is STM32F103
+        (F1 family), NOT F4."""
+        from api.routers.hal_codegen import generate_hal_files, BOARD_META
+
+        # Normalize common board aliases to a supported key so a Blue Pill never
+        # silently falls through to the F4 default (which then fails to compile).
+        raw = (board or "").strip()
+        key = raw.upper().replace(" ", "").replace("-", "")
+        alias = {
+            "BLUEPILL": "STM32F103", "BLUEPILLF103C8": "STM32F103",
+            "STM32F103C8": "STM32F103", "STM32F103C8T6": "STM32F103", "F103": "STM32F103",
+            "STM32F401RE": "STM32F401", "F401": "STM32F401", "NUCLEOF401RE": "STM32F401",
+            "STM32H743": "STM32H743", "H743": "STM32H743",
+        }
+        resolved = alias.get(key, raw)
+        if resolved not in BOARD_META:
+            return (
+                f"ERROR: unsupported board '{board}'. generate_hal supports: "
+                f"{', '.join(BOARD_META)}. Map the user's board to its MCU family "
+                "first (e.g. Blue Pill -> STM32F103, F401 Nucleo -> STM32F401)."
+            )
+        board = resolved
+
+        ids = [p.strip().lower() for p in peripherals.split(",") if p.strip()]
+        if not ids:
+            return "ERROR: no peripherals given. Pass a comma-separated list, e.g. \"rcc, gpio, usart2\"."
+
+        peripheral_dicts = [{"id": pid, "label": pid.upper(), "mode": "", "params": {}} for pid in ids]
+        try:
+            generated = generate_hal_files(board=board, peripherals=peripheral_dicts)
+        except Exception as exc:  # noqa: BLE001 — surface generation errors to the model
+            return f"ERROR: HAL generation failed: {exc}"
+
+        if not generated:
+            return (
+                f"No files generated for peripherals {ids}. None matched a known "
+                "template (rcc, gpio, usart1, usart2, spi1, i2c1, tim1, adc1, dma, nvic)."
+            )
+
+        # Stage each file into the working set so it flows through the standard
+        # proposal/Allow-Reject diff path, exactly like write_file does.
+        for rel_path, content in generated.items():
+            self.files[rel_path] = {"language": "c", "content": content}
+
+        paths = ", ".join(sorted(generated))
+        return (
+            f"Generated {len(generated)} HAL file(s) for {board} "
+            f"({', '.join(ids)}): {paths}. Staged as diff proposals for approval."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -443,24 +602,15 @@ class CodingToolbox(Toolbox):
         # Only applies to C/H files that have no directory component at all.
         if "/" not in path and "\\" not in path and (path.endswith(".c") or path.endswith(".h")):
             path = "src/" + path
-        content = self.call_body.strip()
-
-        if content.startswith("```"):
-            lines = content.split("\n")
-            if len(lines) > 1:
-                # Remove the first line (e.g. ```c)
-                lines = lines[1:]
-                # Find the closing fence and discard everything after it
-                closing_idx = -1
-                for i, line in enumerate(lines):
-                    if line.strip() == "```":
-                        closing_idx = i
-                        break
-                if closing_idx != -1:
-                    lines = lines[:closing_idx]
-                content = "\n".join(lines).strip()
-
         is_code = path.endswith(".c") or path.endswith(".h")
+        # Markdown bodies routinely contain nested ``` code fences (e.g. example
+        # C inside the README). The non-greedy fence extractor would truncate at
+        # the first inner closing fence, so only unwrap a markdown body when it is
+        # a single clean outer fence; otherwise keep the raw body.
+        if path.endswith(".md"):
+            content = _extract_markdown_body(self.call_body)
+        else:
+            content = _extract_fenced_code(self.call_body)
         existing = self.files.get(path)
 
         # Guard 1: never write an empty body — that would silently blank a file.

@@ -6,6 +6,7 @@ export interface FileItem {
   name: string;
   path: string;
   isFolder: boolean;
+  isBinary?: boolean;
   children?: FileItem[];
 }
 
@@ -56,6 +57,11 @@ export interface AgentStep {
   deleted?: boolean;        // proposal: file was deleted
   decision?: "pending" | "allowed" | "rejected"; // proposal approval state
 }
+
+// Synthetic tab-id prefix for proposal diff tabs. A tab whose id starts with
+// this is rendered as a Monaco diff editor (original vs proposed) rather than a
+// normal file editor. The real file path follows the prefix.
+export const DIFF_PREFIX = "diff://";
 
 // A staged file change awaiting the user's Allow/Reject in the chat.
 export interface FileProposal {
@@ -137,28 +143,27 @@ export interface GitInfo {
 }
 
 
-// Pin configuration data
-const stm32F401Pins = [
-  "VBAT", "PC13", "PC14", "PC15", "PH0", "PH1", "NRST", "PC0",
-  "PC1", "PC2", "PC3", "VSSA", "VDDA", "PA0", "PA1", "PA2",
-  "PA3", "VSS", "VDD", "PA4", "PA5", "PA6", "PA7", "PC4",
-  "PC5", "PB0", "PB1", "PB2", "PB10", "PB11", "VSS", "VDD",
-  "PB12", "PB13", "PB14", "PB15", "PC6", "PC7", "PC8", "PC9",
-  "PA8", "PA9", "PA10", "PA11", "PA12", "PA13", "VCAP", "VSS",
-  "VDD", "PA14", "PA15", "PC10", "PC11", "PC12", "PD2", "PB3",
-  "PB4", "PB5", "PB6", "PB7", "BOOT0", "PB8", "PB9", "VSS",
+// Pin configuration data — STM32F103C8T6 Blue Pill (LQFP48) pinout.
+const bluePillPins = [
+  "VBAT", "PC13", "PC14", "PC15", "PD0", "PD1", "NRST", "VSSA",
+  "VDDA", "PA0", "PA1", "PA2", "PA3", "PA4", "PA5", "PA6",
+  "PA7", "PB0", "PB1", "PB2", "PB10", "PB11", "VSS", "VDD",
+  "PB12", "PB13", "PB14", "PB15", "PA8", "PA9", "PA10", "PA11",
+  "PA12", "PA13", "VSS", "VDD", "PA14", "PA15", "PB3", "PB4",
+  "PB5", "PB6", "PB7", "BOOT0", "PB8", "PB9", "VSS", "VDD",
 ];
 
-const initialPins: PinConfig[] = stm32F401Pins.map((pin, index) => {
+const initialPins: PinConfig[] = bluePillPins.map((pin, index) => {
   const defaults: Partial<PinConfig> = {};
-  if (pin === "PA5") Object.assign(defaults, { signal: "GPIO_Output", mode: "Output Push Pull", label: "LED", enabled: true });
-  if (pin === "PA2") Object.assign(defaults, { signal: "USART2_TX", mode: "Alternate Function", label: "UART TX", af: "AF7", enabled: true });
-  if (pin === "PA3") Object.assign(defaults, { signal: "USART2_RX", mode: "Alternate Function", label: "UART RX", af: "AF7", enabled: true });
-  if (pin === "PB6") Object.assign(defaults, { signal: "I2C1_SCL", mode: "Alternate Function", label: "I2C SCL", af: "AF4", enabled: true });
-  if (pin === "PB7") Object.assign(defaults, { signal: "I2C1_SDA", mode: "Alternate Function", label: "I2C SDA", af: "AF4", enabled: true });
+  // Blue Pill onboard LED is PC13 (active LOW).
+  if (pin === "PC13") Object.assign(defaults, { signal: "GPIO_Output", mode: "Output Push Pull", label: "LED (PC13)", enabled: true });
+  if (pin === "PA9") Object.assign(defaults, { signal: "USART1_TX", mode: "Alternate Function", label: "UART TX", af: "AF", enabled: true });
+  if (pin === "PA10") Object.assign(defaults, { signal: "USART1_RX", mode: "Alternate Function", label: "UART RX", af: "AF", enabled: true });
+  if (pin === "PB6") Object.assign(defaults, { signal: "I2C1_SCL", mode: "Alternate Function", label: "I2C SCL", af: "AF", enabled: true });
+  if (pin === "PB7") Object.assign(defaults, { signal: "I2C1_SDA", mode: "Alternate Function", label: "I2C SDA", af: "AF", enabled: true });
 
   const isPower = ["VSS", "VDD", "VBAT", "VDDA", "VSSA", "VCAP"].includes(pin);
-  const isSystem = ["NRST", "BOOT0", "PH0", "PH1"].includes(pin);
+  const isSystem = ["NRST", "BOOT0", "PD0", "PD1"].includes(pin);
 
   return {
     pin,
@@ -207,6 +212,21 @@ function buildProjectFileState(files: any[]): { fileContents: Record<string, str
   return { fileContents, fileTree };
 }
 
+// Normalize a backend disk-tree node into a FileItem. Disk paths already carry a
+// leading slash (e.g. "/src/main.c"), matching the editor's path convention.
+function normalizeDiskNode(node: any): FileItem {
+  const item: FileItem = {
+    name: node.name,
+    path: node.path,
+    isFolder: !!node.isFolder,
+  };
+  if (node.isBinary) item.isBinary = true;
+  if (node.isFolder && Array.isArray(node.children)) {
+    item.children = node.children.map(normalizeDiskNode);
+  }
+  return item;
+}
+
 const isBrowser = typeof window !== 'undefined';
 
 const getInitialActiveProjectId = () => {
@@ -249,15 +269,9 @@ const getInitialShowWelcomeScreen = () => {
   }
 };
 
-const getInitialSelectedBoard = () => {
-  if (!isBrowser) return "STM32F401";
-  try {
-    const val = localStorage.getItem("selectedBoard");
-    return val ? JSON.parse(val) : "STM32F401";
-  } catch {
-    return "STM32F401";
-  }
-};
+// The only supported target is the Blue Pill (STM32F103). Force it even if an
+// older session persisted a different board to localStorage.
+const getInitialSelectedBoard = () => "STM32F103";
 
 const getInitialSelectedProbe = () => {
   if (!isBrowser) return "ST-Link V2";
@@ -335,6 +349,11 @@ export const workspaceStore = writable({
   projectsList: [] as any[],
   activeFile: getInitialActiveFile(),
   openFiles: getInitialOpenFiles(),
+  // Proposal diff tabs opened in the editor area. Keyed by the synthetic tab id
+  // `diff://<path>` (which also lives in openFiles so the tab bar renders it);
+  // the value carries which chat message the proposal belongs to so Allow/Reject
+  // routes back to the shared proposal state and reflects in the chat panel.
+  diffTabs: {} as Record<string, { path: string; msgId: string }>,
   gitChanges: [] as { path: string; status: string }[],
   gitInfo: { is_repo: false, branch: null, detached: false, head_hash: null, short_hash: null } as GitInfo,
   gitBranches: [] as string[],
@@ -343,6 +362,15 @@ export const workspaceStore = writable({
   gitExpandedCommit: null as string | null, // hash of expanded commit row
   fileContents: {} as Record<string, string>,
   fileTree: [] as FileItem[],
+  // Paths present on disk but NOT tracked in the DB (e.g. .pio build artifacts).
+  // These are viewable but read-only — edits are never persisted to the DB.
+  untrackedPaths: {} as Record<string, boolean>,
+  // Folder paths the user has expanded in the explorer. Folders default to
+  // collapsed; a path appears here only after the user opens it.
+  expandedFolders: {} as Record<string, boolean>,
+  // When false, dotfiles (.gitignore, .pio, etc.) are hidden in the explorer.
+  // Toggled by the eye button in the explorer header.
+  showHiddenFiles: false,
 
   // Compilation & Flashing
   isCompiling: false,
@@ -382,13 +410,16 @@ export const workspaceStore = writable({
   aiWaiting: false,
   queuedAiFollowup: null as string | null,
   selectedProvider: "openrouter",
+  // When true, the agent runs build/flash without pausing for a Yes/No prompt
+  // and auto-allows file diffs. Per-session toggle in the chat UI.
+  autoApproveAgent: false,
 
   // UI Tabs
   activeBottomTab: getInitialActiveBottomTab() as "terminal" | "plotter" | "registers" | "memory",
   terminalOpen: getInitialTerminalOpen(),  // whether the bottom drawer (serial/build/etc.) is expanded
   showWelcomeScreen: getInitialShowWelcomeScreen(),
   activeSidebarTab: getInitialActiveSidebarTab() as "explorer" | "search" | "git" | "debug" | "extensions" | "boards" | "rag" | "libraries",
-  selectedBoard: getInitialSelectedBoard() as "STM32F401" | "ESP32-S3" | "RP2040",
+  selectedBoard: getInitialSelectedBoard() as "STM32F103",
   selectedProbe: getInitialSelectedProbe() as "ST-Link V2" | "J-Link" | "CMSIS-DAP",
   toolchainPath: getInitialToolchainPath(),
 
@@ -443,6 +474,22 @@ export const actions = {
     }
   },
 
+  // Fetch the real working-directory tree (incl. .pio, untracked, binaries) and
+  // replace fileTree with it. Falls back silently to the DB-derived tree on error.
+  loadDiskTree: async (id: string) => {
+    try {
+      const res = await api.getProjectTree(id);
+      if (res.source === "disk" && Array.isArray(res.tree)) {
+        const fileTree = res.tree.map(normalizeDiskNode);
+        workspaceStore.update(s =>
+          s.activeProjectId === id ? { ...s, fileTree } : s
+        );
+      }
+    } catch (e) {
+      console.warn("Failed to load disk tree, keeping DB-derived tree", e);
+    }
+  },
+
   // Refresh only the file tree/contents without clearing chat or logs.
   // Used after an agent response so the editor shows new code without losing the conversation.
   refreshProjectFiles: async (id: string) => {
@@ -456,6 +503,8 @@ export const actions = {
         fileContents,
         // Intentionally do NOT touch aiMessages, buildLogs, serialLogs
       }));
+      // Overlay the real working-dir tree (shows .pio/untracked files).
+      actions.loadDiskTree(id);
     } catch (e) {
       console.error("Failed to refresh project files", e);
     }
@@ -475,7 +524,7 @@ export const actions = {
             {
               id: "default-greeting",
               sender: "ai",
-              text: "Hello! I am your HARDCOREAI Copilot. I have loaded context for the **STM32F401RET6** target, SVD registers, and your current `CMake` configuration. \n\nHow can I help you write or debug firmware today?",
+              text: "Hello! I am your HARDCOREAI Copilot. I have loaded context for the **STM32F103C8T6 (Blue Pill)** target, SVD registers, and your current PlatformIO configuration. \n\nHow can I help you write or debug firmware today?",
               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
             }
           ];
@@ -532,6 +581,8 @@ export const actions = {
         };
       });
       
+      // Overlay the real working-dir tree (shows .pio/untracked files).
+      actions.loadDiskTree(id);
       // Also fetch RAG documents for this project
       await actions.fetchRagDocuments();
       // Load git status and info
@@ -543,11 +594,45 @@ export const actions = {
   },
 
   setActiveFile: (path: string | null) => {
+    let needsDiskLoad = false;
+    let projectId: string | null = null;
     workspaceStore.update(s => {
       if (!path) return { ...s, activeFile: null };
       const openFiles = s.openFiles.includes(path) ? s.openFiles : [...s.openFiles, path];
+      // Tracked files have content from the DB; untracked/.pio files don't —
+      // fetch their content from disk on demand.
+      if (s.fileContents[path] === undefined) {
+        needsDiskLoad = true;
+        projectId = s.activeProjectId;
+      }
       return { ...s, openFiles, activeFile: path };
     });
+    const pid: string | null = projectId;
+    if (needsDiskLoad && pid && path) actions.loadDiskFileContent(pid, path);
+  },
+
+  // Lazily fetch a working-dir file's content (untracked/.pio) and cache it in
+  // fileContents so the editor renders it. Binary files get a short placeholder.
+  loadDiskFileContent: async (projectId: string, path: string) => {
+    try {
+      const rel = path.replace(/^\/+/, "");
+      const res = await api.getDiskFile(projectId, rel);
+      const content = res.binary
+        ? `// Binary file (${rel}) — not shown.`
+        : (res.content || "");
+      workspaceStore.update(s => ({
+        ...s,
+        fileContents: { ...s.fileContents, [path]: content },
+        // Mark read-only: this file lives on disk only, not in the DB.
+        untrackedPaths: { ...s.untrackedPaths, [path]: true },
+      }));
+    } catch (e) {
+      console.warn("Failed to load disk file content", path, e);
+      workspaceStore.update(s => ({
+        ...s,
+        fileContents: { ...s.fileContents, [path]: "" },
+      }));
+    }
   },
 
   closeFileTab: (path: string) => {
@@ -557,7 +642,13 @@ export const actions = {
       if (activeFile === path) {
         activeFile = openFiles.length > 0 ? openFiles[openFiles.length - 1] : null;
       }
-      return { ...s, openFiles, activeFile };
+      // Drop any diff-tab bookkeeping for this tab id.
+      let diffTabs = s.diffTabs;
+      if (diffTabs[path]) {
+        diffTabs = { ...diffTabs };
+        delete diffTabs[path];
+      }
+      return { ...s, openFiles, activeFile, diffTabs };
     });
   },
 
@@ -683,14 +774,20 @@ export const actions = {
   
   updateFileContent: (path: string, content: string) => {
     let projectId: string | null = null;
+    let untracked = false;
     workspaceStore.update(s => {
       projectId = s.activeProjectId;
+      untracked = !!s.untrackedPaths[path];
       return {
         ...s,
         fileContents: { ...s.fileContents, [path]: content }
       };
     });
-    
+
+    // Disk-only files (e.g. .pio build artifacts) are read-only: view but never
+    // persist back to the DB.
+    if (untracked) return;
+
     if (projectId) {
       // @ts-ignore - store timeout on the window to survive store updates
       clearTimeout(window.__saveTimeout);
@@ -839,9 +936,35 @@ export const actions = {
     workspaceStore.update(s => ({ ...s, buildLogs: [] }));
   },
 
+  // Per-session "auto-approve everything" toggle for the agent. When on, the
+  // agent runs build/flash without a Yes/No prompt and auto-allows file diffs.
+  setAutoApproveAgent: (on: boolean) => {
+    workspaceStore.update(s => ({ ...s, autoApproveAgent: on }));
+  },
+  toggleAutoApproveAgent: () => {
+    workspaceStore.update(s => ({ ...s, autoApproveAgent: !s.autoApproveAgent }));
+  },
+
+  // Explorer folder expand/collapse. Folders are collapsed by default.
+  toggleFolder: (path: string) => {
+    workspaceStore.update(s => {
+      const expandedFolders = { ...s.expandedFolders };
+      if (expandedFolders[path]) delete expandedFolders[path];
+      else expandedFolders[path] = true;
+      return { ...s, expandedFolders };
+    });
+  },
+
+  // Show/hide dotfiles (.gitignore, .pio, etc.) in the explorer.
+  toggleHiddenFiles: () => {
+    workspaceStore.update(s => ({ ...s, showHiddenFiles: !s.showHiddenFiles }));
+  },
+
   // Real PlatformIO build — streams the compiler output live into the Build Output
   // tab (auto-opening it), then feeds the result to the agent.
-  runBuild: async () => {
+  // notifyAgent: when true (default), the build outcome is posted into the agent
+  // chat so it reacts (Build & Check). When false, it's a plain build only.
+  runBuild: async (notifyAgent: boolean = true) => {
     let projectId: string | null = null;
     let busy = false;
     workspaceStore.subscribe(s => { projectId = s.activeProjectId; busy = s.isCompiling; })();
@@ -875,7 +998,7 @@ export const actions = {
           ? `Build successful in ${done.duration_s}s.${done.firmware_path ? " -> " + done.firmware_path : ""}`
           : `Build FAILED (exit ${done.returncode}).`
       );
-      actions.notifyAgentOfBuild(done);
+      if (notifyAgent) actions.notifyAgentOfBuild(done);
     }
   },
 
@@ -975,7 +1098,7 @@ export const actions = {
       if (pid) actions.fetchInstalledLibraries(pid);
     }
   },
-  setSelectedBoard: (board: "STM32F401" | "ESP32-S3" | "RP2040") => {
+  setSelectedBoard: (board: "STM32F103") => {
     workspaceStore.update(s => ({ ...s, selectedBoard: board }));
   },
   setSelectedProbe: (probe: "ST-Link V2" | "J-Link" | "CMSIS-DAP") => {
@@ -1143,6 +1266,10 @@ export const actions = {
         openFiles
       };
     });
+    // Overlay the real working-dir tree (shows .pio/untracked files).
+    let pid: string | null = null;
+    workspaceStore.subscribe(s => { pid = s.activeProjectId; })();
+    if (pid) actions.loadDiskTree(pid);
     // Load git status
     actions.loadGitStatus();
   },
@@ -1165,7 +1292,19 @@ export const actions = {
       });
       const pid = s.activeProjectId;
       if (pid) api.saveConversationHistory(pid, aiMessages).catch(console.error);
-      return { ...s, aiMessages };
+
+      // Once decided, close the proposal's diff tab if one is open.
+      const tabId = DIFF_PREFIX + path;
+      let { openFiles, activeFile, diffTabs } = s;
+      if (diffTabs[tabId]) {
+        diffTabs = { ...diffTabs };
+        delete diffTabs[tabId];
+        openFiles = openFiles.filter((f: string) => f !== tabId);
+        if (activeFile === tabId) {
+          activeFile = openFiles.length > 0 ? openFiles[openFiles.length - 1] : null;
+        }
+      }
+      return { ...s, aiMessages, openFiles, activeFile, diffTabs };
     });
   },
 
@@ -1220,6 +1359,42 @@ export const actions = {
     for (const path of pending) {
       await actions.approveProposal(msgId, path);
     }
+  },
+
+  // --- Proposal diff tabs (open a proposed change as an editor diff tab) ------
+  // Opens the proposed file as a side-by-side diff tab (original vs modified).
+  // Allow/Reject from the tab call the same approveProposal/rejectProposal, so
+  // the chat panel's proposal card stays in sync automatically.
+  openDiffProposal: (msgId: string, path: string) => {
+    const tabId = DIFF_PREFIX + path;
+    workspaceStore.update(s => {
+      const openFiles = s.openFiles.includes(tabId) ? s.openFiles : [...s.openFiles, tabId];
+      return {
+        ...s,
+        openFiles,
+        activeFile: tabId,
+        diffTabs: { ...s.diffTabs, [tabId]: { path, msgId } },
+      };
+    });
+  },
+
+  // Open every still-pending proposal from a message as diff tabs at once, and
+  // focus the first. Used when the agent finishes proposing changes.
+  openAllDiffProposals: (msgId: string) => {
+    let pending: string[] = [];
+    workspaceStore.update(s => {
+      const m = s.aiMessages.find(x => x.id === msgId);
+      pending = (m?.proposals || []).filter(p => p.decision === "pending").map(p => p.path);
+      if (pending.length === 0) return s;
+      const newTabs = { ...s.diffTabs };
+      let openFiles = [...s.openFiles];
+      for (const path of pending) {
+        const tabId = DIFF_PREFIX + path;
+        newTabs[tabId] = { path, msgId };
+        if (!openFiles.includes(tabId)) openFiles.push(tabId);
+      }
+      return { ...s, openFiles, diffTabs: newTabs, activeFile: DIFF_PREFIX + pending[0] };
+    });
   },
 
   clearQueuedAiFollowup: () => {
@@ -1296,6 +1471,7 @@ export const actions = {
       let buildOutput = "";
 
       let selectedProvider = "openrouter";
+      let autoApprove = false;
       workspaceStore.update(s => {
         history = s.aiMessages.map(m => ({
           role: m.sender === "ai" ? "assistant" : "user",
@@ -1309,6 +1485,7 @@ export const actions = {
 
         // Read the currently selected LLM provider
         selectedProvider = (s as any).selectedProvider || "openrouter";
+        autoApprove = (s as any).autoApproveAgent || false;
         buildOutput = s.buildLogs.join("\n").slice(-20000);
 
         return s;
@@ -1511,10 +1688,20 @@ export const actions = {
                   else list.push(merged);
                 }
               });
+              // With auto-approve on, apply every proposed file change without
+              // asking. Otherwise open them as diff tabs in the editor so the
+              // user can review original-vs-proposed and Allow/Reject there.
+              if (ev.proposals.length > 0) {
+                if (autoApprove) {
+                  actions.approveAllProposals(aiMsgId);
+                } else {
+                  actions.openAllDiffProposals(aiMsgId);
+                }
+              }
             }
             break;
         }
-      }, history, currentPhase, selectedProvider, buildOutput, agentAbortController.signal);
+      }, history, currentPhase, selectedProvider, buildOutput, agentAbortController.signal, autoApprove);
 
       // Stream closed. Nothing is auto-applied: the agent's file changes are
       // staged as proposals and only persisted when the user clicks Allow.
@@ -1571,7 +1758,7 @@ export const actions = {
           {
             id: "default-greeting",
             sender: "ai",
-            text: "Hello! I am your HARDCOREAI Copilot. I have loaded context for the **STM32F401RET6** target, SVD registers, and your current `CMake` configuration. \n\nHow can I help you write or debug firmware today?",
+            text: "Hello! I am your HARDCOREAI Copilot. I have loaded context for the **STM32F103C8T6 (Blue Pill)** target, SVD registers, and your current PlatformIO configuration. \n\nHow can I help you write or debug firmware today?",
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           }
         ]
