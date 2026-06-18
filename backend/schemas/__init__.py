@@ -108,6 +108,9 @@ class AgentRequest(BaseModel):
     conversation_history: list[dict[str, Any]] | None = None
     phase: str | None = None
     build_output: str = ""
+    # When true, the agent runs build/flash (and other gated actions) without
+    # pausing to ask the user — the per-session "auto-approve everything" toggle.
+    auto_approve: bool = False
 
 
 class PhaseTrace(BaseModel):

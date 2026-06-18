@@ -29,6 +29,11 @@ export interface AgentStep {
   decision?: "pending" | "allowed" | "rejected"; // proposal approval state
 }
 
+// Synthetic tab-id prefix for proposal diff tabs. A tab whose id starts with
+// this is rendered as a Monaco diff editor (original vs proposed) rather than a
+// normal file editor. The real file path follows the prefix.
+export const DIFF_PREFIX = "diff://";
+
 // A staged file change awaiting the user's Allow/Reject in the chat.
 export interface FileProposal {
   path: string;
@@ -307,6 +312,11 @@ export const workspaceStore = writable({
   projectsList: [] as any[],
   activeFile: getInitialActiveFile(),
   openFiles: getInitialOpenFiles(),
+  // Proposal diff tabs opened in the editor area. Keyed by the synthetic tab id
+  // `diff://<path>` (which also lives in openFiles so the tab bar renders it);
+  // the value carries which chat message the proposal belongs to so Allow/Reject
+  // routes back to the shared proposal state and reflects in the chat panel.
+  diffTabs: {} as Record<string, { path: string; msgId: string }>,
   gitChanges: [] as { path: string; status: string }[],
   gitInfo: { is_repo: false, branch: null, detached: false, head_hash: null, short_hash: null } as GitInfo,
   gitBranches: [] as string[],
@@ -340,6 +350,9 @@ export const workspaceStore = writable({
   aiWaiting: false,
   queuedAiFollowup: null as string | null,
   selectedProvider: "openrouter",
+  // When true, the agent runs build/flash without pausing for a Yes/No prompt
+  // and auto-allows file diffs. Per-session toggle in the chat UI.
+  autoApproveAgent: false,
 
   // UI Tabs
   activeBottomTab: getInitialActiveBottomTab() as "terminal" | "plotter" | "registers" | "memory",
@@ -504,7 +517,13 @@ export const actions = {
       if (activeFile === path) {
         activeFile = openFiles.length > 0 ? openFiles[openFiles.length - 1] : null;
       }
-      return { ...s, openFiles, activeFile };
+      // Drop any diff-tab bookkeeping for this tab id.
+      let diffTabs = s.diffTabs;
+      if (diffTabs[path]) {
+        diffTabs = { ...diffTabs };
+        delete diffTabs[path];
+      }
+      return { ...s, openFiles, activeFile, diffTabs };
     });
   },
 
@@ -784,6 +803,15 @@ export const actions = {
   },
   clearBuildLogs: () => {
     workspaceStore.update(s => ({ ...s, buildLogs: [] }));
+  },
+
+  // Per-session "auto-approve everything" toggle for the agent. When on, the
+  // agent runs build/flash without a Yes/No prompt and auto-allows file diffs.
+  setAutoApproveAgent: (on: boolean) => {
+    workspaceStore.update(s => ({ ...s, autoApproveAgent: on }));
+  },
+  toggleAutoApproveAgent: () => {
+    workspaceStore.update(s => ({ ...s, autoApproveAgent: !s.autoApproveAgent }));
   },
 
   // Real PlatformIO build — streams the compiler output live into the Build Output
@@ -1112,7 +1140,19 @@ export const actions = {
       });
       const pid = s.activeProjectId;
       if (pid) api.saveConversationHistory(pid, aiMessages).catch(console.error);
-      return { ...s, aiMessages };
+
+      // Once decided, close the proposal's diff tab if one is open.
+      const tabId = DIFF_PREFIX + path;
+      let { openFiles, activeFile, diffTabs } = s;
+      if (diffTabs[tabId]) {
+        diffTabs = { ...diffTabs };
+        delete diffTabs[tabId];
+        openFiles = openFiles.filter((f: string) => f !== tabId);
+        if (activeFile === tabId) {
+          activeFile = openFiles.length > 0 ? openFiles[openFiles.length - 1] : null;
+        }
+      }
+      return { ...s, aiMessages, openFiles, activeFile, diffTabs };
     });
   },
 
@@ -1167,6 +1207,42 @@ export const actions = {
     for (const path of pending) {
       await actions.approveProposal(msgId, path);
     }
+  },
+
+  // --- Proposal diff tabs (open a proposed change as an editor diff tab) ------
+  // Opens the proposed file as a side-by-side diff tab (original vs modified).
+  // Allow/Reject from the tab call the same approveProposal/rejectProposal, so
+  // the chat panel's proposal card stays in sync automatically.
+  openDiffProposal: (msgId: string, path: string) => {
+    const tabId = DIFF_PREFIX + path;
+    workspaceStore.update(s => {
+      const openFiles = s.openFiles.includes(tabId) ? s.openFiles : [...s.openFiles, tabId];
+      return {
+        ...s,
+        openFiles,
+        activeFile: tabId,
+        diffTabs: { ...s.diffTabs, [tabId]: { path, msgId } },
+      };
+    });
+  },
+
+  // Open every still-pending proposal from a message as diff tabs at once, and
+  // focus the first. Used when the agent finishes proposing changes.
+  openAllDiffProposals: (msgId: string) => {
+    let pending: string[] = [];
+    workspaceStore.update(s => {
+      const m = s.aiMessages.find(x => x.id === msgId);
+      pending = (m?.proposals || []).filter(p => p.decision === "pending").map(p => p.path);
+      if (pending.length === 0) return s;
+      const newTabs = { ...s.diffTabs };
+      let openFiles = [...s.openFiles];
+      for (const path of pending) {
+        const tabId = DIFF_PREFIX + path;
+        newTabs[tabId] = { path, msgId };
+        if (!openFiles.includes(tabId)) openFiles.push(tabId);
+      }
+      return { ...s, openFiles, diffTabs: newTabs, activeFile: DIFF_PREFIX + pending[0] };
+    });
   },
 
   clearQueuedAiFollowup: () => {
@@ -1243,6 +1319,7 @@ export const actions = {
       let buildOutput = "";
 
       let selectedProvider = "openrouter";
+      let autoApprove = false;
       workspaceStore.update(s => {
         history = s.aiMessages.map(m => ({
           role: m.sender === "ai" ? "assistant" : "user",
@@ -1256,6 +1333,7 @@ export const actions = {
 
         // Read the currently selected LLM provider
         selectedProvider = (s as any).selectedProvider || "openrouter";
+        autoApprove = (s as any).autoApproveAgent || false;
         buildOutput = s.buildLogs.join("\n").slice(-20000);
 
         return s;
@@ -1458,10 +1536,20 @@ export const actions = {
                   else list.push(merged);
                 }
               });
+              // With auto-approve on, apply every proposed file change without
+              // asking. Otherwise open them as diff tabs in the editor so the
+              // user can review original-vs-proposed and Allow/Reject there.
+              if (ev.proposals.length > 0) {
+                if (autoApprove) {
+                  actions.approveAllProposals(aiMsgId);
+                } else {
+                  actions.openAllDiffProposals(aiMsgId);
+                }
+              }
             }
             break;
         }
-      }, history, currentPhase, selectedProvider, buildOutput, agentAbortController.signal);
+      }, history, currentPhase, selectedProvider, buildOutput, agentAbortController.signal, autoApprove);
 
       // Stream closed. Nothing is auto-applied: the agent's file changes are
       // staged as proposals and only persisted when the user clicks Allow.

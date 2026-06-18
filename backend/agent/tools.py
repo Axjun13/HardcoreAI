@@ -60,6 +60,17 @@ class ProposePlanException(Exception):
         super().__init__(plan)
         self.plan = plan
 
+class ConfirmActionException(Exception):
+    """Raised when a side-effecting action (build/flash) needs user approval.
+
+    Carries the tool name so the UI can show a specific 'Agent wants to build /
+    flash — Allow / Reject' prompt. On Allow, the frontend re-runs the agent with
+    auto_approve (or a 'yes' answer) so the same action proceeds."""
+    def __init__(self, action: str, question: str):
+        super().__init__(question)
+        self.action = action
+        self.question = question
+
 # ---------------------------------------------------------------------------
 # Base toolbox — shared inspection tools + the working workbench copy.
 # ---------------------------------------------------------------------------
@@ -84,6 +95,7 @@ class Toolbox:
         user_id: str | None = None,
         project_id: str | None = None,
         build_output: str = "",
+        auto_approve: bool = False,
     ) -> None:
         self.project_name = project_name
         self.problem = problem
@@ -97,6 +109,10 @@ class Toolbox:
         self.user_id = user_id
         self.project_id = project_id
         self.build_output = build_output or ""
+        # Session-level "auto-approve everything" toggle. When true, gated tools
+        # (build/flash/delete) run without raising for confirmation. Treated the
+        # same as a per-call user_confirmed=True.
+        self.auto_approve = auto_approve
         # Immutable snapshot of the files as they were when the run started. Used
         # to (a) render an accurate before/after diff for each proposal and (b)
         # let the agent loop detect which files a tool actually changed.
@@ -258,14 +274,22 @@ class Toolbox:
         return output
 
     @tool
-    def build(self) -> str:
+    def build(self, confirmed: bool = False) -> str:
         """Actually compile the firmware with PlatformIO (same as the Build button).
 
         Use this whenever asked to build/compile/make. Stores the full compiler
         output so a later read_build_output() returns it. Returns a short summary
-        (status + the tail of the log) for the model."""
+        (status + the tail of the log) for the model.
+
+        Requires user approval: calling with confirmed=False pauses and asks the
+        user first. Pass confirmed=True only after the user has approved."""
         if not self.project_id:
             return "ERROR: No project is associated with this run; cannot build."
+        if not (confirmed or getattr(self, "user_confirmed", False) or self.auto_approve):
+            raise ConfirmActionException(
+                action="build",
+                question="The agent wants to build (compile) the firmware. Allow the build to run?",
+            )
         from services import hardware
 
         result = hardware.build_project(self.project_id)
@@ -279,13 +303,21 @@ class Toolbox:
         return f"Build {status} in {result.duration_s}s.{fw}\n\n{tail}"
 
     @tool
-    def flash(self) -> str:
+    def flash(self, confirmed: bool = False) -> str:
         """Flash the built firmware to a connected STM32 (Blue Pill) over ST-Link.
 
         Builds first if needed. If no board is connected this returns a clear
-        'no device' message rather than failing."""
+        'no device' message rather than failing.
+
+        Requires user approval: calling with confirmed=False pauses and asks the
+        user first. Pass confirmed=True only after the user has approved."""
         if not self.project_id:
             return "ERROR: No project is associated with this run; cannot flash."
+        if not (confirmed or getattr(self, "user_confirmed", False) or self.auto_approve):
+            raise ConfirmActionException(
+                action="flash",
+                question="The agent wants to flash firmware to the connected board. Allow the flash to run?",
+            )
         from services import hardware
 
         result = hardware.flash_project(self.project_id)
@@ -294,6 +326,53 @@ class Toolbox:
         if result.reason == "no_device":
             return f"No device connected — nothing was flashed. {result.output}".strip()
         return f"Flash FAILED ({result.reason}, exit {result.returncode}).\n\n{(result.output or '').strip()[-2000:]}"
+
+    @tool
+    def generate_hal(self, board: str, peripherals: str) -> str:
+        """Generate ready-made STM32 HAL init files (src/hal/*.c and *.h) from
+        templates — the same output as the Embedded Configurator's Generate button.
+
+        Use this when the user wants the structured per-peripheral HAL setup files
+        (e.g. gpio_init.c, uart2_init.c, rcc_init.c, main_init.c) rather than a
+        single hand-written src/main.c. For a simple one-file blink demo, prefer
+        write_file("src/main.c") instead.
+
+        Args:
+          board:       one of STM32F401, STM32F103, STM32H743 (defaults applied otherwise).
+          peripherals: comma-separated peripheral ids to enable. Supported ids:
+                       rcc, gpio, usart1, usart2, spi1, i2c1, tim1, adc1, dma, nvic.
+                       Example: "rcc, gpio, usart2".
+
+        The generated files are staged as normal diff proposals for the user to
+        Allow/Reject — nothing is written until approved."""
+        from api.routers.hal_codegen import generate_hal_files
+
+        ids = [p.strip().lower() for p in peripherals.split(",") if p.strip()]
+        if not ids:
+            return "ERROR: no peripherals given. Pass a comma-separated list, e.g. \"rcc, gpio, usart2\"."
+
+        peripheral_dicts = [{"id": pid, "label": pid.upper(), "mode": "", "params": {}} for pid in ids]
+        try:
+            generated = generate_hal_files(board=board, peripherals=peripheral_dicts)
+        except Exception as exc:  # noqa: BLE001 — surface generation errors to the model
+            return f"ERROR: HAL generation failed: {exc}"
+
+        if not generated:
+            return (
+                f"No files generated for peripherals {ids}. None matched a known "
+                "template (rcc, gpio, usart1, usart2, spi1, i2c1, tim1, adc1, dma, nvic)."
+            )
+
+        # Stage each file into the working set so it flows through the standard
+        # proposal/Allow-Reject diff path, exactly like write_file does.
+        for rel_path, content in generated.items():
+            self.files[rel_path] = {"language": "c", "content": content}
+
+        paths = ", ".join(sorted(generated))
+        return (
+            f"Generated {len(generated)} HAL file(s) for {board} "
+            f"({', '.join(ids)}): {paths}. Staged as diff proposals for approval."
+        )
 
 
 # ---------------------------------------------------------------------------

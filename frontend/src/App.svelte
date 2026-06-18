@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick, onMount } from "svelte";
   import { api } from "./api";
-  import { workspaceStore, actions, type FileItem } from "./store";
+  import { workspaceStore, actions, DIFF_PREFIX, type FileItem } from "./store";
   import * as monaco from "monaco-editor";
   import EmbeddedConfigurator from "./components/EmbeddedConfigurator.svelte";
   import RagUploadPanel from "./components/RagUploadPanel.svelte";
@@ -326,7 +326,7 @@
 
   // Synchronize Monaco editor contents with active file changes
   $: activeFile = $workspaceStore.activeFile;
-  $: if (monacoEditor && activeFile) {
+  $: if (monacoEditor && activeFile && !activeFile.startsWith(DIFF_PREFIX)) {
     const content = $workspaceStore.fileContents[activeFile] || "";
     if (monacoEditor.getValue() !== content) {
       monacoEditor.setValue(content);
@@ -409,6 +409,62 @@
           monacoEditor.dispose();
           monacoEditor = null;
         }
+      },
+    };
+  }
+
+  // --- Proposal diff tabs ---------------------------------------------------
+  // Resolve the active tab to its proposal (if it is a diff tab). Recomputes
+  // whenever the active tab, diff-tab registry, or chat messages change so the
+  // Allow/Reject state mirrors the chat panel live.
+  $: activeDiff = (() => {
+    const af = $workspaceStore.activeFile;
+    if (!af || !af.startsWith(DIFF_PREFIX)) return null;
+    const ref = $workspaceStore.diffTabs[af];
+    if (!ref) return null;
+    const m = $workspaceStore.aiMessages.find((x) => x.id === ref.msgId);
+    const proposal = m?.proposals?.find((p) => p.path === ref.path);
+    if (!proposal) return null;
+    return { ...ref, proposal };
+  })();
+
+  let diffEditor: monaco.editor.IStandaloneDiffEditor | null = null;
+
+  // Mount a Monaco diff editor (original = old content, modified = proposed).
+  // Re-runs via {#key} on the tab id so switching diff tabs rebuilds it.
+  function initDiffEditor(node: HTMLElement) {
+    const d = activeDiff;
+    const original = monaco.editor.createModel(
+      d?.proposal.old || "",
+      d?.proposal.path.endsWith(".c") || d?.proposal.path.endsWith(".h")
+        ? "c"
+        : "javascript",
+    );
+    const modified = monaco.editor.createModel(
+      d?.proposal.deleted ? "" : d?.proposal.code || "",
+      d?.proposal.path.endsWith(".c") || d?.proposal.path.endsWith(".h")
+        ? "c"
+        : "javascript",
+    );
+    diffEditor = monaco.editor.createDiffEditor(node, {
+      theme: isLightTheme ? "vs" : "vs-dark",
+      automaticLayout: true,
+      fontFamily: "JetBrains Mono",
+      fontSize: 13,
+      minimap: { enabled: false },
+      readOnly: true,
+      renderSideBySide: true,
+    });
+    diffEditor.setModel({ original, modified });
+
+    return {
+      destroy() {
+        if (diffEditor) {
+          diffEditor.dispose();
+          diffEditor = null;
+        }
+        original.dispose();
+        modified.dispose();
       },
     };
   }
@@ -2332,19 +2388,31 @@
               <div
                 class="editor-tab {path === $workspaceStore.activeFile
                   ? 'active'
-                  : ''}"
+                  : ''} {path.startsWith(DIFF_PREFIX) ? 'diff-tab' : ''}"
                 onclick={() => actions.setActiveFile(path)}
               >
                 {#if path === $workspaceStore.activeFile}
                   <div class="active-tab-top-bar"></div>
                 {/if}
-                <FileCode
-                  size={12}
-                  style="color: {path === $workspaceStore.activeFile
-                    ? 'var(--accent-violet-hover)'
-                    : 'var(--text-dark)'};"
-                />
-                <span>{path.split("/").pop()}</span>
+                {#if path.startsWith(DIFF_PREFIX)}
+                  <GitBranch
+                    size={12}
+                    style="color: {path === $workspaceStore.activeFile
+                      ? 'var(--accent-violet-hover)'
+                      : 'var(--text-dark)'};"
+                  />
+                  <span
+                    >{path.slice(DIFF_PREFIX.length).split("/").pop()} (diff)</span
+                  >
+                {:else}
+                  <FileCode
+                    size={12}
+                    style="color: {path === $workspaceStore.activeFile
+                      ? 'var(--accent-violet-hover)'
+                      : 'var(--text-dark)'};"
+                  />
+                  <span>{path.split("/").pop()}</span>
+                {/if}
                 <!-- svelte-ignore a11y-click-events-have-key-events -->
                 <!-- svelte-ignore a11y-no-static-element-interactions -->
                 <span
@@ -2361,7 +2429,47 @@
 
           <!-- Active Editor Display -->
           <div class="monaco-editor-wrapper">
-            {#if $workspaceStore.activeFile}
+            {#if activeDiff}
+              <!-- Proposal diff tab: original vs proposed, with Allow/Reject -->
+              <div class="diff-action-bar">
+                <span class="diff-action-label">
+                  <GitBranch size={12} />
+                  {activeDiff.proposal.deleted
+                    ? "Proposed deletion"
+                    : activeDiff.proposal.created
+                      ? "Proposed new file"
+                      : "Proposed change"} · {activeDiff.proposal.path}
+                </span>
+                <div class="diff-action-buttons">
+                  <button
+                    class="proposal-btn reject"
+                    onclick={() =>
+                      actions.rejectProposal(
+                        activeDiff.msgId,
+                        activeDiff.path,
+                      )}>Reject</button
+                  >
+                  <button
+                    class="proposal-btn allow"
+                    onclick={() =>
+                      actions.approveProposal(
+                        activeDiff.msgId,
+                        activeDiff.path,
+                      )}>Allow</button
+                  >
+                  <button
+                    class="proposal-btn allow-all"
+                    onclick={() =>
+                      actions.approveAllProposals(activeDiff.msgId)}
+                    title="Approve every pending change from this response"
+                    >Approve all</button
+                  >
+                </div>
+              </div>
+              {#key $workspaceStore.activeFile}
+                <div class="monaco-container" use:initDiffEditor></div>
+              {/key}
+            {:else if $workspaceStore.activeFile}
               <div class="monaco-container" use:initMonaco></div>
               <div class="editor-bottom-bar">
                 <span>Ln {currentLine}, Col {currentColumn}</span>
@@ -2850,6 +2958,16 @@
                                   {#if (step.decision || "pending") === "pending"}
                                     <div class="agent-proposal-actions">
                                       <button
+                                        class="proposal-btn view-diff"
+                                        onclick={() =>
+                                          actions.openDiffProposal(
+                                            msg.id,
+                                            step.path || "",
+                                          )}
+                                        title="Open this change as a diff tab in the editor"
+                                        >View diff</button
+                                      >
+                                      <button
                                         class="proposal-btn allow"
                                         onclick={() =>
                                           actions.approveProposal(
@@ -3333,6 +3451,16 @@
                   </button>
                 </div>
               {/if}
+              <button
+                type="button"
+                class="auto-approve-toggle"
+                class:on={$workspaceStore.autoApproveAgent}
+                onclick={() => actions.toggleAutoApproveAgent()}
+                title="When on, the agent runs build/flash and applies file changes without asking each time."
+              >
+                <Zap size={11} />
+                <span>Auto-approve {$workspaceStore.autoApproveAgent ? "on" : "off"}</span>
+              </button>
               <form
                 class="chat-input-form"
                 class:streaming={activeAgentStreaming}
@@ -4128,6 +4256,32 @@
     box-shadow: 0 0 0 2px rgba(6, 182, 212, 0.07);
   }
 
+  .auto-approve-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin: 0 0 6px 0;
+    padding: 3px 8px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--text-dark);
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .auto-approve-toggle:hover {
+    color: var(--text-bright);
+    background: rgba(255, 255, 255, 0.07);
+  }
+  .auto-approve-toggle.on {
+    color: #fbbf24;
+    background: rgba(251, 191, 36, 0.12);
+    border-color: rgba(251, 191, 36, 0.35);
+  }
+
   .chat-send-btn.followup {
     background: linear-gradient(135deg, #0891b2, #8b5cf6);
   }
@@ -4451,6 +4605,58 @@
   }
   .proposal-btn.reject:hover {
     background: rgba(239, 68, 68, 0.22);
+  }
+  .proposal-btn.view-diff {
+    background: rgba(139, 92, 246, 0.14);
+    color: #c4b5fd;
+    border-color: rgba(139, 92, 246, 0.4);
+  }
+  .proposal-btn.view-diff:hover {
+    background: rgba(139, 92, 246, 0.26);
+  }
+  .proposal-btn.allow-all {
+    flex: 0 0 auto;
+    background: rgba(16, 185, 129, 0.1);
+    color: #6ee7b7;
+    border-color: rgba(16, 185, 129, 0.3);
+  }
+  .proposal-btn.allow-all:hover {
+    background: rgba(16, 185, 129, 0.22);
+  }
+
+  /* Proposal diff tab in the editor area */
+  .diff-action-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 6px 12px;
+    background: rgba(139, 92, 246, 0.08);
+    border-bottom: 1px solid rgba(139, 92, 246, 0.28);
+    flex: 0 0 auto;
+  }
+  .diff-action-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.74rem;
+    font-weight: 600;
+    color: var(--text-bright);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .diff-action-buttons {
+    display: flex;
+    gap: 8px;
+    flex: 0 0 auto;
+  }
+  .diff-action-buttons .proposal-btn {
+    flex: 0 0 auto;
+    padding: 4px 12px;
+  }
+  .editor-tab.diff-tab span {
+    font-style: italic;
   }
 
   /* Scroll to bottom button styling */

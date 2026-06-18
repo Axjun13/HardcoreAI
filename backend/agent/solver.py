@@ -190,6 +190,20 @@ When the user asks to program/upload/flash the firmware to the board, call flash
 If no STM32 (Blue Pill) is connected it will say so — relay that to the user rather
 than treating it as a code error.
 
+build() and flash() are side-effecting: each pauses for the user's approval before
+running (a Yes/No prompt). Just call them normally — the system handles the prompt.
+Do NOT also call ask_user to confirm a build/flash; the tool does that for you.
+
+GENERATING HAL INIT FILES:
+  • generate_hal(board, peripherals) → produces ready-made per-peripheral HAL setup
+    files (src/hal/gpio_init.c, uart2_init.c, rcc_init.c, main_init.c, etc.) from
+    templates. Use it when the user explicitly wants the structured multi-file HAL
+    scaffold (e.g. "generate the HAL files", "set up GPIO + UART2 + RCC init files").
+    peripherals is a comma-separated list of ids: rcc, gpio, usart1, usart2, spi1,
+    i2c1, tim1, adc1, dma, nvic.
+  • For a simple single-file demo (blink, one UART hello-world), prefer
+    write_file("src/main.c") with the complete firmware — do NOT use generate_hal.
+
 ══════════════════════════════════════════════════════════════
 RULE 5 — CONVERSATION AWARENESS
 ══════════════════════════════════════════════════════════════
@@ -252,6 +266,7 @@ async def run_agent_phase(
     user_id: str,
     messages: list[dict] | None = None,
     build_output: str = "",
+    auto_approve: bool = False,
     on_event=None,
 ) -> tuple[AgentTrace, dict]:
     """Run the conversational STM32 copilot. Returns (trace, mutated-files).
@@ -269,6 +284,7 @@ async def run_agent_phase(
         user_id=user_id,
         project_id=project_id,
         build_output=build_output,
+        auto_approve=auto_approve,
     )
 
     # Include the current main.c so the agent can see existing code (capped to save tokens)

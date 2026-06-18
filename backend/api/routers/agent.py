@@ -167,6 +167,7 @@ async def agent_solve(project_id: str, payload: AgentRequest, user_id: str = Dep
             user_id=user_id,
             messages=prior_history,
             build_output=payload.build_output,
+            auto_approve=payload.auto_approve,
         )
     except llm.LLMError as exc:
         raise HTTPException(status_code=502, detail=f"LLM error: {exc}")
@@ -253,6 +254,7 @@ async def agent_stream(project_id: str, payload: AgentRequest, user_id: str = De
                 user_id=user_id,
                 messages=prior_history,
                 build_output=payload.build_output,
+                auto_approve=payload.auto_approve,
                 on_event=on_event,
             )
             # Stage, don't commit: the agent's file changes are surfaced as
@@ -266,6 +268,7 @@ async def agent_stream(project_id: str, payload: AgentRequest, user_id: str = De
                 "final": agent_trace.final,
                 "question": getattr(agent_trace, "question", ""),
                 "options": getattr(agent_trace, "options", []),
+                "confirm_action": getattr(agent_trace, "confirm_action", ""),
                 "proposals": proposals,
             })
         except llm.LLMError as exc:

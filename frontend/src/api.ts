@@ -173,7 +173,7 @@ async createProject(name: string, description: string = "", path: string | null 
     return res.json();
   },
 
-  async askAgent(query: string, conversationHistory?: any[], phase?: string, provider: string = "openrouter", buildOutput: string = "") {
+  async askAgent(query: string, conversationHistory?: any[], phase?: string, provider: string = "openrouter", buildOutput: string = "", autoApprove: boolean = false) {
     const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/agent/solve`, {
       method: "POST",
       headers: {
@@ -185,7 +185,8 @@ async createProject(name: string, description: string = "", path: string | null 
         problem: query,
         conversation_history: conversationHistory,
         phase: phase,
-        build_output: buildOutput
+        build_output: buildOutput,
+        auto_approve: autoApprove
       })
     });
     if (!res.ok) throw new Error(await res.text());
@@ -349,7 +350,8 @@ async createProject(name: string, description: string = "", path: string | null 
     phase?: string,
     provider: string = "openrouter",
     buildOutput: string = "",
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    autoApprove: boolean = false
   ) {
     const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/agent/stream`, {
       method: "POST",
@@ -362,7 +364,8 @@ async createProject(name: string, description: string = "", path: string | null 
         problem: query,
         conversation_history: conversationHistory,
         phase: phase,
-        build_output: buildOutput
+        build_output: buildOutput,
+        auto_approve: autoApprove
       }),
       signal
     });
