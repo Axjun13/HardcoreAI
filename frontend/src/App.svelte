@@ -45,6 +45,9 @@
   let serialInput = "";
   let selectedPeripheral = "Core Registers";
 
+  // Human-readable target label. The only board is the Blue Pill (STM32F103C8T6).
+  const boardLabel = "STM32F103C8T6";
+
   let showConfigurator = true;
   let showCopilot = true;
 
@@ -951,7 +954,7 @@
     <div class="logo-section">
       <div class="logo-text">HARDCORE<span>AI</span></div>
       <div class="target-tag-pill">
-        <span>Target: {$workspaceStore.selectedBoard}RETx</span>
+        <span>Target: {boardLabel}</span>
       </div>
     </div>
 
@@ -1271,7 +1274,7 @@
                     style="flex: 1; border: none; margin-bottom: 0; background: transparent; text-align: left; cursor: pointer;"
                     onclick={async () => {
                       await actions.loadProject(project.id);
-                      actions.setSelectedBoard("STM32F401");
+                      actions.setSelectedBoard("STM32F103");
                       actions.setSelectedProbe("ST-Link V2");
                       actions.setShowWelcomeScreen(false);
                     }}
@@ -2317,9 +2320,7 @@
                     onchange={(e) =>
                       actions.setSelectedBoard(e.currentTarget.value as any)}
                   >
-                    <option value="STM32F401">STM32F401 (Cortex-M4)</option>
-                    <option value="ESP32-S3">ESP32-S3 (Xtensa LX7)</option>
-                    <option value="RP2040">RP2040 (Cortex-M0+)</option>
+                    <option value="STM32F103">STM32F103C8T6 — Blue Pill (Cortex-M3)</option>
                   </select>
                 </div>
                 <div class="config-group">
@@ -2477,7 +2478,7 @@
                 <span>UTF-8</span>
                 <span>LF</span>
                 <span>C</span>
-                <span>{$workspaceStore.selectedBoard}RETx</span>
+                <span>{boardLabel}</span>
               </div>
             {:else}
               <div class="empty-editor-state">
@@ -3561,7 +3562,7 @@
           title="Open target configurator"
         >
           <Cpu size={13} />
-          <span>{$workspaceStore.selectedBoard}RETx</span>
+          <span>{boardLabel}</span>
         </button>
         <button
           class="status-bar-item"

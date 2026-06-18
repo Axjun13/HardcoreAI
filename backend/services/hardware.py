@@ -137,7 +137,30 @@ def ensure_platformio() -> str:
 
 
 def workspace_dir(project_id: str) -> Path:
-    """Absolute path to the on-disk workspace GitManager syncs DB files into."""
+    """Directory to build/flash in — the same one GitManager syncs DB files into.
+
+    Resolves to the project's real on-disk folder (``project.path``) when one is
+    set, so build artifacts (platformio.ini, .pio/) land next to the user's code
+    where they expect them. Falls back to the internal ``data/workspaces/<id>``
+    only for projects with no real path (mirrors GitManager's resolution).
+    """
+    if str(project_id).isdigit():
+        try:
+            from db.session import engine
+            from sqlmodel import Session, select
+            from db.models import ProjectRow
+            with Session(engine) as session:
+                project = session.exec(
+                    select(ProjectRow).where(ProjectRow.id == int(project_id))
+                ).first()
+                # Match GitManager's resolution exactly: use the real folder only
+                # when it is an initialized repo, otherwise the internal workspace.
+                # This guarantees the build dir is the same one sync writes into.
+                if project and project.path and (Path(project.path) / ".git").exists():
+                    return Path(project.path)
+        except Exception:
+            # Never let DB lookup failure break a build — fall back to internal ws.
+            pass
     return WORKSPACES_DIR / str(project_id)
 
 

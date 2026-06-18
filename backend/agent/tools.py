@@ -379,8 +379,31 @@ class Toolbox:
                        Example: "rcc, gpio, usart2".
 
         The generated files are staged as normal diff proposals for the user to
-        Allow/Reject — nothing is written until approved."""
-        from api.routers.hal_codegen import generate_hal_files
+        Allow/Reject — nothing is written until approved.
+
+        IMPORTANT — board MUST match the project's MCU family, or the generated
+        #include (e.g. stm32f4xx_hal.h) will not compile. Blue Pill is STM32F103
+        (F1 family), NOT F4."""
+        from api.routers.hal_codegen import generate_hal_files, BOARD_META
+
+        # Normalize common board aliases to a supported key so a Blue Pill never
+        # silently falls through to the F4 default (which then fails to compile).
+        raw = (board or "").strip()
+        key = raw.upper().replace(" ", "").replace("-", "")
+        alias = {
+            "BLUEPILL": "STM32F103", "BLUEPILLF103C8": "STM32F103",
+            "STM32F103C8": "STM32F103", "STM32F103C8T6": "STM32F103", "F103": "STM32F103",
+            "STM32F401RE": "STM32F401", "F401": "STM32F401", "NUCLEOF401RE": "STM32F401",
+            "STM32H743": "STM32H743", "H743": "STM32H743",
+        }
+        resolved = alias.get(key, raw)
+        if resolved not in BOARD_META:
+            return (
+                f"ERROR: unsupported board '{board}'. generate_hal supports: "
+                f"{', '.join(BOARD_META)}. Map the user's board to its MCU family "
+                "first (e.g. Blue Pill -> STM32F103, F401 Nucleo -> STM32F401)."
+            )
+        board = resolved
 
         ids = [p.strip().lower() for p in peripherals.split(",") if p.strip()]
         if not ids:

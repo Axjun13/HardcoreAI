@@ -114,28 +114,27 @@ export interface GitInfo {
 }
 
 
-// Pin configuration data
-const stm32F401Pins = [
-  "VBAT", "PC13", "PC14", "PC15", "PH0", "PH1", "NRST", "PC0",
-  "PC1", "PC2", "PC3", "VSSA", "VDDA", "PA0", "PA1", "PA2",
-  "PA3", "VSS", "VDD", "PA4", "PA5", "PA6", "PA7", "PC4",
-  "PC5", "PB0", "PB1", "PB2", "PB10", "PB11", "VSS", "VDD",
-  "PB12", "PB13", "PB14", "PB15", "PC6", "PC7", "PC8", "PC9",
-  "PA8", "PA9", "PA10", "PA11", "PA12", "PA13", "VCAP", "VSS",
-  "VDD", "PA14", "PA15", "PC10", "PC11", "PC12", "PD2", "PB3",
-  "PB4", "PB5", "PB6", "PB7", "BOOT0", "PB8", "PB9", "VSS",
+// Pin configuration data — STM32F103C8T6 Blue Pill (LQFP48) pinout.
+const bluePillPins = [
+  "VBAT", "PC13", "PC14", "PC15", "PD0", "PD1", "NRST", "VSSA",
+  "VDDA", "PA0", "PA1", "PA2", "PA3", "PA4", "PA5", "PA6",
+  "PA7", "PB0", "PB1", "PB2", "PB10", "PB11", "VSS", "VDD",
+  "PB12", "PB13", "PB14", "PB15", "PA8", "PA9", "PA10", "PA11",
+  "PA12", "PA13", "VSS", "VDD", "PA14", "PA15", "PB3", "PB4",
+  "PB5", "PB6", "PB7", "BOOT0", "PB8", "PB9", "VSS", "VDD",
 ];
 
-const initialPins: PinConfig[] = stm32F401Pins.map((pin, index) => {
+const initialPins: PinConfig[] = bluePillPins.map((pin, index) => {
   const defaults: Partial<PinConfig> = {};
-  if (pin === "PA5") Object.assign(defaults, { signal: "GPIO_Output", mode: "Output Push Pull", label: "LED", enabled: true });
-  if (pin === "PA2") Object.assign(defaults, { signal: "USART2_TX", mode: "Alternate Function", label: "UART TX", af: "AF7", enabled: true });
-  if (pin === "PA3") Object.assign(defaults, { signal: "USART2_RX", mode: "Alternate Function", label: "UART RX", af: "AF7", enabled: true });
-  if (pin === "PB6") Object.assign(defaults, { signal: "I2C1_SCL", mode: "Alternate Function", label: "I2C SCL", af: "AF4", enabled: true });
-  if (pin === "PB7") Object.assign(defaults, { signal: "I2C1_SDA", mode: "Alternate Function", label: "I2C SDA", af: "AF4", enabled: true });
+  // Blue Pill onboard LED is PC13 (active LOW).
+  if (pin === "PC13") Object.assign(defaults, { signal: "GPIO_Output", mode: "Output Push Pull", label: "LED (PC13)", enabled: true });
+  if (pin === "PA9") Object.assign(defaults, { signal: "USART1_TX", mode: "Alternate Function", label: "UART TX", af: "AF", enabled: true });
+  if (pin === "PA10") Object.assign(defaults, { signal: "USART1_RX", mode: "Alternate Function", label: "UART RX", af: "AF", enabled: true });
+  if (pin === "PB6") Object.assign(defaults, { signal: "I2C1_SCL", mode: "Alternate Function", label: "I2C SCL", af: "AF", enabled: true });
+  if (pin === "PB7") Object.assign(defaults, { signal: "I2C1_SDA", mode: "Alternate Function", label: "I2C SDA", af: "AF", enabled: true });
 
   const isPower = ["VSS", "VDD", "VBAT", "VDDA", "VSSA", "VCAP"].includes(pin);
-  const isSystem = ["NRST", "BOOT0", "PH0", "PH1"].includes(pin);
+  const isSystem = ["NRST", "BOOT0", "PD0", "PD1"].includes(pin);
 
   return {
     pin,
@@ -226,15 +225,9 @@ const getInitialShowWelcomeScreen = () => {
   }
 };
 
-const getInitialSelectedBoard = () => {
-  if (!isBrowser) return "STM32F401";
-  try {
-    const val = localStorage.getItem("selectedBoard");
-    return val ? JSON.parse(val) : "STM32F401";
-  } catch {
-    return "STM32F401";
-  }
-};
+// The only supported target is the Blue Pill (STM32F103). Force it even if an
+// older session persisted a different board to localStorage.
+const getInitialSelectedBoard = () => "STM32F103";
 
 const getInitialSelectedProbe = () => {
   if (!isBrowser) return "ST-Link V2";
@@ -359,7 +352,7 @@ export const workspaceStore = writable({
   terminalOpen: getInitialTerminalOpen(),  // whether the bottom drawer (serial/build/etc.) is expanded
   showWelcomeScreen: getInitialShowWelcomeScreen(),
   activeSidebarTab: getInitialActiveSidebarTab() as "explorer" | "search" | "git" | "debug" | "extensions" | "boards" | "rag" | "libraries",
-  selectedBoard: getInitialSelectedBoard() as "STM32F401" | "ESP32-S3" | "RP2040",
+  selectedBoard: getInitialSelectedBoard() as "STM32F103",
   selectedProbe: getInitialSelectedProbe() as "ST-Link V2" | "J-Link" | "CMSIS-DAP",
   toolchainPath: getInitialToolchainPath(),
 
@@ -446,7 +439,7 @@ export const actions = {
             {
               id: "default-greeting",
               sender: "ai",
-              text: "Hello! I am your HARDCOREAI Copilot. I have loaded context for the **STM32F401RET6** target, SVD registers, and your current `CMake` configuration. \n\nHow can I help you write or debug firmware today?",
+              text: "Hello! I am your HARDCOREAI Copilot. I have loaded context for the **STM32F103C8T6 (Blue Pill)** target, SVD registers, and your current PlatformIO configuration. \n\nHow can I help you write or debug firmware today?",
               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
             }
           ];
@@ -950,7 +943,7 @@ export const actions = {
       if (pid) actions.fetchInstalledLibraries(pid);
     }
   },
-  setSelectedBoard: (board: "STM32F401" | "ESP32-S3" | "RP2040") => {
+  setSelectedBoard: (board: "STM32F103") => {
     workspaceStore.update(s => ({ ...s, selectedBoard: board }));
   },
   setSelectedProbe: (probe: "ST-Link V2" | "J-Link" | "CMSIS-DAP") => {
@@ -1606,7 +1599,7 @@ export const actions = {
           {
             id: "default-greeting",
             sender: "ai",
-            text: "Hello! I am your HARDCOREAI Copilot. I have loaded context for the **STM32F401RET6** target, SVD registers, and your current `CMake` configuration. \n\nHow can I help you write or debug firmware today?",
+            text: "Hello! I am your HARDCOREAI Copilot. I have loaded context for the **STM32F103C8T6 (Blue Pill)** target, SVD registers, and your current PlatformIO configuration. \n\nHow can I help you write or debug firmware today?",
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           }
         ]

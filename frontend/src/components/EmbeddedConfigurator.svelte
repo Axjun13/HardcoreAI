@@ -54,29 +54,13 @@
       package: string;
     }
   > = {
-    STM32F401: {
-      flash: "512 KB",
-      ram: "96 KB",
-      speed: "84 MHz",
-      core: "Cortex-M4",
-      pins: 64,
-      package: "LQFP64",
-    },
-    "ESP32-S3": {
-      flash: "16 MB",
-      ram: "512 KB",
-      speed: "240 MHz",
-      core: "Xtensa LX7 (Dual)",
-      pins: 45,
-      package: "QFN56",
-    },
-    RP2040: {
-      flash: "2 MB",
-      ram: "264 KB",
-      speed: "133 MHz",
-      core: "Cortex-M0+ (Dual)",
-      pins: 40,
-      package: "QFN56",
+    STM32F103: {
+      flash: "64 KB",
+      ram: "20 KB",
+      speed: "72 MHz",
+      core: "Cortex-M3",
+      pins: 48,
+      package: "LQFP48",
     },
   };
 
@@ -287,11 +271,11 @@
       name: "RCC",
       enabled: true,
       mode: "Crystal/Ceramic Resonator",
-      params: { HSE: "8 MHz", LSE: "32.768 kHz", SYSCLK: "84 MHz" },
+      params: { HSE: "8 MHz", LSE: "32.768 kHz", SYSCLK: "72 MHz" },
     },
   };
 
-  $: specs = BOARD_SPECS[selectedBoard] ?? BOARD_SPECS["STM32F401"];
+  $: specs = BOARD_SPECS[selectedBoard] ?? BOARD_SPECS["STM32F103"];
 
   function toggleCategory(id: string) {
     if (expandedCategories.has(id)) {
@@ -481,7 +465,7 @@
     <div class="ec-header-left">
       <Cpu size={13} style="color: var(--accent-violet);" />
       <span class="ec-header-title">Embedded Configurator</span>
-      <span class="ec-board-chip">{selectedBoard}RETx</span>
+      <span class="ec-board-chip">STM32F103C8T6</span>
     </div>
     <div class="ec-header-actions">
       <button
@@ -587,7 +571,7 @@
 
             <div class="ec-chip-body">
               <div class="ec-brand">ST</div>
-              <div class="ec-model">{selectedBoard}RETx</div>
+              <div class="ec-model">STM32F103C8T6</div>
               <div class="ec-package">{specs.package}</div>
             </div>
           </div>
@@ -663,7 +647,7 @@
     <div class="ec-content ec-clock-tab">
       <div class="ec-section-title">Clock Tree Configuration</div>
       <div class="ec-clock-tree">
-        {#each [{ src: "HSE (8 MHz)", arrow: "→", node: "PLL M=8, N=336, P=2", result: "168 MHz" }, { src: "PLL Output", arrow: "→", node: "AHB Prescaler /2", result: "SYSCLK 84 MHz" }, { src: "SYSCLK", arrow: "→", node: "APB1 Prescaler /2", result: "APB1 42 MHz" }, { src: "SYSCLK", arrow: "→", node: "APB2 Prescaler /1", result: "APB2 84 MHz" }, { src: "APB1", arrow: "→", node: "Timer × 2", result: "TIM CLK 84 MHz" }, { src: "LSI", arrow: "→", node: "IWDG Clock", result: "32 kHz" }] as row}
+        {#each [{ src: "HSE (8 MHz)", arrow: "→", node: "PLL ×9 (PLLMUL9)", result: "72 MHz" }, { src: "PLL Output", arrow: "→", node: "AHB Prescaler /1", result: "SYSCLK 72 MHz" }, { src: "SYSCLK", arrow: "→", node: "APB1 Prescaler /2", result: "APB1 36 MHz" }, { src: "SYSCLK", arrow: "→", node: "APB2 Prescaler /1", result: "APB2 72 MHz" }, { src: "APB1", arrow: "→", node: "Timer × 2", result: "TIM CLK 72 MHz" }, { src: "LSI", arrow: "→", node: "IWDG Clock", result: "40 kHz" }] as row}
           <div class="ec-clock-row">
             <span class="ec-clock-src">{row.src}</span>
             <span class="ec-clock-arrow">{row.arrow}</span>
@@ -999,7 +983,7 @@
   {#if activeTab === "Project"}
     <div class="ec-content ec-project-tab">
       <div class="ec-section-title">Project Directives</div>
-      {#each [{ label: "Firmware Project Name", value: "blinky-stm32f4" }, { label: "Target Toolchain compiler", value: "arm-none-eabi-gcc" }, { label: "Microcontroller Linker File", value: "STM32F401RETX_FLASH.ld" }, { label: "Processor Heap Limit", value: "0x200" }, { label: "Processor Stack Limit", value: "0x400" }, { label: "STM32Cube HAL Version", value: "STM32CubeF4 v1.27.1" }] as row}
+      {#each [{ label: "Firmware Project Name", value: "blinky-bluepill" }, { label: "Target Toolchain compiler", value: "arm-none-eabi-gcc" }, { label: "Microcontroller Linker File", value: "STM32F103C8TX_FLASH.ld" }, { label: "Processor Heap Limit", value: "0x200" }, { label: "Processor Stack Limit", value: "0x400" }, { label: "STM32Cube HAL Version", value: "STM32CubeF1 v1.8.6" }] as row}
         <div class="ec-param-row">
           <label class="ec-param-label" for={makeFieldId(row.label)}
             >{row.label}</label
@@ -1015,7 +999,7 @@
       <div class="ec-section-title" style="margin-top: 16px;">
         Core Generated Source Layout
       </div>
-      {#each ["Core/Src/main.c", "Core/Inc/main.h", "Core/Src/stm32f4xx_it.c", "Makefile"] as f}
+      {#each ["src/main.c", "src/hal/main_init.c", "src/hal/rcc_init.c", "platformio.ini"] as f}
         <div class="ec-file-row">
           <FileCode size={12} style="color: var(--accent-violet-hover);" />
           <span>{f}</span>
