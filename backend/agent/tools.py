@@ -20,6 +20,41 @@ from typing import Any
 from . import editmatch
 from .parser import ToolSpec, tool
 
+import re as _re
+
+
+def _extract_fenced_code(body: str) -> str:
+    """Pull the file content out of a write_file body.
+
+    The model is told to put the file in a ```fence``` after the CALL line, but it
+    frequently wraps that fence in prose ("Here's the code:\n```c\n...\n```\nKey
+    changes: ..."). Earlier we only stripped a fence when the body *started* with
+    one, so a leading sentence caused the entire prose+fence blob to be saved as
+    the file — producing a markdown "C file" that never compiles.
+
+    Strategy:
+      1. If there is at least one ``` fenced block anywhere, return the contents
+         of the FIRST one (prose before/after is discarded).
+      2. Otherwise return the stripped body unchanged (a bare code body).
+    """
+    text = (body or "").strip()
+    if "```" not in text:
+        return text
+
+    # Match the first fenced block; the opening fence may carry a language tag
+    # (```c, ```cpp, ...). DOTALL so the body can span lines; non-greedy so we
+    # stop at the first closing fence.
+    m = _re.search(r"```[^\n]*\n(.*?)```", text, _re.DOTALL)
+    if m:
+        return m.group(1).strip()
+
+    # An opening fence with no closing fence: drop the opening line, keep the rest.
+    lines = text.split("\n")
+    if lines and lines[0].lstrip().startswith("```"):
+        return "\n".join(lines[1:]).strip()
+    return text
+
+
 def _looks_like_c(text: str, is_header: bool = False) -> bool:
     """Heuristic: does this body look like C source rather than English prose?
 
@@ -522,22 +557,7 @@ class CodingToolbox(Toolbox):
         # Only applies to C/H files that have no directory component at all.
         if "/" not in path and "\\" not in path and (path.endswith(".c") or path.endswith(".h")):
             path = "src/" + path
-        content = self.call_body.strip()
-
-        if content.startswith("```"):
-            lines = content.split("\n")
-            if len(lines) > 1:
-                # Remove the first line (e.g. ```c)
-                lines = lines[1:]
-                # Find the closing fence and discard everything after it
-                closing_idx = -1
-                for i, line in enumerate(lines):
-                    if line.strip() == "```":
-                        closing_idx = i
-                        break
-                if closing_idx != -1:
-                    lines = lines[:closing_idx]
-                content = "\n".join(lines).strip()
+        content = _extract_fenced_code(self.call_body)
 
         is_code = path.endswith(".c") or path.endswith(".h")
         existing = self.files.get(path)

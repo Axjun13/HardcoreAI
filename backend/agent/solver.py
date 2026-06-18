@@ -43,7 +43,9 @@ List what is already confirmed:
   - GPIO pins?        → if answered, use it. DO NOT ask again.
 
 If ALL required parameters for the user's task are already in the history
-→ call write_file("src/main.c") IMMEDIATELY. No more questions. No confirmation.
+→ generate the firmware IMMEDIATELY. No more questions. No confirmation.
+   (For peripheral setup that means generate_hal — see RULE 4.6; for pure app
+   logic that means write_file("src/main.c").)
 
 NEVER re-ask a question the user has already answered.
 NEVER ask for confirmation of something already confirmed.
@@ -57,9 +59,10 @@ After reading the history, silently classify the user's request:
   all parameters are already known (e.g. "init USART2 on PA2/PA3 for an
   STM32F405", "toggle PA5", "set up SPI1 mode 0 on the F407"). For these:
     → Write exactly ONE THINK line that says it is a small task and needs no
-      planning, then proceed. Example:
-      THINK: This is a small, well-specified task — no planning needed; I have the board (STM32F405) and pins (PA2/PA3), so I will write the firmware.
-      CALL write_file("src/main.c")
+      planning, then proceed straight to generation. For peripheral setup that
+      is generate_hal (see RULE 4.6). Example:
+      THINK: This is a small, well-specified peripheral setup — no planning needed; I have the board (STM32F405) and USART2, so I will generate the HAL init files.
+      CALL generate_hal("STM32F405", "rcc, gpio, usart2")
     → Do NOT call ask_user or propose_plan for a small clear task.
 
   AMBIGUOUS / MULTI-STEP TASK — missing board/pins/parameters, several
@@ -194,15 +197,35 @@ build() and flash() are side-effecting: each pauses for the user's approval befo
 running (a Yes/No prompt). Just call them normally — the system handles the prompt.
 Do NOT also call ask_user to confirm a build/flash; the tool does that for you.
 
-GENERATING HAL INIT FILES:
-  • generate_hal(board, peripherals) → produces ready-made per-peripheral HAL setup
-    files (src/hal/gpio_init.c, uart2_init.c, rcc_init.c, main_init.c, etc.) from
-    templates. Use it when the user explicitly wants the structured multi-file HAL
-    scaffold (e.g. "generate the HAL files", "set up GPIO + UART2 + RCC init files").
-    peripherals is a comma-separated list of ids: rcc, gpio, usart1, usart2, spi1,
-    i2c1, tim1, adc1, dma, nvic.
-  • For a simple single-file demo (blink, one UART hello-world), prefer
-    write_file("src/main.c") with the complete firmware — do NOT use generate_hal.
+══════════════════════════════════════════════════════════════
+RULE 4.6 — PERIPHERAL SETUP USES generate_hal (PREFER IT)
+══════════════════════════════════════════════════════════════
+For ANY hardware/peripheral setup or initialization, PREFER generate_hal over
+hand-writing the init code in main.c. This is the default for hardware work.
+
+  generate_hal(board, peripherals) → produces ready-made, correct per-peripheral
+  HAL setup files (src/hal/rcc_init.c, gpio_init.c, uart2_init.c, spi1_init.c,
+  main_init.c, …) from vetted templates. peripherals is a comma-separated list of
+  ids: rcc, gpio, usart1, usart2, spi1, i2c1, tim1, adc1, dma, nvic.
+
+WHEN TO USE generate_hal (the common case):
+  • The request is to set up / initialize / configure / enable a peripheral —
+    even a SINGLE one (e.g. "set up UART2", "init SPI1", "configure an ADC",
+    "blink an LED on PA5", "turn on the timer"). Map each peripheral the user
+    wants to its id and call generate_hal. ALWAYS include "rcc" so the system
+    clock is configured, and "gpio" whenever a pin is used (LED, button, etc.).
+    Example:
+      THINK: The user wants UART2 + an LED — this is peripheral setup, so I use generate_hal with rcc, gpio, usart2.
+      CALL generate_hal("STM32F401", "rcc, gpio, usart2")
+
+WHEN TO USE write_file INSTEAD:
+  • Application logic / the main loop / glue that ties the generated init together
+    (e.g. a src/main.c that calls HAL_Init_All() then runs the blink/echo loop),
+    or a file type generate_hal does not cover. After generate_hal, you MAY write
+    a small src/main.c that #includes "main_init.h" and calls the generated init.
+  • A peripheral the template set does not support — then hand-write it in main.c.
+
+Do NOT hand-write peripheral init in main.c when generate_hal covers it.
 
 ══════════════════════════════════════════════════════════════
 RULE 5 — CONVERSATION AWARENESS
@@ -320,9 +343,10 @@ async def run_agent_phase(
             f"Build Output console: {build_output_status}\n\n"
             "Review the conversation history above. "
             "If this turn is about a build/compile/link failure, call read_build_output() first. "
-            "If you now know the board, pins, and all required parameters — "
-            'call write_file("src/main.c") IMMEDIATELY with the complete firmware. '
-            "Do NOT ask any more questions. Do NOT re-confirm anything. Just write the code."
+            "If you now know the board, pins, and all required parameters — generate the "
+            "firmware IMMEDIATELY: use generate_hal for peripheral setup (RULE 4.6), or "
+            'write_file("src/main.c") for pure application logic. '
+            "Do NOT ask any more questions. Do NOT re-confirm anything. Just generate the code."
         )
     else:
         # First turn: send the full structured context so the agent has everything it needs.
