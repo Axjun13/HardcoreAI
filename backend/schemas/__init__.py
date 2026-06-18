@@ -190,3 +190,70 @@ class FlashResult(BaseModel):
     returncode: int = 0
     output: str = ""
     device: DeviceStatus | None = None
+
+
+# ---------------------------------------------------------------------------
+# Debug — GDB / OpenOCD session
+# ---------------------------------------------------------------------------
+
+
+class DebugStartRequest(BaseModel):
+    """Request body for POST /debug/start."""
+    board: str = "bluepill_f103c8"
+
+
+class DebugBreakpointRequest(BaseModel):
+    """Set a breakpoint at file:line."""
+    file: str
+    line: int
+
+
+class DebugBreakpoint(BaseModel):
+    """A breakpoint known to the current GDB session."""
+    id: int
+    file: str
+    line: int
+    enabled: bool = True
+
+
+class DebugState(BaseModel):
+    """Current execution state of the target."""
+    running: bool = False       # target is executing
+    halted: bool = False        # target stopped at bp / step / signal
+    file: str | None = None     # source file from GDB *stopped event
+    line: int | None = None     # source line number
+    reason: str | None = None   # "breakpoint-hit" | "end-stepping-range" | "signal-received" | "exited"
+
+
+class DebugRegister(BaseModel):
+    """One ARM core register value."""
+    name: str      # "r0", "sp", "pc", …
+    number: int    # GDB register number
+    value: str     # hex string e.g. "0x20001234"
+
+
+class DebugFrame(BaseModel):
+    """One frame in the call stack."""
+    level: int
+    function: str
+    file: str | None = None
+    line: int | None = None
+    address: str | None = None
+
+
+class DebugLocal(BaseModel):
+    """One local variable in the current frame."""
+    name: str
+    value: str
+    type: str = ""
+
+
+class DebugSnapshot(BaseModel):
+    """Full state snapshot returned after start/step/continue."""
+    state: DebugState
+    registers: list[DebugRegister] = Field(default_factory=list)
+    call_stack: list[DebugFrame] = Field(default_factory=list)
+    locals: list[DebugLocal] = Field(default_factory=list)
+    breakpoints: list[DebugBreakpoint] = Field(default_factory=list)
+    error: str | None = None   # set when session could not start
+

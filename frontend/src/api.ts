@@ -461,4 +461,116 @@ async createProject(name: string, description: string = "", path: string | null 
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
+
+  // ── Debug API ──────────────────────────────────────────────────────────────
+
+  async startDebug(projectId: string, board?: string) {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/debug/start`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer TEST_TOKEN" },
+      body: JSON.stringify({ board: board ?? "bluepill_f103c8" }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async stopDebug(projectId: string) {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/debug/stop`, {
+      method: "POST",
+      headers: { "Authorization": "Bearer TEST_TOKEN" },
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  /** Open an SSE stream of debug events. Call `controller.abort()` to close. */
+  streamDebug(
+    projectId: string,
+    onEvent: (event: Record<string, unknown>) => void,
+    signal: AbortSignal,
+  ): EventSource | null {
+    // Use EventSource for SSE; it auto-reconnects on network drops
+    const url = `${BACKEND_URL}/api/projects/${projectId}/debug/stream`;
+    try {
+      // EventSource does not support custom headers, so we embed the token
+      // via a query param that the backend accepts in dev mode.
+      const es = new EventSource(url);
+      es.onmessage = (e) => {
+        try {
+          onEvent(JSON.parse(e.data));
+        } catch {
+          // ignore parse errors
+        }
+      };
+      es.onerror = () => es.close();
+      signal.addEventListener("abort", () => es.close());
+      return es;
+    } catch {
+      return null;
+    }
+  },
+
+  async setBreakpoint(projectId: string, file: string, line: number) {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/debug/breakpoint`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer TEST_TOKEN" },
+      body: JSON.stringify({ file, line }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json() as Promise<{ id: number; file: string; line: number; enabled: boolean }>;
+  },
+
+  async removeBreakpoint(projectId: string, bpId: number) {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/debug/breakpoint/${bpId}`, {
+      method: "DELETE",
+      headers: { "Authorization": "Bearer TEST_TOKEN" },
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async debugContinue(projectId: string) {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/debug/continue`, {
+      method: "POST",
+      headers: { "Authorization": "Bearer TEST_TOKEN" },
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async debugStepOver(projectId: string) {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/debug/step-over`, {
+      method: "POST",
+      headers: { "Authorization": "Bearer TEST_TOKEN" },
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async debugStepInto(projectId: string) {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/debug/step-into`, {
+      method: "POST",
+      headers: { "Authorization": "Bearer TEST_TOKEN" },
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async debugStepOut(projectId: string) {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/debug/step-out`, {
+      method: "POST",
+      headers: { "Authorization": "Bearer TEST_TOKEN" },
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async getDebugSnapshot(projectId: string) {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/debug/snapshot`, {
+      headers: { "Authorization": "Bearer TEST_TOKEN" },
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
 };
+

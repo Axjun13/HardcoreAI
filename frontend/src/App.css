@@ -3834,3 +3834,198 @@ body.dragging-col {
   box-shadow: 0 0 4px rgba(139, 92, 246, 0.5);
   pointer-events: none;
 }
+
+/* ── Debug UI Styles ── */
+
+.capsule-btn.debug {
+  color: var(--accent-orange);
+}
+.capsule-btn.debug.active {
+  background: rgba(249, 115, 22, 0.15);
+  border-color: rgba(249, 115, 22, 0.4);
+}
+.capsule-btn.debug:hover:not(:disabled) {
+  background: rgba(249, 115, 22, 0.25);
+}
+
+.debug-status-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-active);
+  margin-bottom: 10px;
+  font-family: var(--font-mono);
+}
+
+.debug-toolbar {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+  background: var(--bg-tertiary);
+  padding: 4px;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+}
+
+.debug-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 3px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-active);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.debug-btn:hover:not(:disabled) {
+  background: var(--bg-secondary);
+  border-color: var(--border-color);
+}
+.debug-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+.debug-btn.stop {
+  color: var(--accent-red);
+}
+
+.debug-section {
+  margin-bottom: 12px;
+}
+
+.debug-section-title {
+  font-size: 0.65rem;
+  font-weight: 800;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  letter-spacing: 0.5px;
+}
+
+.debug-empty {
+  font-size: 0.7rem;
+  color: var(--text-dark);
+  font-style: italic;
+  padding: 2px 4px;
+}
+
+.debug-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 6px;
+  font-size: 0.7rem;
+  font-family: var(--font-mono);
+  border-radius: 3px;
+  margin-bottom: 2px;
+}
+.debug-item:hover {
+  background: var(--bg-tertiary);
+}
+
+.debug-function {
+  color: var(--accent-violet-hover);
+  font-weight: 600;
+}
+.debug-file {
+  color: var(--text-dark);
+  font-size: 0.65rem;
+}
+.debug-name {
+  color: var(--accent-cyan);
+}
+.debug-value {
+  color: var(--text-active);
+}
+
+.bp-item {
+  justify-content: space-between;
+}
+.remove-bp-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-dark);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border-radius: 2px;
+}
+.remove-bp-btn:hover {
+  color: var(--accent-red);
+  background: rgba(244, 63, 94, 0.1);
+}
+
+.debug-log-view {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 6px;
+  height: 120px;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: var(--text-muted);
+}
+.debug-log-line {
+  margin-bottom: 2px;
+  word-wrap: break-word;
+}
+
+.core-registers-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 4px;
+  padding: 8px;
+  overflow-y: auto;
+}
+.core-register-item {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  padding: 4px 6px;
+}
+.core-register-item .reg-name {
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+.core-register-item .reg-value {
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  color: var(--text-active);
+}
+
+/* Monaco Decorators */
+.gutter-breakpoint {
+  background-color: var(--accent-red);
+  border-radius: 50%;
+  width: 10px !important;
+  height: 10px !important;
+  margin-left: 5px;
+  margin-top: 4px;
+}
+
+.gutter-current-line {
+  background-color: var(--accent-orange);
+  clip-path: polygon(0 0, 0 100%, 100% 50%);
+  width: 10px !important;
+  height: 10px !important;
+  margin-left: 5px;
+  margin-top: 4px;
+}
+
+.debug-line-highlight {
+  background-color: rgba(249, 115, 22, 0.2) !important;
+}
