@@ -6,6 +6,7 @@ export interface FileItem {
   name: string;
   path: string;
   isFolder: boolean;
+  isBinary?: boolean;
   children?: FileItem[];
 }
 
@@ -183,6 +184,21 @@ function buildProjectFileState(files: any[]): { fileContents: Record<string, str
   return { fileContents, fileTree };
 }
 
+// Normalize a backend disk-tree node into a FileItem. Disk paths already carry a
+// leading slash (e.g. "/src/main.c"), matching the editor's path convention.
+function normalizeDiskNode(node: any): FileItem {
+  const item: FileItem = {
+    name: node.name,
+    path: node.path,
+    isFolder: !!node.isFolder,
+  };
+  if (node.isBinary) item.isBinary = true;
+  if (node.isFolder && Array.isArray(node.children)) {
+    item.children = node.children.map(normalizeDiskNode);
+  }
+  return item;
+}
+
 const isBrowser = typeof window !== 'undefined';
 
 const getInitialActiveProjectId = () => {
@@ -318,6 +334,15 @@ export const workspaceStore = writable({
   gitExpandedCommit: null as string | null, // hash of expanded commit row
   fileContents: {} as Record<string, string>,
   fileTree: [] as FileItem[],
+  // Paths present on disk but NOT tracked in the DB (e.g. .pio build artifacts).
+  // These are viewable but read-only — edits are never persisted to the DB.
+  untrackedPaths: {} as Record<string, boolean>,
+  // Folder paths the user has expanded in the explorer. Folders default to
+  // collapsed; a path appears here only after the user opens it.
+  expandedFolders: {} as Record<string, boolean>,
+  // When false, dotfiles (.gitignore, .pio, etc.) are hidden in the explorer.
+  // Toggled by the eye button in the explorer header.
+  showHiddenFiles: false,
 
   // Compilation & Flashing
   isCompiling: false,
@@ -407,6 +432,22 @@ export const actions = {
     }
   },
 
+  // Fetch the real working-directory tree (incl. .pio, untracked, binaries) and
+  // replace fileTree with it. Falls back silently to the DB-derived tree on error.
+  loadDiskTree: async (id: string) => {
+    try {
+      const res = await api.getProjectTree(id);
+      if (res.source === "disk" && Array.isArray(res.tree)) {
+        const fileTree = res.tree.map(normalizeDiskNode);
+        workspaceStore.update(s =>
+          s.activeProjectId === id ? { ...s, fileTree } : s
+        );
+      }
+    } catch (e) {
+      console.warn("Failed to load disk tree, keeping DB-derived tree", e);
+    }
+  },
+
   // Refresh only the file tree/contents without clearing chat or logs.
   // Used after an agent response so the editor shows new code without losing the conversation.
   refreshProjectFiles: async (id: string) => {
@@ -420,6 +461,8 @@ export const actions = {
         fileContents,
         // Intentionally do NOT touch aiMessages, buildLogs, serialLogs
       }));
+      // Overlay the real working-dir tree (shows .pio/untracked files).
+      actions.loadDiskTree(id);
     } catch (e) {
       console.error("Failed to refresh project files", e);
     }
@@ -485,6 +528,8 @@ export const actions = {
         };
       });
       
+      // Overlay the real working-dir tree (shows .pio/untracked files).
+      actions.loadDiskTree(id);
       // Also fetch RAG documents for this project
       await actions.fetchRagDocuments();
       // Load git status and info
@@ -496,11 +541,45 @@ export const actions = {
   },
 
   setActiveFile: (path: string | null) => {
+    let needsDiskLoad = false;
+    let projectId: string | null = null;
     workspaceStore.update(s => {
       if (!path) return { ...s, activeFile: null };
       const openFiles = s.openFiles.includes(path) ? s.openFiles : [...s.openFiles, path];
+      // Tracked files have content from the DB; untracked/.pio files don't —
+      // fetch their content from disk on demand.
+      if (s.fileContents[path] === undefined) {
+        needsDiskLoad = true;
+        projectId = s.activeProjectId;
+      }
       return { ...s, openFiles, activeFile: path };
     });
+    const pid: string | null = projectId;
+    if (needsDiskLoad && pid && path) actions.loadDiskFileContent(pid, path);
+  },
+
+  // Lazily fetch a working-dir file's content (untracked/.pio) and cache it in
+  // fileContents so the editor renders it. Binary files get a short placeholder.
+  loadDiskFileContent: async (projectId: string, path: string) => {
+    try {
+      const rel = path.replace(/^\/+/, "");
+      const res = await api.getDiskFile(projectId, rel);
+      const content = res.binary
+        ? `// Binary file (${rel}) — not shown.`
+        : (res.content || "");
+      workspaceStore.update(s => ({
+        ...s,
+        fileContents: { ...s.fileContents, [path]: content },
+        // Mark read-only: this file lives on disk only, not in the DB.
+        untrackedPaths: { ...s.untrackedPaths, [path]: true },
+      }));
+    } catch (e) {
+      console.warn("Failed to load disk file content", path, e);
+      workspaceStore.update(s => ({
+        ...s,
+        fileContents: { ...s.fileContents, [path]: "" },
+      }));
+    }
   },
 
   closeFileTab: (path: string) => {
@@ -642,14 +721,20 @@ export const actions = {
   
   updateFileContent: (path: string, content: string) => {
     let projectId: string | null = null;
+    let untracked = false;
     workspaceStore.update(s => {
       projectId = s.activeProjectId;
+      untracked = !!s.untrackedPaths[path];
       return {
         ...s,
         fileContents: { ...s.fileContents, [path]: content }
       };
     });
-    
+
+    // Disk-only files (e.g. .pio build artifacts) are read-only: view but never
+    // persist back to the DB.
+    if (untracked) return;
+
     if (projectId) {
       // @ts-ignore - store timeout on the window to survive store updates
       clearTimeout(window.__saveTimeout);
@@ -807,9 +892,26 @@ export const actions = {
     workspaceStore.update(s => ({ ...s, autoApproveAgent: !s.autoApproveAgent }));
   },
 
+  // Explorer folder expand/collapse. Folders are collapsed by default.
+  toggleFolder: (path: string) => {
+    workspaceStore.update(s => {
+      const expandedFolders = { ...s.expandedFolders };
+      if (expandedFolders[path]) delete expandedFolders[path];
+      else expandedFolders[path] = true;
+      return { ...s, expandedFolders };
+    });
+  },
+
+  // Show/hide dotfiles (.gitignore, .pio, etc.) in the explorer.
+  toggleHiddenFiles: () => {
+    workspaceStore.update(s => ({ ...s, showHiddenFiles: !s.showHiddenFiles }));
+  },
+
   // Real PlatformIO build — streams the compiler output live into the Build Output
   // tab (auto-opening it), then feeds the result to the agent.
-  runBuild: async () => {
+  // notifyAgent: when true (default), the build outcome is posted into the agent
+  // chat so it reacts (Build & Check). When false, it's a plain build only.
+  runBuild: async (notifyAgent: boolean = true) => {
     let projectId: string | null = null;
     let busy = false;
     workspaceStore.subscribe(s => { projectId = s.activeProjectId; busy = s.isCompiling; })();
@@ -843,7 +945,7 @@ export const actions = {
           ? `Build successful in ${done.duration_s}s.${done.firmware_path ? " -> " + done.firmware_path : ""}`
           : `Build FAILED (exit ${done.returncode}).`
       );
-      actions.notifyAgentOfBuild(done);
+      if (notifyAgent) actions.notifyAgentOfBuild(done);
     }
   },
 
@@ -1111,6 +1213,10 @@ export const actions = {
         openFiles
       };
     });
+    // Overlay the real working-dir tree (shows .pio/untracked files).
+    let pid: string | null = null;
+    workspaceStore.subscribe(s => { pid = s.activeProjectId; })();
+    if (pid) actions.loadDiskTree(pid);
     // Load git status
     actions.loadGitStatus();
   },

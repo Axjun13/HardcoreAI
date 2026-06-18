@@ -106,6 +106,22 @@ async createProject(name: string, description: string = "", path: string | null 
     return res.json();
   },
 
+  // Real working-directory tree (includes .pio, untracked files, binaries).
+  async getProjectTree(id: string) {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${id}/tree`, { headers: { "Authorization": "Bearer TEST_TOKEN" } });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  // Read a single working-dir file's content on demand (for untracked/.pio files).
+  async getDiskFile(id: string, path: string) {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${id}/disk-file?path=${encodeURIComponent(path)}`, {
+      headers: { "Authorization": "Bearer TEST_TOKEN" }
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
   async upsertFile(id: string, path: string, content: string, language: string = "c") {
     // The backend path is a path param, needs URL encoding if it has slashes, though FastAPI path:path handles it
     const res = await fetch(`${BACKEND_URL}/api/projects/${id}/files/${path}`, {

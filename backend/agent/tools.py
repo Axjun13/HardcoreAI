@@ -55,6 +55,28 @@ def _extract_fenced_code(body: str) -> str:
     return text
 
 
+def _extract_markdown_body(body: str) -> str:
+    """Extract a markdown file body from the call text.
+
+    Markdown READMEs commonly embed ``` code fences, so we cannot use the
+    non-greedy code extractor (it would stop at the first inner closing fence).
+    Only unwrap when the entire body is a single outer fence — i.e. it starts
+    with ``` and the only other ``` is the final line. Otherwise return the body
+    as-is, which is what the model most often emits for a README.
+    """
+    text = (body or "").strip()
+    if not text.startswith("```"):
+        return text
+    lines = text.split("\n")
+    # First line is the opening fence (maybe ```markdown / ```md).
+    rest = lines[1:]
+    # An outer fence: the LAST non-empty line is a lone closing fence and there
+    # is no other fence in between (so it isn't wrapping nested code blocks).
+    if rest and rest[-1].strip() == "```" and "```" not in "\n".join(rest[:-1]):
+        return "\n".join(rest[:-1]).strip()
+    return text
+
+
 def _looks_like_c(text: str, is_header: bool = False) -> bool:
     """Heuristic: does this body look like C source rather than English prose?
 
@@ -580,9 +602,15 @@ class CodingToolbox(Toolbox):
         # Only applies to C/H files that have no directory component at all.
         if "/" not in path and "\\" not in path and (path.endswith(".c") or path.endswith(".h")):
             path = "src/" + path
-        content = _extract_fenced_code(self.call_body)
-
         is_code = path.endswith(".c") or path.endswith(".h")
+        # Markdown bodies routinely contain nested ``` code fences (e.g. example
+        # C inside the README). The non-greedy fence extractor would truncate at
+        # the first inner closing fence, so only unwrap a markdown body when it is
+        # a single clean outer fence; otherwise keep the raw body.
+        if path.endswith(".md"):
+            content = _extract_markdown_body(self.call_body)
+        else:
+            content = _extract_fenced_code(self.call_body)
         existing = self.files.get(path)
 
         # Guard 1: never write an empty body — that would silently blank a file.

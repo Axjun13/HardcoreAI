@@ -39,6 +39,9 @@
     Camera,
     ArrowDown,
     RefreshCw,
+    ChevronRight,
+    Eye,
+    EyeOff,
   } from "lucide-svelte";
 
   let aiInput = "";
@@ -333,12 +336,19 @@
     const content = $workspaceStore.fileContents[activeFile] || "";
     if (monacoEditor.getValue() !== content) {
       monacoEditor.setValue(content);
-      const isC = activeFile.endsWith(".c") || activeFile.endsWith(".h");
       monaco.editor.setModelLanguage(
         monacoEditor.getModel()!,
-        isC ? "c" : "javascript",
+        languageForFile(activeFile),
       );
     }
+  }
+
+  // Disk-only files (e.g. .pio build artifacts) are read-only — they aren't
+  // tracked in the DB, so edits can't be persisted.
+  $: if (monacoEditor && activeFile && !activeFile.startsWith(DIFF_PREFIX)) {
+    monacoEditor.updateOptions({
+      readOnly: !!$workspaceStore.untrackedPaths[activeFile],
+    });
   }
 
   // Auto-scroll terminal output
@@ -382,7 +392,7 @@
     monacoEditor = monaco.editor.create(node, {
       value:
         $workspaceStore.fileContents[$workspaceStore.activeFile || ""] || "",
-      language: "c",
+      language: languageForFile($workspaceStore.activeFile || ""),
       theme: isLightTheme ? "vs" : "vs-dark",
       automaticLayout: true,
       fontFamily: "JetBrains Mono",
@@ -559,8 +569,14 @@
   }
 
   // Compiler / Flash handlers — real PlatformIO build + ST-Link flash via backend.
+  // Build & Check: builds, then sends the output to the agent to review.
+  function handleBuildAndCheck() {
+    actions.runBuild(true);
+  }
+
+  // Plain Build: builds only, does not trigger the agent.
   function handleBuild() {
-    actions.runBuild();
+    actions.runBuild(false);
   }
 
   function handleFlash() {
@@ -673,6 +689,22 @@
       j++;
     }
     return out;
+  }
+
+  function languageForFile(path: string): string {
+    if (path.endsWith(".c") || path.endsWith(".h")) return "c";
+    if (path.endsWith(".md")) return "markdown";
+    if (path.endsWith(".json")) return "json";
+    return "javascript";
+  }
+
+  // Markdown files can be viewed as rendered preview or raw source.
+  let markdownPreview = true;
+  $: isMarkdownFile = !!activeFile && activeFile.endsWith(".md");
+  // Whenever we switch to a different file, default markdown back to preview.
+  $: if (activeFile) {
+    void activeFile;
+    markdownPreview = true;
   }
 
   function renderMarkdown(markdown: string) {
@@ -964,10 +996,22 @@
         class="capsule-btn build"
         onclick={handleBuild}
         disabled={$workspaceStore.isCompiling || $workspaceStore.isFlashing}
-        title="Compile Project"
+        title="Compile Project (build only)"
       >
         <Play size={12} class="play-triangle-fill" />
         <span>{$workspaceStore.isCompiling ? "Compiling..." : "Build"}</span>
+      </button>
+
+      <div class="divider-line"></div>
+
+      <button
+        class="capsule-btn build"
+        onclick={handleBuildAndCheck}
+        disabled={$workspaceStore.isCompiling || $workspaceStore.isFlashing}
+        title="Compile Project and send output to the agent to check"
+      >
+        <Check size={12} />
+        <span>Build &amp; Check</span>
       </button>
 
       <div class="divider-line"></div>
@@ -1547,6 +1591,19 @@
                   <button
                     type="button"
                     class="close-ai-btn"
+                    class:active={$workspaceStore.showHiddenFiles}
+                    title={$workspaceStore.showHiddenFiles ? "Hide dotfiles (.gitignore, .pio, …)" : "Show dotfiles (.gitignore, .pio, …)"}
+                    onclick={() => actions.toggleHiddenFiles()}
+                  >
+                    {#if $workspaceStore.showHiddenFiles}
+                      <Eye size={13} />
+                    {:else}
+                      <EyeOff size={13} />
+                    {/if}
+                  </button>
+                  <button
+                    type="button"
+                    class="close-ai-btn"
                     title="New File"
                     onclick={() => {
                       inputPromptModal = {
@@ -1603,14 +1660,22 @@
 
                     {#snippet fileNodeSnippet(item: FileItem)}
                       {#if item.isFolder}
+                        {@const isOpen = !!$workspaceStore.expandedFolders[item.path]}
                         <div style="margin-bottom: 2px;">
+                          <!-- svelte-ignore a11y-click-events-have-key-events -->
+                          <!-- svelte-ignore a11y-no-static-element-interactions -->
                           <div
                             class="file-item folder"
-                            style="display: flex; align-items: center; justify-content: space-between; width: 100%; padding-right: 8px;"
+                            onclick={() => actions.toggleFolder(item.path)}
+                            style="display: flex; align-items: center; justify-content: space-between; width: 100%; padding-right: 8px; cursor: pointer;"
                           >
                             <div
-                              style="display: flex; align-items: center; gap: 6px;"
+                              style="display: flex; align-items: center; gap: 4px;"
                             >
+                              <ChevronRight
+                                size={13}
+                                style="color: var(--text-muted); transition: transform 0.12s; transform: rotate({isOpen ? 90 : 0}deg); flex-shrink: 0;"
+                              />
                               <Folder
                                 size={14}
                                 style="color: var(--accent-violet);"
@@ -1671,14 +1736,16 @@
                               </button>
                             </div>
                           </div>
-                          <div
-                            class="folder-contents"
-                            style="padding-left: 12px; border-left: 1px solid var(--border-color); margin-left: 6px;"
-                          >
-                            {#each item.children || [] as child}
-                              {@render fileNodeSnippet(child)}
-                            {/each}
-                          </div>
+                          {#if isOpen}
+                            <div
+                              class="folder-contents"
+                              style="padding-left: 12px; border-left: 1px solid var(--border-color); margin-left: 6px;"
+                            >
+                              {#each (item.children || []).filter((c) => $workspaceStore.showHiddenFiles || !c.name.startsWith(".")) as child}
+                                {@render fileNodeSnippet(child)}
+                              {/each}
+                            </div>
+                          {/if}
                         </div>
                       {:else}
                         <!-- svelte-ignore a11y-click-events-have-key-events -->
@@ -1719,7 +1786,7 @@
                     {/snippet}
 
                     <div class="folder-contents">
-                      {#each $workspaceStore.fileTree as item}
+                      {#each $workspaceStore.fileTree.filter((item) => $workspaceStore.showHiddenFiles || !item.name.startsWith(".")) as item}
                         {@render fileNodeSnippet(item)}
                       {/each}
                     </div>
@@ -2471,13 +2538,34 @@
                 <div class="monaco-container" use:initDiffEditor></div>
               {/key}
             {:else if $workspaceStore.activeFile}
-              <div class="monaco-container" use:initMonaco></div>
+              {#if isMarkdownFile}
+                <div class="md-view-bar">
+                  <button
+                    class="md-view-btn {markdownPreview ? 'active' : ''}"
+                    onclick={() => (markdownPreview = true)}>Preview</button
+                  >
+                  <button
+                    class="md-view-btn {markdownPreview ? '' : 'active'}"
+                    onclick={() => (markdownPreview = false)}>Source</button
+                  >
+                </div>
+              {/if}
+              {#if isMarkdownFile && markdownPreview}
+                <div class="markdown-preview chat-markdown">
+                  {@html renderMarkdown(
+                    $workspaceStore.fileContents[$workspaceStore.activeFile] ||
+                      "",
+                  )}
+                </div>
+              {:else}
+                <div class="monaco-container" use:initMonaco></div>
+              {/if}
               <div class="editor-bottom-bar">
                 <span>Ln {currentLine}, Col {currentColumn}</span>
                 <span>Spaces: 4</span>
                 <span>UTF-8</span>
                 <span>LF</span>
-                <span>C</span>
+                <span>{languageForFile($workspaceStore.activeFile).toUpperCase()}</span>
                 <span>{boardLabel}</span>
               </div>
             {:else}
