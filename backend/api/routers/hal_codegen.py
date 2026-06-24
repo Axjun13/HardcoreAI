@@ -338,16 +338,16 @@ INIT_CALLS = {
 }
 
 INCLUDES = {
-    "rcc":    '#include "rcc_init.h"',
-    "gpio":   '#include "gpio_init.h"',
-    "dma":    '#include "dma_init.h"',
-    "nvic":   '#include "nvic_init.h"',
-    "usart1": '#include "uart1_init.h"',
-    "usart2": '#include "uart2_init.h"',
-    "spi1":   '#include "spi1_init.h"',
-    "i2c1":   '#include "i2c1_init.h"',
-    "tim1":   '#include "tim1_init.h"',
-    "adc1":   '#include "adc1_init.h"',
+    "rcc": '#include "hal/rcc_init.h"',
+    "gpio": '#include "hal/gpio_init.h"',
+    "dma": '#include "hal/dma_init.h"',
+    "nvic": '#include "hal/nvic_init.h"',
+    "usart1": '#include "hal/uart1_init.h"',
+    "usart2": '#include "hal/uart2_init.h"',
+    "spi1": '#include "hal/spi1_init.h"',
+    "i2c1": '#include "hal/i2c1_init.h"',
+    "tim1": '#include "hal/tim1_init.h"',
+    "adc1": '#include "hal/adc1_init.h"',
 }
 
 
