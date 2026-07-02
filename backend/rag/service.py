@@ -17,16 +17,25 @@ implementation so callers (api/routers/rag.py, agent/tools.py) need no changes:
 ``query`` output still contains the marker the agent splits on:
 
     === LLM-READY PROMPT CONTEXT WINDOW ===
+
+Web-scraping extensions (search_web / ingest_url):
+  - search_web(query)  → calls a self-hosted SearXNG instance (SEARXNG_URL env var)
+  - ingest_url(url)    → fetches the page with httpx, strips HTML, saves as a
+    ``web__<slug>.txt`` file in data_dir, then re-indexes.
+  Both use only stdlib + httpx (already in requirements.txt); no new deps.
 """
 
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import threading
 from dataclasses import dataclass
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Iterable
+from urllib.parse import urlparse
 
 CONTEXT_MARKER = "=== LLM-READY PROMPT CONTEXT WINDOW ==="
 
@@ -39,6 +48,81 @@ CHUNK_OVERLAP = int(os.getenv("RAG_CHUNK_OVERLAP", "64"))
 
 # Name of the Chroma collection holding a user's chunks.
 COLLECTION_NAME = "hardware_manuals"
+
+# Self-hosted SearXNG instance base URL.
+SEARXNG_URL = os.getenv("SEARXNG_URL", "http://localhost:8080")
+
+# Prefix for filenames produced by ingest_url so the list endpoint can
+# distinguish web-scraped documents from user-uploaded PDFs.
+WEB_PREFIX = "web__"
+
+# Maximum characters fetched per page before truncation (≈ 40 k tokens).
+MAX_PAGE_CHARS = 200_000
+
+
+class _TextExtractor(HTMLParser):
+    """Minimal HTML-to-plaintext extractor using only stdlib html.parser.
+
+    Skips <script>, <style>, <head> content. Collapses whitespace.
+    Not a full sanitiser — good enough for extracting readable text from
+    documentation and datasheet pages.
+    """
+
+    _SKIP_TAGS = {"script", "style", "head", "noscript"}
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._parts: list[str] = []
+        self._skip = 0
+
+    def handle_starttag(self, tag: str, attrs) -> None:  # type: ignore[override]
+        if tag in self._SKIP_TAGS:
+            self._skip += 1
+
+    def handle_endtag(self, tag: str) -> None:  # type: ignore[override]
+        if tag in self._SKIP_TAGS and self._skip > 0:
+            self._skip -= 1
+
+    def handle_data(self, data: str) -> None:
+        if self._skip == 0:
+            stripped = data.strip()
+            if stripped:
+                self._parts.append(stripped)
+
+    def get_text(self) -> str:
+        raw = " ".join(self._parts)
+        # Collapse runs of whitespace into a single space.
+        return re.sub(r"[ \t]{2,}", " ", raw).strip()
+
+
+def _html_to_text(html: str) -> str:
+    """Extract readable text from an HTML string using only stdlib."""
+    parser = _TextExtractor()
+    parser.feed(html)
+    return parser.get_text()
+
+
+def _slug_url(url: str) -> str:
+    """Convert a URL into a safe, deterministic filename stem.
+
+    The result must be a **flat** filename (no slashes) safe on both
+    Windows and Linux. All non-word characters, including path separators,
+    are replaced with underscores.
+
+    Example::
+        https://www.st.com/resource/en/reference_manual/rm0090.pdf
+        → st.com_resource_en_reference_manual_rm0090_pdf
+    """
+    parsed = urlparse(url)
+    # netloc without leading www.
+    host = re.sub(r"^www\.", "", parsed.netloc)
+    # Replace every non-word character (including / and .) with _
+    path = re.sub(r"[^\w]", "_", parsed.path).strip("_")
+    slug = f"{host}_{path}" if path else host
+    # Also sanitise the host portion (dots → underscores to keep it clean)
+    slug = re.sub(r"[^\w]", "_", slug)
+    # Truncate so the full filename (web__ + slug + .txt) stays under 200 chars.
+    return slug[:180]
 
 
 def _split_csv(raw: str, default: list[str]) -> list[str]:
@@ -64,7 +148,7 @@ class RAGConfig:
             upload_dir=Path(os.getenv("UPLOAD_DIR", "integration/uploads")),
             default_k=int(os.getenv("RAG_K", "3")),
             default_max_tokens=int(os.getenv("RAG_MAX_TOKENS", "3000")),
-            allowed_extensions=_split_csv(os.getenv("ALLOWED_EXTENSIONS", ".pdf"), [".pdf"]),
+            allowed_extensions=_split_csv(os.getenv("ALLOWED_EXTENSIONS", ".pdf,.txt"), [".pdf", ".txt"]),
             max_upload_size_mb=int(os.getenv("MAX_UPLOAD_SIZE_MB", "50")),
         )
 
@@ -193,6 +277,115 @@ class RAGService:
             copied.append(str(destination))
         return copied
 
+    # -- web-search / url-scrape -----------------------------------------
+
+    def search_web(self, query: str, num_results: int = 5) -> list[dict]:
+        """Query the self-hosted SearXNG instance and return result metadata.
+
+        Returns a list of dicts::
+
+            [{"title": str, "url": str, "snippet": str}, ...]
+
+        Never raises — returns an empty list with an error key on failure so
+        the agent tool can surface a readable message.
+        """
+        import httpx
+
+        endpoint = f"{SEARXNG_URL}/search"
+        params = {
+            "q": query,
+            "format": "json",
+            "language": "en",
+            "engines": "google,bing,duckduckgo",
+        }
+        try:
+            with httpx.Client(timeout=15.0) as client:
+                resp = client.get(endpoint, params=params)
+                resp.raise_for_status()
+                data = resp.json()
+        except Exception as exc:
+            return [{"error": str(exc), "title": "", "url": "", "snippet": ""}]
+
+        results = []
+        for item in data.get("results", [])[:num_results]:
+            results.append({
+                "title": item.get("title", ""),
+                "url": item.get("url", ""),
+                "snippet": item.get("content", ""),
+            })
+        return results
+
+    def ingest_url(self, url: str) -> dict:
+        """Fetch *url*, extract plain text, and add it to the RAG index.
+
+        The file is saved as ``web__<slug>.txt`` inside ``data_dir``.  If a
+        file with that name already exists the call is a no-op (dedup).
+
+        Returns::
+
+            {
+                "filename": str,
+                "url": str,
+                "size": int,        # bytes written (0 if skipped)
+                "skipped": bool,    # True when the URL was already indexed
+                "error": str | None,
+            }
+        """
+        import httpx
+
+        slug = _slug_url(url)
+        filename = f"{WEB_PREFIX}{slug}.txt"
+        dest = self.config.data_dir / filename
+
+        if dest.exists():
+            return {"filename": filename, "url": url, "size": 0, "skipped": True, "error": None}
+
+        try:
+            with httpx.Client(
+                timeout=20.0,
+                follow_redirects=True,
+                headers={"User-Agent": "HardcoreAI-RAG/1.0 (+https://github.com/vardhin/HardcoreAI)"},
+            ) as client:
+                resp = client.get(url)
+                resp.raise_for_status()
+                content_type = resp.headers.get("content-type", "")
+                if "text/html" in content_type or "text/plain" in content_type:
+                    raw_text = _html_to_text(resp.text) if "html" in content_type else resp.text
+                else:
+                    return {
+                        "filename": filename,
+                        "url": url,
+                        "size": 0,
+                        "skipped": False,
+                        "error": f"Unsupported content-type: {content_type!r}",
+                    }
+        except Exception as exc:
+            return {"filename": filename, "url": url, "size": 0, "skipped": False, "error": str(exc)}
+
+        if not raw_text.strip():
+            return {"filename": filename, "url": url, "size": 0, "skipped": False, "error": "Empty page text"}
+
+        # Truncate very large pages to stay within token budget.
+        if len(raw_text) > MAX_PAGE_CHARS:
+            raw_text = raw_text[:MAX_PAGE_CHARS]
+
+        # Prepend a source-URL header line so _build_index can surface it.
+        body = f"# source: {url}\n\n{raw_text}"
+
+        self.config.data_dir.mkdir(parents=True, exist_ok=True)
+        dest.write_text(body, encoding="utf-8")
+        size = dest.stat().st_size
+
+        try:
+            # Only re-index the new file, not the entire corpus.
+            self._build_index([dest])
+        except Exception as exc:
+            # The file is already on disk; report the indexing error but don't
+            # delete the file — ingest() can pick it up on the next full run.
+            return {"filename": filename, "url": url, "size": size, "skipped": False, "error": f"Index error: {exc}"}
+
+        return {"filename": filename, "url": url, "size": size, "skipped": False, "error": None}
+
     # -- internals --------------------------------------------------------
 
     def _chroma_collection(self, *, create: bool):
@@ -204,19 +397,55 @@ class RAGService:
             return client, client.get_or_create_collection(COLLECTION_NAME)
         return client, client.get_collection(COLLECTION_NAME)
 
-    def _build_index(self, pdfs: list[Path]) -> int:
+    def _build_index(self, files: list[Path]) -> int:
+        """Index a list of files (PDFs and/or .txt) into Chroma.
+
+        PDFs are loaded with LlamaIndex's PDFReader (preserves page metadata).
+        Plain-text files (including web-scraped .txt) are loaded with
+        SimpleDirectoryReader, which handles them natively without extra deps.
+        """
         from llama_index.core import StorageContext, VectorStoreIndex
         from llama_index.core.node_parser import SentenceSplitter
         from llama_index.readers.file import PDFReader
         from llama_index.vector_stores.chroma import ChromaVectorStore
 
-        reader = PDFReader()
+        pdf_reader = PDFReader()
         documents = []
-        for pdf in pdfs:
-            docs = reader.load_data(file=pdf)
-            for d in docs:
-                d.metadata = {**(d.metadata or {}), "filename": pdf.name}
+        for f in files:
+            suffix = f.suffix.lower()
+            if suffix == ".pdf":
+                docs = pdf_reader.load_data(file=f)
+                for d in docs:
+                    d.metadata = {
+                        **(d.metadata or {}),
+                        "filename": f.name,
+                        "source": "pdf",
+                    }
+            elif suffix == ".txt":
+                # Read the raw text; strip the source-URL header line if present.
+                raw = f.read_text(encoding="utf-8", errors="replace")
+                # Extract optional source URL from first line (# source: <url>).
+                source_url = ""
+                lines = raw.splitlines()
+                if lines and lines[0].startswith("# source: "):
+                    source_url = lines[0][len("# source: "):].strip()
+                    raw = "\n".join(lines[1:]).strip()
+                from llama_index.core import Document
+                docs = [Document(
+                    text=raw,
+                    metadata={
+                        "filename": f.name,
+                        "source": "web",
+                        "source_url": source_url,
+                    },
+                )]
+            else:
+                # Unknown extension — skip gracefully.
+                continue
             documents.extend(docs)
+
+        if not documents:
+            return 0
 
         _, collection = self._chroma_collection(create=True)
         vector_store = ChromaVectorStore(chroma_collection=collection)

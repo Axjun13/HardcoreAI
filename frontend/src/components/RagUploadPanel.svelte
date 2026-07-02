@@ -3,11 +3,14 @@
   import { 
     Upload, 
     FileText, 
+    Globe,
     Trash2, 
     Search, 
     Sparkles, 
     BookOpen, 
-    HelpCircle
+    HelpCircle,
+    Link,
+    Clock
   } from "lucide-svelte";
 
   let filesInput: HTMLInputElement;
@@ -57,6 +60,19 @@
     }
   }
 
+  let urlInput = "";
+
+  function handleIngestUrl() {
+    const trimmed = urlInput.trim();
+    if (!trimmed) return;
+    urlInput = "";
+    actions.ingestUrl(trimmed);
+  }
+
+  function handleUrlKeyPress(e: KeyboardEvent) {
+    if (e.key === "Enter") handleIngestUrl();
+  }
+
   function deleteDoc(id: string, name: string) {
     workspaceStore.update(s => ({
       ...s,
@@ -101,6 +117,28 @@
       <button class="select-files-btn" disabled={!!$workspaceStore.ragUploadProgress}>Select File</button>
     </div>
 
+    <!-- URL Ingestion Row -->
+    <div class="url-ingest-row">
+      <div class="url-ingest-box">
+        <Link size={12} style="color: var(--accent-cyan); flex-shrink: 0;" />
+        <input
+          type="url"
+          class="url-ingest-input"
+          placeholder="Paste a URL to fetch & ingest (e.g. https://www.st.com/...)"
+          bind:value={urlInput}
+          onkeypress={handleUrlKeyPress}
+          disabled={!!$workspaceStore.ragUploadProgress}
+        />
+        <button
+          class="url-ingest-btn"
+          onclick={handleIngestUrl}
+          disabled={!!$workspaceStore.ragUploadProgress || !urlInput.trim()}
+        >
+          Fetch & Ingest
+        </button>
+      </div>
+    </div>
+
     <!-- Dynamic Ingesting Progress Tracker -->
     {#if $workspaceStore.ragUploadProgress}
       <div class="indexing-progress-card">
@@ -125,10 +163,14 @@
       {#each $workspaceStore.ragDocuments as doc}
         <div class="doc-card">
           <div class="doc-icon-cell">
-            <FileText size={16} style="color: var(--accent-violet);" />
+            {#if doc.source === "web"}
+              <Globe size={16} style="color: var(--accent-cyan);" />
+            {:else}
+              <FileText size={16} style="color: var(--accent-violet);" />
+            {/if}
           </div>
           <div class="doc-info-cell">
-            <span class="doc-name" title={doc.name}>{doc.name}</span>
+            <span class="doc-name" title={doc.url || doc.name}>{doc.name}</span>
             <div class="doc-meta">
               <span>{doc.size}</span>
               <span class="dot-separator">•</span>
@@ -136,6 +178,10 @@
               {#if doc.tokens > 0}
                 <span class="dot-separator">•</span>
                 <span style="color: var(--accent-cyan);">{doc.tokens.toLocaleString()} tokens</span>
+              {/if}
+              {#if doc.source === "web"}
+                <span class="dot-separator">•</span>
+                <span class="web-source-badge">🌐 Web</span>
               {/if}
             </div>
           </div>
@@ -158,7 +204,7 @@
     </div>
   </div>
 
-  <!-- Right Side: Semantic Snippet Search -->
+  <!-- Right Side: Semantic Snippet Search + Web Search Placeholder -->
   <div class="rag-search-col">
     <div class="rag-section-title">
       <Search size={13} style="color: var(--accent-success);" />
@@ -213,6 +259,20 @@
           {/each}
         </div>
       {/if}
+    </div>
+
+    <!-- Web Search Placeholder -->
+    <div class="web-search-placeholder">
+      <div class="rag-section-title" style="margin-bottom: 8px;">
+        <Globe size={13} style="color: var(--accent-violet);" />
+        <span>WEB SEARCH & INGEST</span>
+        <span class="coming-soon-badge">Coming Soon</span>
+      </div>
+      <div class="web-search-placeholder-body">
+        <Clock size={20} style="color: var(--text-dark); stroke-width: 1.5;" />
+        <p>Search the web and bulk-ingest pages directly into your RAG knowledge base.</p>
+        <span>Use the URL input above to ingest individual pages now, or ask the agent to call <code>search_and_ingest_web</code>.</span>
+      </div>
     </div>
   </div>
 </div>
@@ -632,5 +692,129 @@
     gap: 4px;
     font-size: 0.58rem;
     color: var(--text-dark);
+  }
+
+  /* -- URL Ingestion Row ------------------------------------------------- */
+
+  .url-ingest-row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .url-ingest-box {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #08080C;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 4px 8px;
+    transition: border-color 0.2s ease;
+  }
+
+  .url-ingest-box:focus-within {
+    border-color: var(--accent-cyan);
+  }
+
+  .url-ingest-input {
+    background: none;
+    border: none;
+    color: var(--text-bright);
+    font-family: var(--font-sans);
+    font-size: 0.7rem;
+    flex-grow: 1;
+    min-width: 0;
+    outline: none;
+  }
+
+  .url-ingest-input::placeholder {
+    color: var(--text-dark);
+    font-size: 0.68rem;
+  }
+
+  .url-ingest-btn {
+    background: rgba(6, 182, 212, 0.1);
+    border: 1px solid rgba(6, 182, 212, 0.25);
+    border-radius: var(--radius-sm);
+    color: var(--accent-cyan);
+    font-size: 0.68rem;
+    font-weight: 500;
+    padding: 3px 10px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.2s ease, border-color 0.2s ease;
+  }
+
+  .url-ingest-btn:hover:not(:disabled) {
+    background: rgba(6, 182, 212, 0.18);
+    border-color: var(--accent-cyan);
+  }
+
+  .url-ingest-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  /* -- Web source badge -------------------------------------------------- */
+
+  .web-source-badge {
+    color: var(--accent-cyan);
+    font-size: 0.58rem;
+    font-weight: 600;
+  }
+
+  /* -- Web Search Placeholder -------------------------------------------- */
+
+  .web-search-placeholder {
+    margin-top: auto;
+    padding-top: 10px;
+    border-top: 1px solid var(--border-color);
+  }
+
+  .coming-soon-badge {
+    margin-left: auto;
+    font-size: 0.55rem;
+    font-weight: 600;
+    letter-spacing: 0.4px;
+    color: var(--accent-violet);
+    background: rgba(139, 92, 246, 0.08);
+    border: 1px solid rgba(139, 92, 246, 0.2);
+    border-radius: 10px;
+    padding: 1px 6px;
+    text-transform: none;
+  }
+
+  .web-search-placeholder-body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 6px;
+    padding: 12px 8px;
+    background: #0B0B0F;
+    border: 1px dashed var(--border-color);
+    border-radius: var(--radius-sm);
+  }
+
+  .web-search-placeholder-body p {
+    margin: 0;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--text-muted);
+  }
+
+  .web-search-placeholder-body span {
+    font-size: 0.63rem;
+    color: var(--text-dark);
+    line-height: 1.35;
+  }
+
+  .web-search-placeholder-body code {
+    font-family: var(--font-mono);
+    color: var(--accent-cyan);
+    background: rgba(6, 182, 212, 0.08);
+    padding: 1px 4px;
+    border-radius: 3px;
   }
 </style>

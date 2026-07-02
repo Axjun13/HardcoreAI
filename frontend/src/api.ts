@@ -189,6 +189,32 @@ async createProject(name: string, description: string = "", path: string | null 
     return res.json();
   },
 
+  async scrapeUrl(url: string) {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/rag/scrape-url`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer TEST_TOKEN"
+      },
+      body: JSON.stringify({ url })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async scrapeSearch(query: string, numResults: number = 3) {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/rag/scrape-search`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer TEST_TOKEN"
+      },
+      body: JSON.stringify({ query, num_results: numResults })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
   async askAgent(query: string, conversationHistory?: any[], phase?: string, provider: string = "openrouter", buildOutput: string = "", autoApprove: boolean = false) {
     const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/agent/solve`, {
       method: "POST",
