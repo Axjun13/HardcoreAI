@@ -120,6 +120,10 @@ export interface RagDocument {
   chunks: number;
   status: "Uploading..." | "Chunking..." | "Embedding..." | "Ready in Database";
   tokens: number;
+  /** "pdf" for uploaded files, "web" for URL-scraped pages */
+  source?: "pdf" | "web";
+  /** Original URL for web-scraped documents, empty string otherwise */
+  url?: string;
 }
 
 export interface GitCommit {
@@ -1151,7 +1155,9 @@ export const actions = {
             size: sizeKb,
             chunks: 0,
             status: "Ready in Database",
-            tokens: 0
+            tokens: 0,
+            source: (doc.source as "pdf" | "web") ?? "pdf",
+            url: doc.url ?? "",
           };
         })
       }));
@@ -1215,6 +1221,59 @@ export const actions = {
       }));
     } catch (e) {
       console.error("Failed to delete doc", e);
+    }
+  },
+
+  ingestUrl: async (url: string) => {
+    const displayName = (() => {
+      try { return new URL(url).hostname; } catch { return url; }
+    })();
+    const tempId = `web__${displayName}`;
+
+    workspaceStore.update(s => ({
+      ...s,
+      ragUploadProgress: `Fetching & ingesting ${displayName}...`,
+      ragDocuments: [
+        { id: tempId, name: displayName, size: "...", chunks: 0, status: "Uploading...", tokens: 0, source: "web", url },
+        ...s.ragDocuments.filter(d => d.id !== tempId)
+      ]
+    }));
+
+    try {
+      const result = await api.scrapeUrl(url);
+      const filename: string = result.filename;
+
+      if (result.skipped) {
+        // Already ingested — just refresh the doc list.
+        workspaceStore.update(s => ({ ...s, ragUploadProgress: null }));
+        await actions.fetchRagDocuments();
+        return;
+      }
+
+      // Poll until the new file appears in the list (same pattern as uploadDocument).
+      let found = false;
+      for (let i = 0; i < 30; i++) {
+        await new Promise(r => setTimeout(r, 1000));
+        const res = await api.listRagDocuments();
+        if (res.documents.some((d: any) => (typeof d === "string" ? d : d.name) === filename)) {
+          found = true;
+          break;
+        }
+      }
+
+      await actions.fetchRagDocuments();
+      workspaceStore.update(s => ({ ...s, ragUploadProgress: null }));
+
+      if (!found) {
+        console.warn("ingestUrl: file did not appear in list within timeout, refreshed anyway.");
+      }
+    } catch (e: any) {
+      workspaceStore.update(s => ({
+        ...s,
+        ragUploadProgress: null,
+        ragDocuments: s.ragDocuments.filter(d => d.id !== tempId)
+      }));
+      alert(`Failed to ingest URL: ${e.message}`);
     }
   },
 

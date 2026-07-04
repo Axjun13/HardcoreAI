@@ -320,6 +320,58 @@ class Toolbox:
             return f"ERROR: Failed to search manuals: {e}"
 
     @tool
+    def search_and_ingest_web(self, query: str, num_results: int = 3) -> str:
+        """Search the web via SearXNG for hardware/electronics information, fetch the top
+        result pages, and add them to the RAG knowledge base so you can immediately
+        query them with search_hardware_manuals.
+
+        Use this when the user asks about a component, datasheet, or specification that
+        is not already in the uploaded documents. After calling this tool, call
+        search_hardware_manuals with the same query to retrieve the ingested content.
+
+        Returns a plain-text summary of what was ingested (or any errors encountered).
+        """
+        if not self.user_id or not self.project_id:
+            return "ERROR: user_id or project_id is not set. Cannot access the project knowledge base."
+        from rag import RAGService
+        try:
+            svc = RAGService(user_id=str(self.user_id), project_id=str(self.project_id))
+
+            # Step 1: Search SearXNG for relevant pages.
+            results = svc.search_web(query, num_results=int(num_results))
+            if not results:
+                return "Web search returned no results. Is SearXNG running at the configured SEARXNG_URL?"
+            if results and results[0].get("error"):
+                return f"Web search failed: {results[0]['error']}"
+
+            # Step 2: Ingest each result page into the RAG index.
+            lines = [f"Web search for '{query}' returned {len(results)} result(s):"]
+            ingested = 0
+            for i, r in enumerate(results, start=1):
+                url = r.get("url", "")
+                title = r.get("title", url)
+                if not url:
+                    continue
+                ingest_result = svc.ingest_url(url)
+                if ingest_result.get("skipped"):
+                    lines.append(f"  [{i}] SKIPPED (already indexed): {title} — {url}")
+                elif ingest_result.get("error"):
+                    lines.append(f"  [{i}] ERROR: {ingest_result['error']} — {url}")
+                else:
+                    size_kb = ingest_result.get("size", 0) // 1024
+                    lines.append(f"  [{i}] INGESTED ({size_kb} KB): {title} — {url}")
+                    ingested += 1
+
+            lines.append("")
+            lines.append(
+                f"Ingested {ingested} new page(s). "
+                "Now call search_hardware_manuals with your original query to retrieve the content."
+            )
+            return "\n".join(lines)
+        except Exception as e:
+            return f"ERROR: search_and_ingest_web failed: {e}"
+
+    @tool
     def read_build_output(self) -> str:
         """Read the log of a PREVIOUS build (does NOT compile; use build() to compile)."""
         output = (self.build_output or "").strip()
