@@ -24,7 +24,9 @@ from __future__ import annotations
 import inspect
 from dataclasses import dataclass, field
 from typing import Any, Callable
+import re
 
+_CODE_FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
 # ---------------------------------------------------------------------------
 # 1. PARSE ERRORS + C-STYLE CALL PARSER
 # ---------------------------------------------------------------------------
@@ -206,8 +208,6 @@ def build_tool_block(specs: list[ToolSpec]) -> str:
     return "\n".join(lines)
 
 
-import re
-
 def parse_call(
     raw: str, specs_by_name: dict[str, ToolSpec]
 ) -> tuple[str, str, dict[str, Any], str] | None:
@@ -216,9 +216,25 @@ def parse_call(
     Returns (thought, tool_name, kwargs, body), or None when no parsable CALL is
     present - in which case `raw` is the model's final answer for the phase.
     """
-    call_match = re.search(r"CALL\s+([a-zA-Z0-9_]+)\s*\(", raw, flags=re.IGNORECASE)
+    # Blank out code fences before searching so that function calls inside
+    # ```c blocks (e.g. HAL_IncTick()) are never matched as tool invocations.
+    searchable = _CODE_FENCE_RE.sub(lambda m: " " * len(m.group(0)), raw)
+
+    # Prefer a line that literally starts with CALL (anchored to line start).
+    # Fall back to anywhere outside fences only if nothing anchored is found.
+    call_match = re.search(
+        r"^CALL\s+([a-zA-Z0-9_]+)\s*\(",
+        searchable,
+        flags=re.IGNORECASE | re.MULTILINE,
+    )
     if not call_match:
-        # Check for model-specific sentinel
+        call_match = re.search(
+            r"CALL\s+([a-zA-Z0-9_]+)\s*\(",
+            searchable,
+            flags=re.IGNORECASE,
+        )
+
+    if not call_match:
         sentinel_idx = raw.find("<|tool_call>")
         if sentinel_idx == -1:
             return None
@@ -226,8 +242,16 @@ def parse_call(
         call_idx = sentinel_idx
     else:
         call_idx = call_match.start()
-        # Find the end of the line containing the CALL, or the end of the parenthesis
-        call_str_raw = raw[call_idx + 4:].lstrip(":= ").strip()
+        # Only take the rest of the CALL line (up to newline), not the entire
+        # remainder of the response. Without this, multiline output after the
+        # CALL line (e.g. unfenced code) causes the paren-matcher to find the
+        # first ( in the body — like HAL_IncTick() — instead of the actual
+        # tool argument list.
+        call_line_end = raw.find("\n", call_idx)
+        if call_line_end == -1:
+            call_line_end = len(raw)
+        call_line = raw[call_idx:call_line_end]
+        call_str_raw = call_line[4:].lstrip(":= ").strip()
 
     # Find the matching closing parenthesis for the call
     open_idx = call_str_raw.find("(")
@@ -257,10 +281,12 @@ def parse_call(
                         end_idx = i
                         break
             i += 1
-        
+
         if end_idx != -1:
             call_str = call_str_raw[:end_idx + 1]
-            body = call_str_raw[end_idx + 1:].strip()
+            # Body is the fenced code block that follows the CALL line,
+            # not anything trailing on the same line after the closing paren.
+            body = raw[raw.find("\n", call_idx) + 1:].strip() if "\n" in raw[call_idx:] else ""
         else:
             call_str = call_str_raw
             body = ""
@@ -268,15 +294,14 @@ def parse_call(
         call_str = call_str_raw
         body = ""
 
-    # Extract thought
+    # Extract thought from text before the CALL line
     pre_call = raw[:call_idx]
     think_match = re.search(r"THINK:?\s*(.*)", pre_call, flags=re.IGNORECASE | re.DOTALL)
     thought = think_match.group(1).strip() if think_match else ""
 
     name, kwargs = _parse_one(call_str, specs_by_name)
-    
-    return thought, name, kwargs, body
 
+    return thought, name, kwargs, body
 
 def _parse_one(
     call_str: str, specs_by_name: dict[str, ToolSpec]
@@ -422,8 +447,13 @@ async def run_phase(
     trace = AgentTrace(phase=phase)
 
     for step in range(MAX_STEPS):
-        raw = await complete_fn(messages)
-        print("RAW LLM OUTPUT:", repr(raw))
+        try:
+            raw = await complete_fn(messages)
+            print("RAW LLM OUTPUT:", repr(raw))
+        except Exception as e:
+            print("LLM CALL FAILED:", repr(e))
+            import traceback; traceback.print_exc()
+            raise
         
         try:
             parsed = parse_call(raw, specs_by_name)
