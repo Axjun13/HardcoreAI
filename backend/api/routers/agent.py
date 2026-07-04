@@ -238,6 +238,7 @@ async def agent_stream(project_id: str, payload: AgentRequest, user_id: str = De
         await queue.put(event)
 
     async def run() -> None:
+        print("RUN() STARTED")
         """Drive the agent, then enqueue the terminal `done` event with proposals.
 
         Nothing is persisted here: the agent's file changes are staged as
@@ -274,6 +275,8 @@ async def agent_stream(project_id: str, payload: AgentRequest, user_id: str = De
         except llm.LLMError as exc:
             await queue.put({"type": "error", "fatal": True, "message": f"LLM error: {exc}"})
         except Exception as exc:  # noqa: BLE001 — surface any failure to the client
+            import traceback
+            traceback.print_exc()
             await queue.put({"type": "error", "fatal": True, "message": str(exc)})
         finally:
             await queue.put(None)  # sentinel: stream complete
