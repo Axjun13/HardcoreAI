@@ -18,6 +18,7 @@ dependencies = [
     "llama-index-embeddings-fastembed>=0.6.0",
     "chromadb>=1.5.9",
     "fastembed>=0.8.0",
+    "ddgs>=6.0.0",
 ]
 
 [dependency-groups]

@@ -199,7 +199,7 @@ async def web_search(
     payload: WebSearchRequest,
     user_id: str = Depends(get_current_user_id),
 ):
-    """Query SearXNG and return result metadata without ingesting anything.
+    """Run a web search and return result metadata without ingesting anything.
 
     Useful for previewing results before deciding which pages to ingest.
     """
@@ -218,7 +218,7 @@ async def scrape_search(
     background_tasks: BackgroundTasks,
     user_id: str = Depends(get_current_user_id),
 ):
-    """Search SearXNG, fetch the top N result pages, and ingest them all.
+    """Run a web search, fetch the top N result pages, and ingest them all.
 
     The first URL is ingested synchronously so the caller gets at least one
     result in the response. The remaining URLs are queued as a background task

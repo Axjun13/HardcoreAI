@@ -321,7 +321,7 @@ class Toolbox:
 
     @tool
     def search_and_ingest_web(self, query: str, num_results: int = 3) -> str:
-        """Search the web via SearXNG for hardware/electronics information, fetch the top
+        """Search the web for hardware/electronics information, fetch the top
         result pages, and add them to the RAG knowledge base so you can immediately
         query them with search_hardware_manuals.
 
@@ -337,10 +337,10 @@ class Toolbox:
         try:
             svc = RAGService(user_id=str(self.user_id), project_id=str(self.project_id))
 
-            # Step 1: Search SearXNG for relevant pages.
+            # Step 1: Search the web for relevant pages.
             results = svc.search_web(query, num_results=int(num_results))
             if not results:
-                return "Web search returned no results. Is SearXNG running at the configured SEARXNG_URL?"
+                return "Web search returned no results for this query."
             if results and results[0].get("error"):
                 return f"Web search failed: {results[0]['error']}"
 

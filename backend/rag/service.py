@@ -19,10 +19,11 @@ implementation so callers (api/routers/rag.py, agent/tools.py) need no changes:
     === LLM-READY PROMPT CONTEXT WINDOW ===
 
 Web-scraping extensions (search_web / ingest_url):
-  - search_web(query)  → calls a self-hosted SearXNG instance (SEARXNG_URL env var)
+  - search_web(query)  → in-process web search (see rag/web_search.py): Brave
+    API when BRAVE_API_KEY is set, else the key-less DuckDuckGo backend. No
+    external server or port.
   - ingest_url(url)    → fetches the page with httpx, strips HTML, saves as a
     ``web__<slug>.txt`` file in data_dir, then re-indexes.
-  Both use only stdlib + httpx (already in requirements.txt); no new deps.
 """
 
 from __future__ import annotations
@@ -48,9 +49,6 @@ CHUNK_OVERLAP = int(os.getenv("RAG_CHUNK_OVERLAP", "64"))
 
 # Name of the Chroma collection holding a user's chunks.
 COLLECTION_NAME = "hardware_manuals"
-
-# Self-hosted SearXNG instance base URL.
-SEARXNG_URL = os.getenv("SEARXNG_URL", "http://localhost:8080")
 
 # Prefix for filenames produced by ingest_url so the list endpoint can
 # distinguish web-scraped documents from user-uploaded PDFs.
@@ -280,40 +278,21 @@ class RAGService:
     # -- web-search / url-scrape -----------------------------------------
 
     def search_web(self, query: str, num_results: int = 5) -> list[dict]:
-        """Query the self-hosted SearXNG instance and return result metadata.
+        """Run an in-process web search and return result metadata.
+
+        Delegates to ``rag.web_search.search_web`` (Brave API when
+        ``BRAVE_API_KEY`` is set, otherwise the key-less DuckDuckGo backend).
 
         Returns a list of dicts::
 
             [{"title": str, "url": str, "snippet": str}, ...]
 
-        Never raises — returns an empty list with an error key on failure so
-        the agent tool can surface a readable message.
+        Never raises — returns a single-element list with an ``error`` key on
+        failure so the agent tool can surface a readable message.
         """
-        import httpx
+        from .web_search import search_web as _search_web
 
-        endpoint = f"{SEARXNG_URL}/search"
-        params = {
-            "q": query,
-            "format": "json",
-            "language": "en",
-            "engines": "google,bing,duckduckgo",
-        }
-        try:
-            with httpx.Client(timeout=15.0) as client:
-                resp = client.get(endpoint, params=params)
-                resp.raise_for_status()
-                data = resp.json()
-        except Exception as exc:
-            return [{"error": str(exc), "title": "", "url": "", "snippet": ""}]
-
-        results = []
-        for item in data.get("results", [])[:num_results]:
-            results.append({
-                "title": item.get("title", ""),
-                "url": item.get("url", ""),
-                "snippet": item.get("content", ""),
-            })
-        return results
+        return _search_web(query, num_results=num_results)
 
     def ingest_url(self, url: str) -> dict:
         """Fetch *url*, extract plain text, and add it to the RAG index.
