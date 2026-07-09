@@ -86,8 +86,15 @@ async def debug_start(
         raise HTTPException(status_code=500, detail=f"Could not resolve project path: {e}")
 
     # Determine probe from project settings (default to ST-Link)
+    # Determine probe from project settings (default to ST-Link)
     probe = "ST-Link V2"
     board = payload.board
+    
+    if board is None:
+        from boards import device_manager
+        with db_session(user_id) as db:
+            board = device_manager.for_project(project_id, db).id
+    print(f"[DEBUG STEP32] resolved board = {board}")
 
     try:
         session = debug_svc.get_or_create_session(project_id, project_path)

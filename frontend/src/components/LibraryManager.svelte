@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { workspaceStore, actions } from "../store";
+  import { onMount } from "svelte";
+  import { workspaceStore } from "../store";
   import {
     Search,
     Package,
@@ -18,52 +19,257 @@
     User,
   } from "lucide-svelte";
 
-  // Reactive state from store
-  $: tab = $workspaceStore.libraryManagerTab;
-  $: availableLibraries = $workspaceStore.availableLibraries;
-  $: installedLibraries = $workspaceStore.installedLibraries;
-  $: libraryCategories = $workspaceStore.libraryCategories;
-  $: installStatus = $workspaceStore.libraryInstallStatus;
-  $: installError = $workspaceStore.libraryInstallError;
-  $: loading = $workspaceStore.librariesLoading;
-  $: hasProject = !!$workspaceStore.activeProjectId;
+  // ── Types ─────────────────────────────────────────────────────────────────
+  interface Library {
+    id: string;
+    name: string;
+    version: string;
+    description: string;
+    author: string;
+    category: string;
+    targets?: string[];
+    license?: string;
+    pio_name?: string;
+    note?: string;
+    homepage?: string;
+  }
 
-  // Local search state — debounced to avoid hammering the backend
-  let localSearch = $workspaceStore.librarySearchQuery;
+  // ── Constants ─────────────────────────────────────────────────────────────
+  const BASE = "http://127.0.0.1:62018";
+
+  // ── Reactive project id ───────────────────────────────────────────────────
+  $: projectId = $workspaceStore.activeProjectId;
+  $: hasProject = !!projectId;
+
+  // ── Tab state (local) ─────────────────────────────────────────────────────
+  let tab: "discover" | "installed" | "updates" = "discover";
+
+  // ── Discover state ────────────────────────────────────────────────────────
+  let availableLibraries: Library[] = [];
+  let libraryCategories: string[] = [];
+  let librarySearchQuery = "";
+  let librarySelectedCategory = "";
+  let librariesLoading = false;
+  let discoverError = "";
+  // true = showing live PlatformIO registry results, false = local curated list
+  let isRegistrySearch = false;
+  let registryTotal = 0;
+
+  // ── Installed state ───────────────────────────────────────────────────────
+  let installedLibraries: Library[] = [];
+  let installedLoading = false;
+  let installedError = "";
+
+  // ── Per-library op tracking ───────────────────────────────────────────────
+  // "idle" | "confirming" | "installing" | "removing" | "error"
+  let opStatus: Record<string, string> = {};
+  let opError: Record<string, string> = {};
+
+  // ── Expand state ──────────────────────────────────────────────────────────
+  let expandedLibrary: string | null = null;
+
+  // ── Search debounce ───────────────────────────────────────────────────────
   let searchTimer: ReturnType<typeof setTimeout>;
+
+  // ── Derived ───────────────────────────────────────────────────────────────
+  // Keep both id-based and pio_name-based sets so discover cards (keyed by id)
+  // correctly reflect installed state (stored by pio_name in platformio.ini).
+  $: installedByPioName = new Set(
+    installedLibraries.map((l) => l.pio_name).filter(Boolean),
+  );
+  $: installedById = new Set(
+    installedLibraries.map((l) => l.id).filter(Boolean),
+  );
+  $: installedByName = new Set(
+    installedLibraries.map((l) => l.name?.toLowerCase().trim()).filter(Boolean),
+  );
+
+  function isLibraryInstalled(lib: Library): boolean {
+    // Match by id OR by pio_name — whichever column the backend returns —
+    // and fall back to name match in case id/pio_name aren't stable across
+    // the discover and installed endpoints.
+    return (
+      installedById.has(lib.id) ||
+      (!!lib.pio_name && installedByPioName.has(lib.pio_name)) ||
+      installedByName.has(lib.name?.toLowerCase().trim())
+    );
+  }
+
+  function getInstallStatus(
+    lib: Library,
+  ): "idle" | "confirming" | "installing" | "installed" | "error" {
+    if (isLibraryInstalled(lib)) return "installed";
+    const s = opStatus[lib.id];
+    if (s === "installing") return "installing";
+    if (s === "error") return "error";
+    return "idle";
+  }
+
+  // ── API helpers ───────────────────────────────────────────────────────────
+  async function fetchAvailableLibraries() {
+    librariesLoading = true;
+    discoverError = "";
+    try {
+      const q = librarySearchQuery.trim();
+
+      if (q) {
+        // ── Live PlatformIO registry search ──────────────────────────────
+        isRegistrySearch = true;
+        const params = new URLSearchParams({ query: q });
+        const res = await fetch(`${BASE}/api/libraries/search?${params}`, {
+          cache: "no-store",
+        });
+        if (!res.ok) throw new Error(`Registry HTTP ${res.status}`);
+        const results: Library[] = await res.json();
+        registryTotal = results.length;
+        // Category filter applied client-side on registry results
+        availableLibraries = librarySelectedCategory
+          ? results.filter(
+              (l) =>
+                l.category?.toLowerCase() ===
+                librarySelectedCategory.toLowerCase(),
+            )
+          : results;
+      } else {
+        // ── Browse local curated registry ─────────────────────────────────
+        isRegistrySearch = false;
+        registryTotal = 0;
+        const params = new URLSearchParams();
+        if (librarySelectedCategory)
+          params.set("category", librarySelectedCategory);
+        const res = await fetch(`${BASE}/api/libraries?${params}`, {
+          cache: "no-store",
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        availableLibraries = await res.json();
+      }
+    } catch (e: any) {
+      discoverError = e.message ?? "Failed to load libraries.";
+    } finally {
+      librariesLoading = false;
+    }
+  }
+
+  async function fetchCategories() {
+    try {
+      const res = await fetch(`${BASE}/api/libraries/categories`);
+      if (!res.ok) return;
+      libraryCategories = await res.json();
+    } catch {}
+  }
+
+  async function fetchInstalledLibraries() {
+    if (!projectId) return;
+    installedLoading = true;
+    installedError = "";
+    try {
+      const res = await fetch(`${BASE}/api/projects/${projectId}/libraries`, {
+        cache: "no-store",
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      installedLibraries = await res.json();
+    } catch (e: any) {
+      installedError = "Could not load installed libraries.";
+    } finally {
+      installedLoading = false;
+    }
+  }
+
+  async function refreshAll() {
+    await Promise.all([fetchAvailableLibraries(), fetchInstalledLibraries()]);
+  }
+
+  // ── Actions ───────────────────────────────────────────────────────────────
+  function setLibraryManagerTab(t: "discover" | "installed" | "updates") {
+    tab = t;
+    if (t === "installed" || t === "discover") fetchInstalledLibraries();
+  }
+
+  function setLibrarySearch(val: string) {
+    librarySearchQuery = val;
+  }
+
+  function setLibraryCategory(cat: string) {
+    librarySelectedCategory = cat;
+  }
 
   function onSearch(e: Event) {
     const val = (e.target as HTMLInputElement).value;
-    localSearch = val;
+    librarySearchQuery = val;
     clearTimeout(searchTimer);
-    actions.setLibrarySearch(val);
     searchTimer = setTimeout(() => {
-      actions.fetchAvailableLibraries();
+      fetchAvailableLibraries();
     }, 300);
   }
 
   function onCategoryFilter(cat: string) {
-    const current = $workspaceStore.librarySelectedCategory;
-    const next = current === cat ? "" : cat;
-    actions.setLibraryCategory(next);
-    actions.fetchAvailableLibraries();
+    librarySelectedCategory = librarySelectedCategory === cat ? "" : cat;
+    fetchAvailableLibraries();
   }
 
-  // Expanded card state (local)
-  let expandedLibrary: string | null = null;
   function toggleExpand(id: string) {
     expandedLibrary = expandedLibrary === id ? null : id;
   }
 
-  // Computed: mark available libraries that are installed
-  $: installedIds = new Set(installedLibraries.map((l: any) => l.id));
-
-  function getInstallStatus(id: string): "idle" | "confirming" | "installing" | "installed" | "error" {
-    if (installedIds.has(id)) return "installed";
-    return installStatus[id] ?? "idle";
+  async function installLibrary(id: string) {
+    if (!projectId) {
+      opStatus = { ...opStatus, [id]: "error" };
+      opError = { ...opError, [id]: "No project open. Open a project first." };
+      return;
+    }
+    opStatus = { ...opStatus, [id]: "installing" };
+    try {
+      const res = await fetch(
+        `${BASE}/api/projects/${projectId}/libraries/install`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ library_id: id }),
+        },
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.success === false) {
+        throw new Error(data.detail || data.message || `HTTP ${res.status}`);
+      }
+      // Refresh both lists so discover + installed reflect the new state immediately
+      await Promise.all([fetchInstalledLibraries(), fetchAvailableLibraries()]);
+      // Clear op state regardless of whether isLibraryInstalled() found a match —
+      // if the backend's id/pio_name doesn't line up with the discover entry,
+      // we don't want the card stuck showing "Installing..." forever.
+      const next = { ...opStatus };
+      delete next[id];
+      opStatus = next;
+    } catch (e: any) {
+      opStatus = { ...opStatus, [id]: "error" };
+      opError = { ...opError, [id]: e.message || "Installation failed" };
+    }
   }
 
-  // Category colour map
+  async function uninstallLibrary(id: string) {
+    if (!projectId) return;
+    opStatus = { ...opStatus, [id]: "removing" };
+    try {
+      const res = await fetch(
+        `${BASE}/api/projects/${projectId}/libraries/${id}`,
+        {
+          method: "DELETE",
+        },
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail || `HTTP ${res.status}`);
+      }
+      const next = { ...opStatus };
+      delete next[id];
+      opStatus = next;
+      await fetchInstalledLibraries();
+    } catch (e: any) {
+      opStatus = { ...opStatus, [id]: "error" };
+      opError = { ...opError, [id]: e.message || "Removal failed" };
+    }
+  }
+
+  // ── Category colour map ───────────────────────────────────────────────────
   const categoryColors: Record<string, string> = {
     RTOS: "var(--accent-violet)",
     CMSIS: "var(--accent-cyan)",
@@ -80,6 +286,16 @@
   function categoryColor(cat: string) {
     return categoryColors[cat] ?? "var(--text-muted)";
   }
+
+  // ── Init ──────────────────────────────────────────────────────────────────
+  onMount(() => {
+    fetchCategories();
+    fetchAvailableLibraries();
+    fetchInstalledLibraries();
+  });
+
+  // Re-fetch installed when project changes
+  $: if (projectId) fetchInstalledLibraries();
 </script>
 
 <div class="lib-panel">
@@ -88,6 +304,16 @@
     <div class="lib-title-row">
       <Package size={14} style="color: var(--accent-violet);" />
       <span class="lib-title">LIBRARY MANAGER</span>
+      <!-- svelte-ignore a11y-click-events-have-key-events -->
+      <!-- svelte-ignore a11y-no-static-element-interactions -->
+      <div
+        class="lib-refresh-icon"
+        onclick={refreshAll}
+        title="Refresh"
+        style="margin-left: auto; cursor: pointer; opacity: 0.5;"
+      >
+        <RefreshCw size={12} />
+      </div>
     </div>
 
     <!-- Tab bar -->
@@ -96,7 +322,7 @@
       <!-- svelte-ignore a11y-no-static-element-interactions -->
       <div
         class="lib-tab {tab === 'discover' ? 'active' : ''}"
-        onclick={() => actions.setLibraryManagerTab("discover")}
+        onclick={() => setLibraryManagerTab("discover")}
       >
         <Search size={11} />
         Discover
@@ -105,7 +331,7 @@
       <!-- svelte-ignore a11y-no-static-element-interactions -->
       <div
         class="lib-tab {tab === 'installed' ? 'active' : ''}"
-        onclick={() => actions.setLibraryManagerTab("installed")}
+        onclick={() => setLibraryManagerTab("installed")}
       >
         <PackageCheck size={11} />
         Installed
@@ -117,7 +343,7 @@
       <!-- svelte-ignore a11y-no-static-element-interactions -->
       <div
         class="lib-tab {tab === 'updates' ? 'active' : ''}"
-        onclick={() => actions.setLibraryManagerTab("updates")}
+        onclick={() => setLibraryManagerTab("updates")}
       >
         <RefreshCw size={11} />
         Updates
@@ -132,21 +358,52 @@
       <input
         type="text"
         class="lib-search-input"
-        placeholder="Search libraries..."
-        value={localSearch}
+        placeholder="Search PlatformIO registry..."
+        value={librarySearchQuery}
         oninput={onSearch}
       />
+      {#if librarySearchQuery}
+        <!-- svelte-ignore a11y-click-events-have-key-events -->
+        <!-- svelte-ignore a11y-no-static-element-interactions -->
+        <div
+          style="cursor:pointer; color: var(--text-muted); flex-shrink:0; padding: 2px;"
+          onclick={() => {
+            librarySearchQuery = "";
+            fetchAvailableLibraries();
+          }}
+          title="Clear search"
+        >
+          ✕
+        </div>
+      {/if}
     </div>
 
-    <!-- Category chips -->
-    {#if libraryCategories.length > 0}
+    <!-- Source indicator -->
+    {#if isRegistrySearch}
+      <div class="lib-source-badge">
+        <span class="lib-source-dot live"></span>
+        PlatformIO Registry · {registryTotal} result{registryTotal === 1
+          ? ""
+          : "s"}
+      </div>
+    {:else}
+      <div class="lib-source-badge">
+        <span class="lib-source-dot local"></span>
+        Curated · type to search registry
+      </div>
+    {/if}
+
+    <!-- Category chips (shown in browse mode only) -->
+    {#if !isRegistrySearch && libraryCategories.length > 0}
       <div class="lib-categories">
         {#each libraryCategories as cat}
           <!-- svelte-ignore a11y-click-events-have-key-events -->
           <!-- svelte-ignore a11y-no-static-element-interactions -->
           <div
-            class="lib-cat-chip {$workspaceStore.librarySelectedCategory === cat ? 'active' : ''}"
-            style={$workspaceStore.librarySelectedCategory === cat
+            class="lib-cat-chip {librarySelectedCategory === cat
+              ? 'active'
+              : ''}"
+            style={librarySelectedCategory === cat
               ? `background: ${categoryColor(cat)}22; border-color: ${categoryColor(cat)}; color: ${categoryColor(cat)};`
               : ""}
             onclick={() => onCategoryFilter(cat)}
@@ -157,27 +414,57 @@
       </div>
     {/if}
 
+    <!-- Error banner -->
+    {#if discoverError}
+      <div class="lib-error-banner">
+        <AlertCircle size={12} style="flex-shrink:0;" />
+        {discoverError}
+      </div>
+    {/if}
+
     <!-- Library list -->
     <div class="lib-list">
-      {#if loading}
+      {#if librariesLoading}
         <div class="lib-empty-state">
-          <Loader size={20} style="animation: spin 1s linear infinite; color: var(--accent-violet);" />
-          <span>Loading libraries...</span>
+          <Loader
+            size={20}
+            style="animation: spin 1s linear infinite; color: var(--accent-violet);"
+          />
+          <span
+            >{isRegistrySearch
+              ? "Searching registry..."
+              : "Loading libraries..."}</span
+          >
+        </div>
+      {:else if availableLibraries.length === 0 && isRegistrySearch}
+        <div class="lib-empty-state">
+          <Package size={28} style="color: var(--text-muted); opacity: 0.4;" />
+          <span>No results for "{librarySearchQuery}"</span>
+          <span
+            style="font-size: 0.68rem; color: var(--text-muted); opacity: 0.6;"
+            >Try a different keyword</span
+          >
         </div>
       {:else if availableLibraries.length === 0}
         <div class="lib-empty-state">
           <Package size={28} style="color: var(--text-muted); opacity: 0.4;" />
           <span>No libraries found</span>
-          <span style="font-size: 0.68rem; color: var(--text-muted); opacity: 0.6;">Try a different search or category</span>
+          <span
+            style="font-size: 0.68rem; color: var(--text-muted); opacity: 0.6;"
+            >Try a different search or category</span
+          >
         </div>
       {:else}
         {#each availableLibraries as lib (lib.id)}
-          {@const status = getInstallStatus(lib.id)}
+          {@const status = getInstallStatus(lib)}
           {@const isExpanded = expandedLibrary === lib.id}
           <!-- svelte-ignore a11y-click-events-have-key-events -->
           <!-- svelte-ignore a11y-no-static-element-interactions -->
           <div
-            class="lib-card {isExpanded ? 'expanded' : ''} {status === 'installed' ? 'lib-card-installed' : ''}"
+            class="lib-card {isExpanded ? 'expanded' : ''} {status ===
+            'installed'
+              ? 'lib-card-installed'
+              : ''}"
             onclick={() => toggleExpand(lib.id)}
           >
             <!-- Card top row -->
@@ -185,7 +472,11 @@
               <div class="lib-card-left">
                 <div class="lib-name-row">
                   <span class="lib-name">{lib.name}</span>
-                  <span class="lib-version-badge">v{lib.version}</span>
+                  {#if lib.version}
+                    <span class="lib-version-badge">
+                      v{lib.version}
+                    </span>
+                  {/if}
                   {#if status === "installed"}
                     <span class="lib-installed-badge">
                       <CheckCircle2 size={10} /> Installed
@@ -195,49 +486,46 @@
                 <div class="lib-meta-row">
                   <span class="lib-meta-item" title="Author">
                     <User size={9} style="opacity:0.5;" />
-                    {lib.author}
+                    {lib.author || "Unknown"}
                   </span>
                   <span
                     class="lib-cat-tag"
-                    style="color: {categoryColor(lib.category)}; border-color: {categoryColor(lib.category)}40;"
+                    style="color: {categoryColor(
+                      lib.category,
+                    )}; border-color: {categoryColor(lib.category)}40;"
                   >
                     <Tag size={9} />
-                    {lib.category}
+                    {lib.category || "Library"}
                   </span>
                 </div>
               </div>
+
               <div class="lib-card-right" onclick={(e) => e.stopPropagation()}>
-                <!-- Install button state machine -->
                 {#if status === "idle"}
                   {#if hasProject}
                     <button
                       class="lib-install-btn"
-                      onclick={() => actions.confirmInstallLibrary(lib.id)}
+                      onclick={() => installLibrary(lib.id)}
                     >
                       <PackagePlus size={11} />
                       Install
                     </button>
                   {:else}
-                    <button class="lib-install-btn" disabled title="Open a project first">
+                    <button
+                      class="lib-install-btn"
+                      disabled
+                      title="Open a project first"
+                    >
                       <PackagePlus size={11} />
                       Install
                     </button>
                   {/if}
-                {:else if status === "confirming"}
-                  <div class="lib-confirm-row">
-                    <span class="lib-confirm-text">Add to project?</span>
-                    <button
-                      class="lib-confirm-btn yes"
-                      onclick={() => actions.installLibrary(lib.id)}
-                    >Yes</button>
-                    <button
-                      class="lib-confirm-btn no"
-                      onclick={() => actions.cancelInstallLibrary(lib.id)}
-                    >No</button>
-                  </div>
                 {:else if status === "installing"}
                   <div class="lib-installing-indicator">
-                    <Loader size={11} style="animation: spin 1s linear infinite;" />
+                    <Loader
+                      size={11}
+                      style="animation: spin 1s linear infinite;"
+                    />
                     <span>Installing...</span>
                   </div>
                 {:else if status === "installed"}
@@ -246,15 +534,33 @@
                     <span>Installed</span>
                   </div>
                 {:else if status === "error"}
-                  <button
-                    class="lib-install-btn error"
-                    title={installError[lib.id] || "Install failed"}
-                    onclick={() => actions.confirmInstallLibrary(lib.id)}
+                  <div
+                    style="display:flex; flex-direction:column; align-items:flex-end; gap:3px;"
                   >
-                    <AlertCircle size={11} />
-                    Retry
-                  </button>
+                    <button
+                      class="lib-install-btn error"
+                      title={opError[lib.id] || "Install failed"}
+                      onclick={() => installLibrary(lib.id)}
+                    >
+                      <AlertCircle size={11} />
+                      Retry
+                    </button>
+                    {#if opError[lib.id]}
+                      <span class="lib-op-error">{opError[lib.id]}</span>
+                    {/if}
+                  </div>
                 {/if}
+
+                {#if opStatus[lib.id] === "removing"}
+                  <div class="lib-installing-indicator">
+                    <Loader
+                      size={11}
+                      style="animation: spin 1s linear infinite;"
+                    />
+                    <span>Removing...</span>
+                  </div>
+                {/if}
+
                 <div class="lib-expand-icon">
                   {#if isExpanded}
                     <ChevronDown size={13} style="color: var(--text-muted);" />
@@ -270,7 +576,7 @@
               <div class="lib-card-detail" onclick={(e) => e.stopPropagation()}>
                 <p class="lib-description">{lib.description}</p>
                 <div class="lib-detail-meta">
-                  {#if lib.targets?.length > 0}
+                  {#if lib.targets && lib.targets.length > 0}
                     <div class="lib-detail-row">
                       <Cpu size={10} style="color: var(--text-muted);" />
                       <span class="lib-detail-label">Targets:</span>
@@ -292,12 +598,19 @@
                     <div class="lib-detail-row">
                       <Package size={10} style="color: var(--text-muted);" />
                       <span class="lib-detail-label">PIO:</span>
-                      <span class="lib-detail-value" style="font-family: 'JetBrains Mono', monospace; font-size: 0.65rem;">{lib.pio_name}</span>
+                      <span
+                        class="lib-detail-value"
+                        style="font-family: 'JetBrains Mono', monospace; font-size: 0.65rem;"
+                        >{lib.pio_name}</span
+                      >
                     </div>
                   {/if}
                   {#if lib.note}
                     <div class="lib-note">
-                      <AlertCircle size={10} style="color: #f59e0b; flex-shrink:0;" />
+                      <AlertCircle
+                        size={10}
+                        style="color: #f59e0b; flex-shrink:0;"
+                      />
                       <span>{lib.note}</span>
                     </div>
                   {/if}
@@ -321,65 +634,106 @@
       {/if}
     </div>
 
-  <!-- ── INSTALLED TAB ── -->
+    <!-- ── INSTALLED TAB ── -->
   {:else if tab === "installed"}
     <div class="lib-list" style="padding-top: 8px;">
       {#if !hasProject}
         <div class="lib-empty-state">
           <Package size={28} style="color: var(--text-muted); opacity: 0.4;" />
           <span>No project open</span>
-          <span style="font-size: 0.68rem; color: var(--text-muted); opacity: 0.6;">Open a project to see its installed libraries</span>
+          <span
+            style="font-size: 0.68rem; color: var(--text-muted); opacity: 0.6;"
+            >Open a project to see its installed libraries</span
+          >
+        </div>
+      {:else if installedLoading}
+        <div class="lib-empty-state">
+          <Loader
+            size={20}
+            style="animation: spin 1s linear infinite; color: var(--accent-violet);"
+          />
+          <span>Loading...</span>
+        </div>
+      {:else if installedError}
+        <div class="lib-error-banner">
+          <AlertCircle size={12} style="flex-shrink:0;" />
+          {installedError}
         </div>
       {:else if installedLibraries.length === 0}
         <div class="lib-empty-state">
-          <PackagePlus size={28} style="color: var(--text-muted); opacity: 0.4;" />
+          <PackagePlus
+            size={28}
+            style="color: var(--text-muted); opacity: 0.4;"
+          />
           <span>No libraries installed</span>
-          <span style="font-size: 0.68rem; color: var(--text-muted); opacity: 0.6;">Use the Discover tab to install libraries</span>
+          <span
+            style="font-size: 0.68rem; color: var(--text-muted); opacity: 0.6;"
+            >Use the Discover tab to install libraries</span
+          >
         </div>
       {:else}
         {#each installedLibraries as lib (lib.id)}
+          {@const removing = opStatus[lib.id] === "removing"}
+          {@const err = opError[lib.id]}
           <div class="lib-installed-row">
             <div class="lib-installed-info">
               <div class="lib-installed-name">
-                <PackageCheck size={12} style="color: #10b981; flex-shrink: 0;" />
+                <PackageCheck
+                  size={12}
+                  style="color: #10b981; flex-shrink: 0;"
+                />
                 <span>{lib.name}</span>
                 <span class="lib-version-badge">{lib.version ?? "custom"}</span>
               </div>
               <div class="lib-meta-row" style="padding-left: 4px;">
                 <span
                   class="lib-cat-tag"
-                  style="color: {categoryColor(lib.category)}; border-color: {categoryColor(lib.category)}40;"
+                  style="color: {categoryColor(
+                    lib.category,
+                  )}; border-color: {categoryColor(lib.category)}40;"
                 >
                   <Tag size={9} />
                   {lib.category}
                 </span>
-                {#if lib.targets?.length > 0}
+                {#if lib.targets && lib.targets.length > 0}
                   {#each lib.targets.slice(0, 2) as t}
                     <span class="lib-target-chip">{t}</span>
                   {/each}
                 {/if}
               </div>
+              {#if err}
+                <span class="lib-op-error" style="padding-left:4px;">{err}</span
+                >
+              {/if}
             </div>
             <button
               class="lib-uninstall-btn"
               title="Uninstall {lib.name}"
-              onclick={() => actions.uninstallLibrary(lib.id)}
+              disabled={removing}
+              onclick={() => uninstallLibrary(lib.id)}
             >
-              <Trash2 size={12} />
+              {#if removing}
+                <Loader size={12} style="animation: spin 1s linear infinite;" />
+              {:else}
+                <Trash2 size={12} />
+              {/if}
             </button>
           </div>
         {/each}
       {/if}
     </div>
 
-  <!-- ── UPDATES TAB ── -->
+    <!-- ── UPDATES TAB ── -->
   {:else if tab === "updates"}
     <div class="lib-list">
       <div class="lib-empty-state" style="padding-top: 40px;">
         <RefreshCw size={28} style="color: var(--text-muted); opacity: 0.3;" />
         <span style="color: var(--text-muted);">Update checking</span>
-        <span style="font-size: 0.68rem; color: var(--text-muted); opacity: 0.55; text-align: center; max-width: 160px; line-height: 1.5;">
-          Coming soon — automatically detect when installed libraries have newer versions available.
+        <span
+          style="font-size: 0.68rem; color: var(--text-muted); opacity: 0.55; text-align: center; max-width: 160px; line-height: 1.5;"
+        >
+          Coming soon — automatically detect when installed libraries have newer
+          versions available.
         </span>
       </div>
     </div>
@@ -415,6 +769,11 @@
     color: var(--text-muted);
   }
 
+  .lib-refresh-icon:hover {
+    opacity: 1 !important;
+    color: var(--accent-violet);
+  }
+
   /* Tabs */
   .lib-tabs {
     display: flex;
@@ -432,7 +791,9 @@
     color: var(--text-muted);
     cursor: pointer;
     border-bottom: 2px solid transparent;
-    transition: color 0.15s, border-color 0.15s;
+    transition:
+      color 0.15s,
+      border-color 0.15s;
     user-select: none;
     white-space: nowrap;
   }
@@ -483,6 +844,32 @@
     opacity: 0.6;
   }
 
+  /* Source indicator */
+  .lib-source-badge {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 12px;
+    font-size: 0.62rem;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border-color);
+    opacity: 0.7;
+    flex-shrink: 0;
+  }
+  .lib-source-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .lib-source-dot.live {
+    background: #10b981;
+    box-shadow: 0 0 4px #10b981;
+  }
+  .lib-source-dot.local {
+    background: var(--text-muted);
+  }
+
   /* Category chips */
   .lib-categories {
     display: flex;
@@ -511,6 +898,28 @@
 
   .lib-cat-chip.active {
     font-weight: 600;
+  }
+
+  /* Error banner */
+  .lib-error-banner {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 12px;
+    font-size: 0.68rem;
+    color: #f87171;
+    background: rgba(239, 68, 68, 0.07);
+    border-bottom: 1px solid rgba(239, 68, 68, 0.2);
+    flex-shrink: 0;
+  }
+
+  /* Per-card inline error */
+  .lib-op-error {
+    font-size: 0.6rem;
+    color: #f87171;
+    max-width: 140px;
+    word-break: break-word;
+    line-height: 1.3;
   }
 
   /* Library list */
@@ -584,7 +993,7 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 130px;
+    max-width: 220px;
   }
 
   .lib-version-badge {
@@ -594,7 +1003,7 @@
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid var(--border-color);
     color: var(--text-muted);
-    font-family: 'JetBrains Mono', monospace;
+    font-family: "JetBrains Mono", monospace;
     white-space: nowrap;
     flex-shrink: 0;
   }
@@ -866,14 +1275,23 @@
     align-items: center;
   }
 
-  .lib-uninstall-btn:hover {
+  .lib-uninstall-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .lib-uninstall-btn:hover:not(:disabled) {
     background: rgba(239, 68, 68, 0.1);
     border-color: rgba(239, 68, 68, 0.3);
     color: #ef4444;
   }
 
   @keyframes spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
   }
 </style>

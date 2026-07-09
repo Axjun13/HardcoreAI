@@ -61,6 +61,7 @@ class ProjectRow(SQLModel, table=True):
     id: int | None = SQLField(default=None, primary_key=True)
     name: str
     description: str = ""
+    board_id: str = SQLField(default="bluepill_f103c8")
     user_id: UUID | None = SQLField(default=None)
     path: str | None = SQLField(default=None)
     viewport: dict[str, Any] = SQLField(

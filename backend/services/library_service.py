@@ -1,26 +1,20 @@
 """Library service — install, uninstall, and list embedded libraries for a project.
 
-Libraries are installed by:
-  1. Running `pio pkg install --library "<pio_name>"` in the project workspace.
-  2. Adding the library to the [env] `lib_deps` section of platformio.ini.
-
-For custom Git URLs, step 1 uses the URL directly and step 2 records the URL.
-This makes the install idempotent: re-running `pio run` always resolves deps.
-
-The service is intentionally structured so that install() can be wrapped in a
-background thread + SSE stream later without any changes to this module.
+Libraries are registered as lib_deps in platformio.ini.  PlatformIO resolves
+and downloads them automatically on the next `pio run` / build.  We do NOT run
+`pio pkg install` here because that command requires a fully-configured [env:]
+section and fails with ProjectEnvsNotAvailableError on fresh or partially-set-up
+projects.  Writing to lib_deps is idempotent and always safe.
 """
 
 from __future__ import annotations
 
 import json
 import re
-import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
-from services.hardware import ensure_platformio, workspace_dir, ensure_platformio_ini, DEFAULT_BOARD
+from services.hardware import workspace_dir, ensure_platformio_ini, DEFAULT_BOARD
 
 # ---------------------------------------------------------------------------
 # Registry helpers
@@ -37,7 +31,8 @@ def load_registry() -> list[dict[str, Any]]:
     global _registry_cache
     if _registry_cache is None:
         with open(_REGISTRY_PATH, encoding="utf-8") as f:
-            _registry_cache = json.load(f)
+            data = json.load(f)
+        _registry_cache = data if isinstance(data, list) else []
     return _registry_cache
 
 
@@ -51,8 +46,8 @@ def search_registry(query: str = "", category: str = "") -> list[dict[str, Any]]
     libs = load_registry()
     if category:
         libs = [lib for lib in libs if lib.get("category", "").lower() == category.lower()]
-    if query:
-        q = query.lower()
+    q = query.lower().strip()
+    if q:
         libs = [
             lib for lib in libs
             if q in lib["name"].lower()
@@ -60,7 +55,13 @@ def search_registry(query: str = "", category: str = "") -> list[dict[str, Any]]
             or q in lib.get("category", "").lower()
             or q in lib.get("author", "").lower()
         ]
-    return libs
+    return sorted(
+        libs,
+        key=lambda lib: (
+            not lib["name"].lower().startswith(q) if q else False,
+            lib["name"].lower(),
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -78,7 +79,6 @@ def _get_lib_deps(ini_content: str) -> list[str]:
     if not match:
         return []
     raw = match.group(1)
-    # Each dep is either on the same line (comma-separated) or on indented continuation lines
     entries = re.split(r"[,\n]", raw)
     return [e.strip() for e in entries if e.strip()]
 
@@ -89,7 +89,6 @@ def _set_lib_deps(ini_content: str, deps: list[str]) -> str:
     new_line = f"lib_deps =\n    {dep_block}" if deps else "lib_deps ="
 
     if re.search(r"lib_deps\s*=", ini_content):
-        # Replace the existing lib_deps block
         updated = re.sub(
             r"lib_deps\s*=\s*(.*?)(?=\n\[|\Z)",
             new_line + "\n",
@@ -98,7 +97,6 @@ def _set_lib_deps(ini_content: str, deps: list[str]) -> str:
         )
         return updated
     else:
-        # Append to the last [env:...] block
         return ini_content.rstrip() + f"\n{new_line}\n"
 
 
@@ -112,25 +110,24 @@ def install_library(
     library_id: str | None = None,
     git_url: str | None = None,
 ) -> dict[str, Any]:
-    """Install a library into the project workspace.
+    """Register a library in the project's platformio.ini lib_deps.
 
-    Pass either a `library_id` (from the registry) or a `git_url` for custom
-    libraries. Returns a dict with keys: success, message, dep_name.
-
-    Structured so this function can be run in a thread for SSE streaming later.
+    Does NOT run `pio pkg install` — PlatformIO resolves lib_deps automatically
+    on the next build, which avoids ProjectEnvsNotAvailableError on projects
+    that haven't been built yet.
     """
     workspace = workspace_dir(project_id)
     if not workspace.exists():
         return {"success": False, "message": "Workspace not found — open the project first."}
 
-    # Resolve what we're installing
+    # Resolve dep identifier
     dep_name: str | None = None
     if library_id:
         lib = get_library(library_id)
         if not lib:
             return {"success": False, "message": f"Library '{library_id}' not found in registry."}
         if lib.get("pio_name") is None:
-            # e.g. STM32 HAL is bundled with the framework — nothing to install
+            # Bundled with the framework — nothing to add to lib_deps
             return {
                 "success": True,
                 "message": lib.get("note", "Library is included with the framework automatically."),
@@ -142,50 +139,41 @@ def install_library(
     else:
         return {"success": False, "message": "Provide either library_id or git_url."}
 
-    # Ensure platformio.ini exists
+    # Ensure platformio.ini exists with at least a minimal board env
     ensure_platformio_ini(workspace, DEFAULT_BOARD)
 
-    # Check if already installed
     ini_path = workspace / "platformio.ini"
     ini_content = _read_ini(ini_path)
     current_deps = _get_lib_deps(ini_content)
+
     if dep_name in current_deps:
         return {"success": True, "message": "Library is already installed.", "dep_name": dep_name}
 
-    # Run pio pkg install
-    try:
-        pio = ensure_platformio()
-    except RuntimeError as exc:
-        return {"success": False, "message": f"PlatformIO unavailable: {exc}"}
-
-    result = subprocess.run(
-        [pio, "pkg", "install", "--library", dep_name, "-d", str(workspace)],
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
-    if result.returncode != 0:
-        err = (result.stdout + result.stderr).strip()[-1000:]
-        return {"success": False, "message": f"Install failed:\n{err}"}
-
-    # Update platformio.ini lib_deps
+    # Write dep into lib_deps — PIO will download it on next build
     updated_deps = current_deps + [dep_name]
     new_ini = _set_lib_deps(ini_content, updated_deps)
     ini_path.write_text(new_ini, encoding="utf-8")
 
-    return {"success": True, "message": f"Installed '{dep_name}' successfully.", "dep_name": dep_name}
+    return {
+        "success": True,
+        "message": f"Added '{dep_name}' to lib_deps. It will be downloaded on the next build.",
+        "dep_name": dep_name,
+    }
 
 
 def uninstall_library(project_id: str, library_id: str) -> dict[str, Any]:
     """Remove a library from the project's platformio.ini lib_deps."""
     workspace = workspace_dir(project_id)
+    if not workspace.exists():
+        return {"success": False, "message": "Workspace not found — open the project first."}
+
     lib = get_library(library_id)
     if not lib:
         return {"success": False, "message": f"Library '{library_id}' not found in registry."}
 
     dep_name = lib.get("pio_name")
     if not dep_name:
-        return {"success": False, "message": "This library cannot be uninstalled (bundled with framework)."}
+        return {"success": False, "message": "This library cannot be removed (bundled with the framework)."}
 
     ini_path = workspace / "platformio.ini"
     if not ini_path.exists():
@@ -193,6 +181,7 @@ def uninstall_library(project_id: str, library_id: str) -> dict[str, Any]:
 
     ini_content = _read_ini(ini_path)
     current_deps = _get_lib_deps(ini_content)
+
     if dep_name not in current_deps:
         return {"success": False, "message": "Library is not installed in this project."}
 
@@ -200,24 +189,11 @@ def uninstall_library(project_id: str, library_id: str) -> dict[str, Any]:
     new_ini = _set_lib_deps(ini_content, updated_deps)
     ini_path.write_text(new_ini, encoding="utf-8")
 
-    # Best-effort pio pkg uninstall (don't fail if it errors)
-    try:
-        pio = ensure_platformio()
-        subprocess.run(
-            [pio, "pkg", "uninstall", "--library", dep_name, "-d", str(workspace)],
-            capture_output=True, text=True, timeout=60,
-        )
-    except Exception:
-        pass
-
-    return {"success": True, "message": f"Uninstalled '{dep_name}'.", "dep_name": dep_name}
+    return {"success": True, "message": f"Removed '{dep_name}' from lib_deps.", "dep_name": dep_name}
 
 
 def list_installed(project_id: str) -> list[dict[str, Any]]:
-    """Return the libraries installed in this project (from platformio.ini lib_deps).
-
-    Enriches each dep_name with registry metadata when available.
-    """
+    """Return libraries registered in this project's platformio.ini lib_deps."""
     workspace = workspace_dir(project_id)
     ini_path = workspace / "platformio.ini"
     if not ini_path.exists():
@@ -234,7 +210,6 @@ def list_installed(project_id: str) -> list[dict[str, Any]]:
         if dep in pio_name_to_lib:
             result.append({**pio_name_to_lib[dep], "installed": True})
         else:
-            # Custom Git URL or unknown library — return minimal metadata
             result.append({
                 "id": dep,
                 "name": dep.split("/")[-1] if "/" in dep else dep,

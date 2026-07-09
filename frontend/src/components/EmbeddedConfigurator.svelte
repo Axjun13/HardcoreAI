@@ -275,7 +275,112 @@
     },
   };
 
-  $: specs = BOARD_SPECS[selectedBoard] ?? BOARD_SPECS["STM32F103"];
+  function formatByteSize(bytes: number | undefined | null) {
+    if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes <= 0) {
+      return "N/A";
+    }
+    const kb = bytes / 1024;
+    if (kb >= 1024) {
+      return `${(kb / 1024).toFixed(1)} MB`;
+    }
+    return `${Math.round(kb)} KB`;
+  }
+
+  $: boardMeta = $workspaceStore.selectedBoardInfo;
+  $: specs = {
+    flash: boardMeta?.flash_bytes
+      ? formatByteSize(boardMeta.flash_bytes)
+      : (BOARD_SPECS[selectedBoard]?.flash ?? BOARD_SPECS["STM32F103"].flash),
+    ram: boardMeta?.ram_bytes
+      ? formatByteSize(boardMeta.ram_bytes)
+      : (BOARD_SPECS[selectedBoard]?.ram ?? BOARD_SPECS["STM32F103"].ram),
+    speed: boardMeta?.f_cpu_hz
+      ? `${Math.round(boardMeta.f_cpu_hz / 1_000_000)} MHz`
+      : (BOARD_SPECS[selectedBoard]?.speed ?? BOARD_SPECS["STM32F103"].speed),
+    core:
+      boardMeta?.core ??
+      BOARD_SPECS[selectedBoard]?.core ??
+      BOARD_SPECS["STM32F103"].core,
+    pins:
+      boardMeta?.full_pinout?.length ??
+      BOARD_SPECS[selectedBoard]?.pins ??
+      BOARD_SPECS["STM32F103"].pins,
+    package: boardMeta?.full_pinout?.length
+      ? boardMeta.full_pinout.length === 48
+        ? "LQFP48"
+        : "Package-defined"
+      : (BOARD_SPECS[selectedBoard]?.package ??
+        BOARD_SPECS["STM32F103"].package),
+  };
+  $: boardDisplayLabel = boardMeta?.label || selectedBoard || "Selected board";
+  $: boardModel = boardMeta?.mcu || selectedBoard || "STM32";
+  $: projectName = `blinky-${(selectedBoard || "board").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`;
+  $: linkerFile = `${boardModel.replace(/[^a-zA-Z0-9]+/g, "") || "STM32"}_FLASH.ld`;
+  $: halVersion = boardMeta?.family
+    ? `STM32Cube ${boardMeta.family.replace("STM32", "")}`
+    : "STM32Cube F1";
+
+  // Oscillator + PLL setup used by each family's SystemClock_Config()
+  // template in hal_codegen.py. Mirrors the backend's per-family choices so
+  // this tab is accurate for any of the 15 supported STM32 families, not
+  // just the original F103 board.
+  const FAMILY_CLOCK: Record<string, { source: string; pll: string }> = {
+    STM32F0: {
+      source: "HSI48 (internal, 48 MHz)",
+      pll: "Direct — HSI48 used as SYSCLK",
+    },
+    STM32F1: { source: "HSE (8 MHz)", pll: "PLL ×9 (PLLMUL9)" },
+    STM32F2: {
+      source: "HSE (8 MHz, bypass via ST-LINK MCO)",
+      pll: "PLLM=8, PLLN=240, PLLP=2",
+    },
+    STM32F3: { source: "HSE (8 MHz)", pll: "PLL ×9 (PLLMUL9)" },
+    STM32F4: {
+      source: "HSE (8 MHz)",
+      pll: "PLLM=4, PLLN, PLLP=2 (board-specific N)",
+    },
+    STM32F7: { source: "HSE (8 MHz)", pll: "PLLM=4, PLLN=216, PLLP=2" },
+    STM32G0: { source: "HSI16 (internal, 16 MHz)", pll: "PLLM÷1, PLLN=8" },
+    STM32G4: {
+      source: "HSI16 (internal, 16 MHz)",
+      pll: "PLLM÷4, PLLN=85, PLLR÷2",
+    },
+    STM32H5: { source: "HSE (8 MHz, bypass)", pll: "PLLM=4, PLLN=250, PLLP=2" },
+    STM32H7: { source: "HSI (internal, 64 MHz)", pll: "PLL1, HSI-fed" },
+    STM32L0: { source: "HSI16 (internal, 16 MHz)", pll: "PLLMUL×4 / PLLDIV÷2" },
+    STM32L1: { source: "HSI16 (internal, 16 MHz)", pll: "PLLMUL×4 / PLLDIV÷2" },
+    STM32L4: { source: "MSI (4 MHz)", pll: "PLLM÷1, PLLN=40, PLLR÷2" },
+    STM32L5: { source: "MSI (4 MHz)", pll: "PLLM÷1, PLLN=55, PLLR÷2" },
+    STM32U5: { source: "MSIS (4 MHz)", pll: "PLLM÷1, PLLN=80, PLLR÷2" },
+    STM32WB: {
+      source: "MSI (4 MHz)",
+      pll: "PLLM÷1, PLLN=32, PLLR÷2 (CPU1/M4)",
+    },
+    STM32WL: { source: "MSI (4 MHz)", pll: "PLL-derived SYSCLK" },
+  };
+  $: familyClock = FAMILY_CLOCK[boardMeta?.family ?? ""] ?? {
+    source: "HSE (8 MHz)",
+    pll: "PLL (family-specific — see generated code)",
+  };
+  $: clockTreeRows = [
+    {
+      src: familyClock.source,
+      arrow: "→",
+      node: familyClock.pll,
+      result: `SYSCLK ${specs.speed}`,
+    },
+    {
+      src: "SYSCLK",
+      arrow: "→",
+      node: "AHB / APB prescalers",
+      result: `${specs.speed} domain`,
+    },
+  ];
+  $: clockSourceRows = [
+    { label: "Oscillator Source", value: familyClock.source },
+    { label: "PLL Configuration", value: familyClock.pll },
+    { label: "System Clock Speed", value: specs.speed },
+  ];
 
   function toggleCategory(id: string) {
     if (expandedCategories.has(id)) {
@@ -465,7 +570,7 @@
     <div class="ec-header-left">
       <Cpu size={13} style="color: var(--accent-violet);" />
       <span class="ec-header-title">Embedded Configurator</span>
-      <span class="ec-board-chip">STM32F103C8T6</span>
+      <span class="ec-board-chip">{boardDisplayLabel}</span>
     </div>
     <div class="ec-header-actions">
       <button
@@ -503,142 +608,163 @@
   <!-- ── PINOUT TAB ── -->
   {#if activeTab === "Pinout"}
     <div class="ec-content ec-pinout-tab">
-      <div class="ec-pinout-visual">
-        <!-- Interactive Chip Map -->
-        <div class="ec-chip-wrapper">
-          <div class="ec-chip">
-            <div class="ec-chip-notch"></div>
-
-            <!-- Top pins -->
-            <div class="ec-chip-pins ec-pins-top">
-              {#each chipPins.slice(0, 16) as pin}
-                <button
-                  type="button"
-                  class="ec-pin ec-pin-metal {pin.enabled ? 'active-pin' : ''}"
-                  style="--pin-color: {getPinColor(pin)}"
-                  onclick={() => openPinEditor(pin)}
-                  aria-label="Configure {pin.pin}"
-                  title="{pin.pin}: {pin.signal} ({pin.label})"
-                ></button>
-              {/each}
-            </div>
-
-            <!-- Bottom pins -->
-            <div class="ec-chip-pins ec-pins-bottom">
-              {#each chipPins.slice(32, 48) as pin}
-                <button
-                  type="button"
-                  class="ec-pin ec-pin-metal {pin.enabled ? 'active-pin' : ''}"
-                  style="--pin-color: {getPinColor(pin)}"
-                  onclick={() => openPinEditor(pin)}
-                  aria-label="Configure {pin.pin}"
-                  title="{pin.pin}: {pin.signal} ({pin.label})"
-                ></button>
-              {/each}
-            </div>
-
-            <!-- Left pins -->
-            <div class="ec-chip-pins ec-pins-left">
-              {#each chipPins.slice(48, 64) as pin}
-                <button
-                  type="button"
-                  class="ec-pin ec-pin-metal ec-pin-h {pin.enabled
-                    ? 'active-pin'
-                    : ''}"
-                  style="--pin-color: {getPinColor(pin)}"
-                  onclick={() => openPinEditor(pin)}
-                  aria-label="Configure {pin.pin}"
-                  title="{pin.pin}: {pin.signal} ({pin.label})"
-                ></button>
-              {/each}
-            </div>
-
-            <!-- Right pins -->
-            <div class="ec-chip-pins ec-pins-right">
-              {#each chipPins.slice(16, 32) as pin}
-                <button
-                  type="button"
-                  class="ec-pin ec-pin-metal ec-pin-h {pin.enabled
-                    ? 'active-pin'
-                    : ''}"
-                  style="--pin-color: {getPinColor(pin)}"
-                  onclick={() => openPinEditor(pin)}
-                  aria-label="Configure {pin.pin}"
-                  title="{pin.pin}: {pin.signal} ({pin.label})"
-                ></button>
-              {/each}
-            </div>
-
-            <div class="ec-chip-body">
-              <div class="ec-brand">ST</div>
-              <div class="ec-model">STM32F103C8T6</div>
-              <div class="ec-package">{specs.package}</div>
-            </div>
+      {#if $workspaceStore.pins.length === 0}
+        <div class="ec-pinout-unavailable">
+          <AlertTriangle size={28} />
+          <div class="ec-pinout-unavailable-title">
+            Pinout not verified for {boardDisplayLabel}
           </div>
+          <p>
+            We haven't hand-verified a physical pin map for this specific board
+            yet, so we're not showing one rather than guessing wrong. Peripheral
+            config below and HAL/clock generation still work normally — only the
+            pin diagram is affected.
+          </p>
         </div>
+      {:else}
+        <div class="ec-pinout-visual">
+          <!-- Interactive Chip Map -->
+          <div class="ec-chip-wrapper">
+            <div class="ec-chip">
+              <div class="ec-chip-notch"></div>
 
-        <div class="ec-pinout-legend">
-          <div class="ec-legend-item">
-            <span
-              class="ec-legend-dot"
-              style="background: var(--accent-violet);"
-            ></span>Alternate
-          </div>
-          <div class="ec-legend-item">
-            <span class="ec-legend-dot" style="background: var(--accent-cyan);"
-            ></span>Analog
-          </div>
-          <div class="ec-legend-item">
-            <span
-              class="ec-legend-dot"
-              style="background: var(--accent-success);"
-            ></span>Output
-          </div>
-          <div class="ec-legend-item">
-            <span class="ec-legend-dot" style="background: var(--text-dark);"
-            ></span>Inactive
-          </div>
-        </div>
+              <!-- Top pins -->
+              <div class="ec-chip-pins ec-pins-top">
+                {#each chipPins.slice(0, 16) as pin}
+                  <button
+                    type="button"
+                    class="ec-pin ec-pin-metal {pin.enabled
+                      ? 'active-pin'
+                      : ''}"
+                    style="--pin-color: {getPinColor(pin)}"
+                    onclick={() => openPinEditor(pin)}
+                    aria-label="Configure {pin.pin}"
+                    title="{pin.pin}: {pin.signal} ({pin.label})"
+                  ></button>
+                {/each}
+              </div>
 
-        <p
-          class="ec-hint-txt"
-          style="text-align: center; margin-top: 8px; font-size: 0.7rem; color: var(--text-muted);"
-        >
-          💡 Click on any metal pin on the microchip block above to configure
-          its configuration parameters directly!
-        </p>
-      </div>
+              <!-- Bottom pins -->
+              <div class="ec-chip-pins ec-pins-bottom">
+                {#each chipPins.slice(32, 48) as pin}
+                  <button
+                    type="button"
+                    class="ec-pin ec-pin-metal {pin.enabled
+                      ? 'active-pin'
+                      : ''}"
+                    style="--pin-color: {getPinColor(pin)}"
+                    onclick={() => openPinEditor(pin)}
+                    aria-label="Configure {pin.pin}"
+                    title="{pin.pin}: {pin.signal} ({pin.label})"
+                  ></button>
+                {/each}
+              </div>
 
-      <!-- Pinout Assignments Table -->
-      <div class="ec-pinout-list">
-        <div class="ec-section-title">Active Pin Mappings</div>
-        <div class="ec-pins-table-header">
-          <span>Pin</span>
-          <span>Signal</span>
-          <span>Mode</span>
-          <span>Alt Func</span>
-        </div>
-        {#each $workspaceStore.pins as row}
-          <!-- svelte-ignore a11y-click-events-have-key-events -->
-          <!-- svelte-ignore a11y-no-static-element-interactions -->
-          <div
-            class="ec-pin-row {row.enabled ? 'assigned' : 'unassigned'}"
-            onclick={() => openPinEditor(row)}
-            title="Edit configuration for {row.pin}"
-            style="cursor: pointer;"
+              <!-- Left pins -->
+              <div class="ec-chip-pins ec-pins-left">
+                {#each chipPins.slice(48, 64) as pin}
+                  <button
+                    type="button"
+                    class="ec-pin ec-pin-metal ec-pin-h {pin.enabled
+                      ? 'active-pin'
+                      : ''}"
+                    style="--pin-color: {getPinColor(pin)}"
+                    onclick={() => openPinEditor(pin)}
+                    aria-label="Configure {pin.pin}"
+                    title="{pin.pin}: {pin.signal} ({pin.label})"
+                  ></button>
+                {/each}
+              </div>
+
+              <!-- Right pins -->
+              <div class="ec-chip-pins ec-pins-right">
+                {#each chipPins.slice(16, 32) as pin}
+                  <button
+                    type="button"
+                    class="ec-pin ec-pin-metal ec-pin-h {pin.enabled
+                      ? 'active-pin'
+                      : ''}"
+                    style="--pin-color: {getPinColor(pin)}"
+                    onclick={() => openPinEditor(pin)}
+                    aria-label="Configure {pin.pin}"
+                    title="{pin.pin}: {pin.signal} ({pin.label})"
+                  ></button>
+                {/each}
+              </div>
+
+              <div class="ec-chip-body">
+                <div class="ec-brand">ST</div>
+                <div class="ec-model">{boardModel}</div>
+                <div class="ec-package">{specs.package}</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="ec-pinout-legend">
+            <div class="ec-legend-item">
+              <span
+                class="ec-legend-dot"
+                style="background: var(--accent-violet);"
+              ></span>Alternate
+            </div>
+            <div class="ec-legend-item">
+              <span
+                class="ec-legend-dot"
+                style="background: var(--accent-cyan);"
+              ></span>Analog
+            </div>
+            <div class="ec-legend-item">
+              <span
+                class="ec-legend-dot"
+                style="background: var(--accent-success);"
+              ></span>Output
+            </div>
+            <div class="ec-legend-item">
+              <span class="ec-legend-dot" style="background: var(--text-dark);"
+              ></span>Inactive
+            </div>
+          </div>
+
+          <p
+            class="ec-hint-txt"
+            style="text-align: center; margin-top: 8px; font-size: 0.7rem; color: var(--text-muted);"
           >
-            <span
-              class="ec-pin-id"
-              style="border-left: 3px solid {getPinColor(
-                row,
-              )}; padding-left: 6px;">{row.pin}</span
-            >
-            <span class="ec-pin-signal">{row.signal}</span>
-            <span class="ec-pin-mode">{row.mode}</span>
-            <span class="ec-pin-af">{row.af}</span>
+            💡 Click on any metal pin on the microchip block above to configure
+            its configuration parameters directly!
+          </p>
+        </div>
+
+        <!-- Pinout Assignments Table -->
+        <div class="ec-pinout-list">
+          <div class="ec-section-title">Active Pin Mappings</div>
+          <div class="ec-pins-table-header">
+            <span>Pin</span>
+            <span>Signal</span>
+            <span>Mode</span>
+            <span>Alt Func</span>
           </div>
-        {/each}
-      </div>
+          {#each $workspaceStore.pins as row}
+            <!-- svelte-ignore a11y-click-events-have-key-events -->
+            <!-- svelte-ignore a11y-no-static-element-interactions -->
+            <div
+              class="ec-pin-row {row.enabled ? 'assigned' : 'unassigned'}"
+              onclick={() => openPinEditor(row)}
+              title="Edit configuration for {row.pin}"
+              style="cursor: pointer;"
+            >
+              <span
+                class="ec-pin-id"
+                style="border-left: 3px solid {getPinColor(
+                  row,
+                )}; padding-left: 6px;">{row.pin}</span
+              >
+              <span class="ec-pin-signal">{row.signal}</span>
+              <span class="ec-pin-mode">{row.mode}</span>
+              <span class="ec-pin-af">{row.af}</span>
+            </div>
+          {/each}
+        </div>
+      {/if}
     </div>
   {/if}
 
@@ -647,7 +773,7 @@
     <div class="ec-content ec-clock-tab">
       <div class="ec-section-title">Clock Tree Configuration</div>
       <div class="ec-clock-tree">
-        {#each [{ src: "HSE (8 MHz)", arrow: "→", node: "PLL ×9 (PLLMUL9)", result: "72 MHz" }, { src: "PLL Output", arrow: "→", node: "AHB Prescaler /1", result: "SYSCLK 72 MHz" }, { src: "SYSCLK", arrow: "→", node: "APB1 Prescaler /2", result: "APB1 36 MHz" }, { src: "SYSCLK", arrow: "→", node: "APB2 Prescaler /1", result: "APB2 72 MHz" }, { src: "APB1", arrow: "→", node: "Timer × 2", result: "TIM CLK 72 MHz" }, { src: "LSI", arrow: "→", node: "IWDG Clock", result: "40 kHz" }] as row}
+        {#each clockTreeRows as row}
           <div class="ec-clock-row">
             <span class="ec-clock-src">{row.src}</span>
             <span class="ec-clock-arrow">{row.arrow}</span>
@@ -656,11 +782,15 @@
           </div>
         {/each}
       </div>
+      <div class="ec-clock-note">
+        Exact prescaler tree is family-specific — see the generated
+        SystemClock_Config() in the Project tab for the full breakdown.
+      </div>
 
       <div class="ec-section-title" style="margin-top: 16px;">
         Clock Source Frequencies
       </div>
-      {#each [{ label: "HSE Resonator", value: "8 MHz" }, { label: "Internal HSI Clock", value: "16 MHz" }, { label: "System Clock Speed", value: specs.speed }, { label: "USB Clock Source", value: "48 MHz (PLL Q=7)" }] as row}
+      {#each clockSourceRows as row}
         <div class="ec-param-row">
           <label class="ec-param-label" for={makeFieldId(row.label)}
             >{row.label}</label
@@ -983,7 +1113,7 @@
   {#if activeTab === "Project"}
     <div class="ec-content ec-project-tab">
       <div class="ec-section-title">Project Directives</div>
-      {#each [{ label: "Firmware Project Name", value: "blinky-bluepill" }, { label: "Target Toolchain compiler", value: "arm-none-eabi-gcc" }, { label: "Microcontroller Linker File", value: "STM32F103C8TX_FLASH.ld" }, { label: "Processor Heap Limit", value: "0x200" }, { label: "Processor Stack Limit", value: "0x400" }, { label: "STM32Cube HAL Version", value: "STM32CubeF1 v1.8.6" }] as row}
+      {#each [{ label: "Firmware Project Name", value: projectName }, { label: "Target Toolchain compiler", value: "arm-none-eabi-gcc" }, { label: "Microcontroller Linker File", value: linkerFile }, { label: "Processor Heap Limit", value: "0x200" }, { label: "Processor Stack Limit", value: "0x400" }, { label: "STM32Cube HAL Version", value: `${halVersion} v1.8.6` }] as row}
         <div class="ec-param-row">
           <label class="ec-param-label" for={makeFieldId(row.label)}
             >{row.label}</label

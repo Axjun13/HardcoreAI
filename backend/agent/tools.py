@@ -395,7 +395,9 @@ class Toolbox:
         write_file("src/main.c") instead.
 
         Args:
-          board:       one of STM32F401, STM32F103, STM32H743 (defaults applied otherwise).
+          board:       this project's board REGISTRY ID exactly as given in the
+                       board context block (e.g. "bluepill_f103c8", "nucleo_f446re")
+                       — NOT a bare family name like "STM32F4" or "F103".
           peripherals: comma-separated peripheral ids to enable. Supported ids:
                        rcc, gpio, usart1, usart2, spi1, i2c1, tim1, adc1, dma, nvic.
                        Example: "rcc, gpio, usart2".
@@ -403,29 +405,14 @@ class Toolbox:
         The generated files are staged as normal diff proposals for the user to
         Allow/Reject — nothing is written until approved.
 
-        IMPORTANT — board MUST match the project's MCU family, or the generated
-        #include (e.g. stm32f4xx_hal.h) will not compile. Blue Pill is STM32F103
-        (F1 family), NOT F4."""
-        from api.routers.hal_codegen import generate_hal_files, BOARD_META
+        IMPORTANT — board MUST be this project's actual board id, or the generated
+        #include / clock / DMA code will be for the wrong MCU family and will not
+        compile."""
+        from api.routers.hal_codegen import generate_hal_files, SUPPORTED_FAMILIES, UnsupportedFamilyError
 
-        # Normalize common board aliases to a supported key so a Blue Pill never
-        # silently falls through to the F4 default (which then fails to compile).
-        raw = (board or "").strip()
-        key = raw.upper().replace(" ", "").replace("-", "")
-        alias = {
-            "BLUEPILL": "STM32F103", "BLUEPILLF103C8": "STM32F103",
-            "STM32F103C8": "STM32F103", "STM32F103C8T6": "STM32F103", "F103": "STM32F103",
-            "STM32F401RE": "STM32F401", "F401": "STM32F401", "NUCLEOF401RE": "STM32F401",
-            "STM32H743": "STM32H743", "H743": "STM32H743",
-        }
-        resolved = alias.get(key, raw)
-        if resolved not in BOARD_META:
-            return (
-                f"ERROR: unsupported board '{board}'. generate_hal supports: "
-                f"{', '.join(BOARD_META)}. Map the user's board to its MCU family "
-                "first (e.g. Blue Pill -> STM32F103, F401 Nucleo -> STM32F401)."
-            )
-        board = resolved
+        board = (board or "").strip()
+        if not board:
+            return "ERROR: no board given. Pass this project's board id exactly as shown in the board context block."
 
         ids = [p.strip().lower() for p in peripherals.split(",") if p.strip()]
         if not ids:
@@ -434,6 +421,8 @@ class Toolbox:
         peripheral_dicts = [{"id": pid, "label": pid.upper(), "mode": "", "params": {}} for pid in ids]
         try:
             generated = generate_hal_files(board=board, peripherals=peripheral_dicts)
+        except UnsupportedFamilyError as exc:
+            return f"ERROR: {exc}"
         except Exception as exc:  # noqa: BLE001 — surface generation errors to the model
             return f"ERROR: HAL generation failed: {exc}"
 
@@ -923,34 +912,40 @@ class CodingToolbox(Toolbox):
 
     @tool
     def list_supported_boards(self) -> str:
-        """List all supported STM32 boards with chip details, HAL header, and default pin assignments."""
-        return """Supported STM32 boards:
+        """List STM32 families known to the registry — one representative board
+        per family — and whether HAL code generation (generate_hal) is available
+        for that family yet. Use get_board_details for a specific board's info."""
+        from boards.registry import registry
+        from api.routers.hal_codegen import is_supported_family
 
-STM32F407 Discovery (STM32F407VGT6 — Cortex-M4, up to 168 MHz)
-  Header : #include \"stm32f4xx_hal.h\"
-  LEDs   : PD12 (green), PD13 (orange), PD14 (red), PD15 (blue)
-  UART   : USART2 on PA2 (TX) / PA3 (RX)
-  Button : PA0 (active HIGH)
+        devices = registry.list()
+        if not devices:
+            return "No boards found in the registry."
 
-STM32F103C8T6 — Blue Pill (Cortex-M3, up to 72 MHz)
-  Header : #include \"stm32f1xx_hal.h\"
-  LED    : PC13 (built-in, active LOW — reset to turn ON)
-  UART   : USART1 on PA9 (TX) / PA10 (RX)
-  Button : PA0 (active HIGH)
+        # Registry.list() can return hundreds of PlatformIO-imported boards —
+        # group by family and show one representative per family rather than
+        # dumping every board into the model's context.
+        by_family: dict[str, list] = {}
+        for d in devices:
+            by_family.setdefault(d.family, []).append(d)
 
-STM32F401 Nucleo (STM32F401RET6 — Cortex-M4, up to 84 MHz)
-  Header : #include \"stm32f4xx_hal.h\"
-  LED    : PA5 (LD2, active HIGH)
-  UART   : USART2 on PA2 (TX) / PA3 (RX)
-  Button : PC13 (active LOW)
-
-STM32F446RE Nucleo (STM32F446RET6 — Cortex-M4, up to 180 MHz)
-  Header : #include \"stm32f4xx_hal.h\"
-  LED    : PA5 (LD2, active HIGH)
-  UART   : USART2 on PA2 (TX) / PA3 (RX)
-  Button : PC13 (active LOW)
-
-CRITICAL: Always use HSI oscillator. HSE is not supported by the QEMU emulator."""
+        lines = [f"Known STM32 families ({len(by_family)}, {len(devices)} total boards):", ""]
+        for family in sorted(by_family):
+            group = by_family[family]
+            rep = min(group, key=lambda d: len(d.id))  # shortest id = usually the well-known one
+            codegen = "yes" if is_supported_family(family) else "NOT YET"
+            lines.append(
+                f"{family} — {len(group)} board(s) — codegen: {codegen}\n"
+                f"  e.g. {rep.label} (id: {rep.id}) — {rep.core}, up to {rep.f_cpu_hz // 1_000_000} MHz, "
+                f"#include \\\"{rep.hal_header}\\\""
+            )
+        lines.append(
+            "\nTo get one specific board's exact id/details, ask the user which "
+            "board (or check the project's board_id) rather than guessing from this list. "
+            "When calling generate_hal(board, peripherals), pass the board's exact "
+            "registry id, not the family name."
+        )
+        return "\n\n".join(lines)
 
     @tool
     def netlist(self) -> str:

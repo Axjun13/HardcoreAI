@@ -51,17 +51,20 @@ def list_projects(user_id: str = Depends(get_current_user_id)) -> list[ProjectOu
 @router.post("/api/projects", response_model=ProjectOut)
 def create_project(payload: ProjectCreate, user_id: str = Depends(get_current_user_id)) -> ProjectOut:
     with db_session(user_id) as session:
+        from boards.registry import registry
+        resolved_board_id = payload.board_id or registry.default().id
         project = ProjectRow(
             name=payload.name.strip(),
             description=payload.description.strip(),
             user_id=UUID(user_id),
             path=payload.path,
+            board_id=resolved_board_id,
         )
         session.add(project)
         session.commit()
         session.refresh(project)
 
-        files = default_files(project.name)
+        files = default_files(project.name, resolved_board_id)
         for path, language, content in files:
             session.add(
                 CodeFileRow(project_id=project.id, path=path, language=language, content=content)

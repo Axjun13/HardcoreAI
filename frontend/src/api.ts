@@ -8,10 +8,37 @@ export const api = {
   setActiveProject(id: string) {
     activeProjectId = id;
   },
+
+  getActiveProject(): string | null {
+    return activeProjectId;
+  },
+
+  hasActiveProject(): boolean {
+    return activeProjectId !== null;
+  },
   
   // --- Projects API ---
   async getProjects() {
     const res = await fetch(`${BACKEND_URL}/api/projects`, { headers: { "Authorization": "Bearer TEST_TOKEN" } });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+  async listBoards() {
+    const res = await fetch(`${BACKEND_URL}/api/boards`, { headers: { "Authorization": "Bearer TEST_TOKEN" } });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+  async getBoard(boardId: string) {
+    const res = await fetch(`${BACKEND_URL}/api/boards/${boardId}`, { headers: { "Authorization": "Bearer TEST_TOKEN" } });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+  async setProjectBoard(projectId: string, boardId: string) {
+    const res = await fetch(`${BACKEND_URL}/api/boards/projects/${projectId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer TEST_TOKEN" },
+      body: JSON.stringify({ board_id: boardId })
+    });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
@@ -287,7 +314,20 @@ async createProject(name: string, description: string = "", path: string | null 
 
   // --- Hardware: build / flash / device detection ---
 
-  async getDeviceStatus() {
+  async getDeviceStatus(projectId?: string) {
+    const url = projectId
+      ? `${BACKEND_URL}/api/device/status?project_id=${projectId}`
+      : `${BACKEND_URL}/api/device/status`;
+    const res = await fetch(url, {
+      headers: { "Authorization": "Bearer TEST_TOKEN" }
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  // Generic chip-ID probe: ignores any selected board, reads the connected
+  // chip's DBGMCU DEV_ID, and returns { detected_family, suggested_boards }.
+  async detectConnectedBoard() {
     const res = await fetch(`${BACKEND_URL}/api/device/status`, {
       headers: { "Authorization": "Bearer TEST_TOKEN" }
     });
@@ -464,15 +504,29 @@ async createProject(name: string, description: string = "", path: string | null 
 
   // ── Debug API ──────────────────────────────────────────────────────────────
 
-  async startDebug(projectId: string, board?: string) {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/debug/start`, {
+  async startDebug(projectId: string, board: string) {
+  if (!board) {
+    throw new Error("No STM32 board selected");
+  }
+
+  const res = await fetch(
+    `${BACKEND_URL}/api/projects/${projectId}/debug/start`,
+    {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": "Bearer TEST_TOKEN" },
-      body: JSON.stringify({ board: board ?? "bluepill_f103c8" }),
-    });
-    if (!res.ok) throw new Error(await res.text());
-    return res.json();
-  },
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer TEST_TOKEN",
+      },
+      body: JSON.stringify({ board }),
+    }
+  );
+
+  if (!res.ok) {
+    throw new Error(await res.text());
+  }
+
+  return res.json();
+},
 
   async stopDebug(projectId: string) {
     const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/debug/stop`, {

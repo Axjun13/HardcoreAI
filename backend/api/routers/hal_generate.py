@@ -9,7 +9,7 @@ from core.security import get_current_user_id
 from db.models import CodeFileRow, ProjectRow
 from db.session import db_session
 from services.projects import get_project_or_404
-from .hal_codegen import generate_hal_files
+from .hal_codegen import generate_hal_files,UnsupportedFamilyError
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -53,7 +53,10 @@ def generate_hal(
             {"id": p.id, "label": p.label, "mode": p.mode, "params": p.params}
             for p in req.peripherals
         ]
-        generated = generate_hal_files(board=req.board, peripherals=peripheral_dicts)
+        try:
+            generated = generate_hal_files(board=req.board, peripherals=peripheral_dicts)
+        except UnsupportedFamilyError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
         written: list[GeneratedFile] = []
 

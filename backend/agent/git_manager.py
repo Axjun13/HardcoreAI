@@ -181,7 +181,16 @@ class GitManager:
                 rel_path = full_path.relative_to(self.workspace_dir)
                 disk_files.add(rel_path.as_posix())
 
+        # Files that are managed exclusively by library_service — never overwrite from DB
+        _DISK_OWNED = {"platformio.ini", "libraries.json"}
+
         for path, meta in files.items():
+            if Path(path).name in _DISK_OWNED:
+                # Track in disk_files so it isn't deleted, but never write
+                posix_path = Path(path).as_posix()
+                if posix_path in disk_files:
+                    disk_files.remove(posix_path)
+                continue
             content = meta.get("content", "")
             file_path = self.workspace_dir / path
             file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -192,6 +201,12 @@ class GitManager:
                 disk_files.remove(posix_path)
 
         for path in disk_files:
+            if path in (
+        "platformio.ini",
+        "libraries.json",
+    ):
+                continue
+
             file_path = self.workspace_dir / path
             if file_path.exists() and file_path.is_file():
                 file_path.unlink()
@@ -211,7 +226,7 @@ class GitManager:
                 if ignored in dirs:
                     dirs.remove(ignored)
             for f in filenames:
-                if f in ["platformio.ini", ".gitkeep"]:
+                if f == ".gitkeep":
                     continue
                 full_path = Path(root) / f
                 rel_path = full_path.relative_to(self.workspace_dir).as_posix()

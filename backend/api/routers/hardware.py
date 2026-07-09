@@ -42,16 +42,28 @@ def _sync_workspace(project_id: str, user_id: str) -> None:
 
 
 @router.get("/api/device/status")
-def device_status(user_id: str = Depends(get_current_user_id)) -> DeviceStatus:
-    """Whether an ST-Link + STM32 board is currently connected. Polled by the UI."""
-    return hardware.detect_device()
+def device_status(
+    project_id: str | None = None, user_id: str = Depends(get_current_user_id)
+) -> DeviceStatus:
+    """Whether an ST-Link + STM32 board is currently connected. Polled by the UI.
 
+    If project_id is given, probes against that project's actual target board
+    (previously this always probed using the Blue Pill's target script
+    regardless of which board the project used). If omitted, runs a generic
+    chip-ID probe and suggests a matching board instead of assuming one.
+    """
+    if project_id:
+        with db_session(user_id) as session:
+            project = get_project_or_404(session, project_id, user_id)
+            return hardware.detect_device(project.board_id, session=session)
+    return hardware.probe_connected_chip()
 
 @router.post("/api/projects/{project_id}/build")
 def build(project_id: str, user_id: str = Depends(get_current_user_id)) -> BuildResult:
     """Sync the project to disk and run a real PlatformIO build. Returns output."""
     _sync_workspace(project_id, user_id)
-    return hardware.build_project(project_id)
+    with db_session(user_id) as session:
+        return hardware.build_project(project_id, session=session)
 
 
 @router.post("/api/projects/{project_id}/build/stream")
@@ -107,4 +119,5 @@ async def build_stream(project_id: str, user_id: str = Depends(get_current_user_
 def flash(project_id: str, user_id: str = Depends(get_current_user_id)) -> FlashResult:
     """Sync, then flash via PlatformIO upload — gated on a detected device."""
     _sync_workspace(project_id, user_id)
-    return hardware.flash_project(project_id)
+    with db_session(user_id) as session:
+        return hardware.flash_project(project_id, session=session)
