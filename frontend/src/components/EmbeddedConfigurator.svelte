@@ -43,6 +43,15 @@
   let pinAf = "";
   let pinEnabled = false;
 
+  // Every full_pinout table in the backend (boards/pinout.py) is an LQFP
+  // package today — keep this in sync if a QFN/BGA/UFQFPN table is ever
+  // added there, since the count-to-name mapping stops being safe then.
+  const LQFP_PACKAGE_NAMES: Record<number, string> = {
+    48: "LQFP48",
+    64: "LQFP64",
+    144: "LQFP144",
+  };
+
   const BOARD_SPECS: Record<
     string,
     {
@@ -303,12 +312,12 @@
       BOARD_SPECS["STM32F103"].core,
     pins:
       boardMeta?.full_pinout?.length ??
+      boardMeta?.package_pins ??
       BOARD_SPECS[selectedBoard]?.pins ??
       BOARD_SPECS["STM32F103"].pins,
     package: boardMeta?.full_pinout?.length
-      ? boardMeta.full_pinout.length === 48
-        ? "LQFP48"
-        : "Package-defined"
+      ? (LQFP_PACKAGE_NAMES[boardMeta.full_pinout.length] ??
+        `${boardMeta.full_pinout.length}-pin`)
       : (BOARD_SPECS[selectedBoard]?.package ??
         BOARD_SPECS["STM32F103"].package),
   };
@@ -408,6 +417,27 @@
     peripheralConfigs = { ...peripheralConfigs };
   }
 
+  function signalsForPin(pinName: string) {
+    const meta = boardMeta?.pin_metadata?.find(
+      (pin: any) => pin.name === pinName,
+    );
+    const signals =
+      meta?.signals
+        ?.map((signal: any) => ({ name: signal.name, af: signal.af ?? "-" }))
+        ?.filter((signal: any) => signal.name && signal.name !== "GPIO") ?? [];
+    return signals.length
+      ? signals
+      : [
+          { name: "SPI1_SCK", af: "AF5" },
+          { name: "SPI1_MISO", af: "AF5" },
+          { name: "SPI1_MOSI", af: "AF5" },
+          { name: "USART2_TX", af: "AF7" },
+          { name: "USART2_RX", af: "AF7" },
+          { name: "I2C1_SCL", af: "AF4" },
+          { name: "I2C1_SDA", af: "AF4" },
+        ];
+  }
+
   // Interactive Pin Editor
   function openPinEditor(pin: PinConfig) {
     editingPin = pin;
@@ -426,7 +456,10 @@
     // Auto alternate function detection
     let af = pinAf;
     if (pinMode === "Alternate Function" && !af) {
-      af = "AF" + Math.floor(Math.random() * 4 + 4); // Simulate AF
+      af =
+        signalsForPin(editingPin.pin).find(
+          (signal: any) => signal.name === pinSignal,
+        )?.af ?? "-";
     }
 
     actions.updatePinConfig(editingPin.pin, {
@@ -483,7 +516,17 @@
     name: selectedPeripheral.toUpperCase(),
     enabled: false,
   };
-  $: chipPins = $workspaceStore.pins.slice(0, 64);
+  // No 64-pin cap — LQFP144 boards (H5/F2/H7/L5/U5 Nucleo-144s) need all
+  // their pins to show up, not just the first quarter of them. Sides are
+  // split into even quarters at whatever the real pin count is; order
+  // matches the physical top -> right -> bottom -> left walk the layout
+  // below expects.
+  $: chipPins = $workspaceStore.pins;
+  $: chipPinsPerSide = Math.max(1, Math.ceil(chipPins.length / 4));
+  $: chipPinsTop = chipPins.slice(0, chipPinsPerSide);
+  $: chipPinsRight = chipPins.slice(chipPinsPerSide, chipPinsPerSide * 2);
+  $: chipPinsBottom = chipPins.slice(chipPinsPerSide * 2, chipPinsPerSide * 3);
+  $: chipPinsLeft = chipPins.slice(chipPinsPerSide * 3, chipPinsPerSide * 4);
 
   function makeFieldId(label: string, suffix = "field") {
     return `ec-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${suffix}`;
@@ -612,7 +655,11 @@
         <div class="ec-pinout-unavailable">
           <AlertTriangle size={28} />
           <div class="ec-pinout-unavailable-title">
-            Pinout not verified for {boardDisplayLabel}
+            {#if boardMeta?.package_pins}
+              {boardMeta.package_pins}-pin package detected for {boardDisplayLabel}
+            {:else}
+              Pinout not verified for {boardDisplayLabel}
+            {/if}
           </div>
           <p>
             We haven't hand-verified a physical pin map for this specific board
@@ -625,12 +672,20 @@
         <div class="ec-pinout-visual">
           <!-- Interactive Chip Map -->
           <div class="ec-chip-wrapper">
-            <div class="ec-chip">
+            <div
+              class="ec-chip"
+              style="--pin-side-count: {chipPinsPerSide}; --chip-size: {chipPinsPerSide >
+              20
+                ? '176px'
+                : chipPinsPerSide > 12
+                  ? '140px'
+                  : '112px'}"
+            >
               <div class="ec-chip-notch"></div>
 
               <!-- Top pins -->
               <div class="ec-chip-pins ec-pins-top">
-                {#each chipPins.slice(0, 16) as pin}
+                {#each chipPinsTop as pin}
                   <button
                     type="button"
                     class="ec-pin ec-pin-metal {pin.enabled
@@ -646,7 +701,7 @@
 
               <!-- Bottom pins -->
               <div class="ec-chip-pins ec-pins-bottom">
-                {#each chipPins.slice(32, 48) as pin}
+                {#each chipPinsBottom as pin}
                   <button
                     type="button"
                     class="ec-pin ec-pin-metal {pin.enabled
@@ -662,7 +717,7 @@
 
               <!-- Left pins -->
               <div class="ec-chip-pins ec-pins-left">
-                {#each chipPins.slice(48, 64) as pin}
+                {#each chipPinsLeft as pin}
                   <button
                     type="button"
                     class="ec-pin ec-pin-metal ec-pin-h {pin.enabled
@@ -678,7 +733,7 @@
 
               <!-- Right pins -->
               <div class="ec-chip-pins ec-pins-right">
-                {#each chipPins.slice(16, 32) as pin}
+                {#each chipPinsRight as pin}
                   <button
                     type="button"
                     class="ec-pin ec-pin-metal ec-pin-h {pin.enabled
@@ -878,10 +933,18 @@
         <div class="ec-chip-and-specs">
           <!-- Static Chip display -->
           <div class="ec-chip-wrapper mini-chip">
-            <div class="ec-chip">
+            <div
+              class="ec-chip"
+              style="--pin-side-count: {chipPinsPerSide}; --chip-size: {chipPinsPerSide >
+              20
+                ? '176px'
+                : chipPinsPerSide > 12
+                  ? '140px'
+                  : '112px'}"
+            >
               <div class="ec-chip-notch"></div>
               <div class="ec-chip-pins ec-pins-top">
-                {#each chipPins.slice(0, 16) as pin}
+                {#each chipPinsTop as pin}
                   <button
                     type="button"
                     class="ec-pin ec-pin-metal {pin.enabled
@@ -895,7 +958,7 @@
                 {/each}
               </div>
               <div class="ec-chip-pins ec-pins-bottom">
-                {#each chipPins.slice(32, 48) as pin}
+                {#each chipPinsBottom as pin}
                   <button
                     type="button"
                     class="ec-pin ec-pin-metal {pin.enabled
@@ -909,7 +972,7 @@
                 {/each}
               </div>
               <div class="ec-chip-pins ec-pins-left">
-                {#each chipPins.slice(48, 64) as pin}
+                {#each chipPinsLeft as pin}
                   <button
                     type="button"
                     class="ec-pin ec-pin-metal ec-pin-h {pin.enabled
@@ -923,7 +986,7 @@
                 {/each}
               </div>
               <div class="ec-chip-pins ec-pins-right">
-                {#each chipPins.slice(16, 32) as pin}
+                {#each chipPinsRight as pin}
                   <button
                     type="button"
                     class="ec-pin ec-pin-metal ec-pin-h {pin.enabled
@@ -1224,15 +1287,13 @@
               <!-- svelte-ignore a11y-label-has-associated-control -->
               <label>Alternate Signal Map</label>
               <select class="modal-select" bind:value={pinSignal}>
-                <option value="SPI1_SCK">SPI1_SCK (Clock)</option>
-                <option value="SPI1_MISO">SPI1_MISO (Master In)</option>
-                <option value="SPI1_MOSI">SPI1_MOSI (Master Out)</option>
-                <option value="USART2_TX">USART2_TX (Transmit)</option>
-                <option value="USART2_RX">USART2_RX (Receive)</option>
-                <option value="I2C1_SCL">I2C1_SCL (I2C Clock)</option>
-                <option value="I2C1_SDA">I2C1_SDA (I2C Data)</option>
-                <option value="USB_OTG_FS_DM">USB_OTG_FS_DM</option>
-                <option value="USB_OTG_FS_DP">USB_OTG_FS_DP</option>
+                {#each signalsForPin(editingPin.pin) as signal}
+                  <option value={signal.name}>
+                    {signal.name}{signal.af && signal.af !== "-"
+                      ? ` (${signal.af})`
+                      : ""}
+                  </option>
+                {/each}
               </select>
             </div>
 
@@ -1240,10 +1301,11 @@
               <!-- svelte-ignore a11y-label-has-associated-control -->
               <label>Alternate Function Multiplexer</label>
               <select class="modal-select" bind:value={pinAf}>
-                <option value="AF4">AF4 (I2C)</option>
-                <option value="AF5">AF5 (SPI1/SPI2)</option>
-                <option value="AF7">AF7 (USART1/USART2)</option>
-                <option value="AF10">AF10 (USB)</option>
+                {#each Array.from(new Set(signalsForPin(editingPin.pin)
+                      .map((signal: any) => signal.af)
+                      .filter((af: string) => af && af !== "-"))) as af}
+                  <option value={af}>{af}</option>
+                {/each}
               </select>
             </div>
           {:else if pinMode === "Analog Mode"}

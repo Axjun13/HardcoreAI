@@ -113,6 +113,78 @@ _FAMILY_NOTES: dict[str, dict[str, str]] = {
                       "template. Some WL parts (WLE5) are single-core M4 only. If the user "
                       "asks about LoRa, SubGHz, or the radio, tell them this isn't covered here.",
     },
+    "STM32C0": {
+        "led_pin": "PA5 (Nucleo-64 convention, assumed by analogy — not confirmed per-board; "
+                    "some C0 boards are Nucleo-32 with a different LED pin, verify against the "
+                    "board's User Manual).",
+        "gpio_quirk": "Same .Alternate field shape as other post-F1 families.",
+        "clock_fields": "NO PLL on this family at all (confirmed in RM0490) — SYSCLK comes "
+                         "directly from HSI48 divided by HSIDIV, max 48 MHz. Do not generate "
+                         "PLL.* struct fields for C0, HAL_RCC_OscConfig will reject them.",
+        "dma_model": "Single DMA1 with numbered channels, no DMAMUX — entry-level part, same "
+                      "generation pattern as L0/L1/F1.",
+        "adc_notes": "Same .Resolution/.ClockPrescaler shape as other post-F1 families. "
+                      "Cortex-M0+ core has NO NVIC sub-priority — priority grouping is always 0. "
+                      "Flash wait-state count (1WS at 48 MHz) is inferred from the same-generation "
+                      "G0/F0/L0 pattern, not individually confirmed against RM0490's own table.",
+    },
+    "STM32U0": {
+        "led_pin": "PA5 (Nucleo-64 convention, assumed by analogy — not confirmed per-board; "
+                    "verify against the board's User Manual).",
+        "gpio_quirk": "Same .Alternate field shape as other post-F1 families.",
+        "clock_fields": "Newer PLLM/PLLN/PLLR field scheme (like G0/G4), NOT L0's older "
+                         "PLLMUL/PLLDIV. Generated code deliberately targets a conservative "
+                         "32 MHz SYSCLK rather than U0's documented maximum — ST's own RM0503, "
+                         "datasheet, and CubeMX disagree with each other on that number (56 vs "
+                         "64 MHz have both been cited), so don't push higher without resolving "
+                         "that discrepancy against your specific silicon revision first.",
+        "dma_model": "Assumed single DMA1 with numbered channels, no DMAMUX, by analogy with "
+                      "C0/L0 — not individually confirmed against RM0503's DMA chapter.",
+        "adc_notes": "Same .Resolution/.ClockPrescaler shape as other post-F1 families. "
+                      "Cortex-M0+ core has NO NVIC sub-priority — priority grouping is always 0.",
+    },
+    "STM32C5": {
+        "led_pin": "PA5 assumed (Nucleo-64 convention) — UNVERIFIED, C5 is brand-new, no quoted board schematic.",
+        "gpio_quirk": "Same .Alternate field shape as other post-F1 families.",
+        "clock_fields": "BEST-EFFORT: modeled on U5/H5's PLLM/N/P/Q/R scheme, conservative 48 MHz target. Not matched against a real RM/DS quote — verify before trusting.",
+        "dma_model": "BEST-EFFORT: GPDMA assumed by analogy with U5/H5, unverified.",
+        "adc_notes": "BEST-EFFORT: post-F1 ADC shape assumed. Cortex-M33, 4-bit NVIC preemption, unverified for this family.",
+    },
+    "STM32WB0": {
+        "led_pin": "PA5 assumed (Nucleo-64 convention) — UNVERIFIED.",
+        "gpio_quirk": "Same .Alternate field shape as other post-F1 families.",
+        "clock_fields": "STRUCTURAL WARNING: BLE part — like WBA, ST expects clock changes to go through its own stack helpers once radio is active, not bare HAL_RCC_ClockConfig. Generated block is HSI-only, fine for non-radio bring-up only.",
+        "dma_model": "BEST-EFFORT: single DMA1, no DMAMUX, by analogy with C0. Unverified.",
+        "adc_notes": "BEST-EFFORT, unverified. Cortex-M0+, no NVIC sub-priority.",
+    },
+    "STM32WBA": {
+        "led_pin": "PB4 assumed from board connector layout pattern — UNVERIFIED, check UM3103's actual schematic before trusting.",
+        "gpio_quirk": "Same .Alternate field shape as other post-F1 families.",
+        "clock_fields": "STRUCTURAL WARNING: ST documents a dedicated System Clock Manager (SCM) for WBA because the BLE stack force-switches the clock to 16 MHz internally during radio init — route clock changes through scm_setsystemclock(), not raw HAL_RCC_ClockConfig, once BLE is in play. Known rev-A PLL step-switch errata (ES0592) too. Generated block is safe for non-radio bring-up only.",
+        "dma_model": "BEST-EFFORT: GPDMA assumed by analogy with H5/U5, unverified.",
+        "adc_notes": "BEST-EFFORT, unverified. Cortex-M33, 4-bit NVIC preemption.",
+    },
+    "STM32U3": {
+        "led_pin": "PA5 assumed (Nucleo-64 convention) — UNVERIFIED.",
+        "gpio_quirk": "Same .Alternate field shape as other post-F1 families.",
+        "clock_fields": "BEST-EFFORT: modeled directly on U5's PLLM/N/P/Q/R scheme (U3 is U5's newer low-power sibling), conservative 48 MHz target, not matched against a quoted RM/DS example.",
+        "dma_model": "BEST-EFFORT: GPDMA assumed by analogy with U5, unverified.",
+        "adc_notes": "BEST-EFFORT, unverified. Cortex-M33, 4-bit NVIC preemption.",
+    },
+    "STM32N6": {
+        "led_pin": "PA5 placeholder — N6 has no Nucleo-64 form factor (it's the STM32N6570-DK Discovery board), near-certainly wrong. Check the DK schematic.",
+        "gpio_quirk": "Same .Alternate field shape as other post-F1 families.",
+        "clock_fields": "HIGH RISK: N6 is an AI/NPU application-class part with its own multi-PLL RCC scheme (RM0486) and an external boot-flash-loader stage this template doesn't attempt to replicate. Treat generated RCC code as a placeholder, not a working bring-up — port ST's actual STM32CubeN6 clock example in by hand.",
+        "dma_model": "BEST-EFFORT: stream-based DMA assumed by analogy with H7, unverified — N6 may use GPDMA/HPDMA instead per RM0486.",
+        "adc_notes": "BEST-EFFORT, unverified. Cortex-M55, 4-bit NVIC preemption assumed.",
+    },
+    "STM32V8": {
+        "led_pin": "PA5 placeholder — no real board exists yet (Nucleo-V8 still 'coming soon' per ST).",
+        "gpio_quirk": "Same .Alternate field shape as other post-F1 families.",
+        "clock_fields": "HIGHEST RISK IN THIS SET: V8 was only announced Nov 2025 (OEM availability Q1 2026) — no public datasheet or reference manual exists to verify anything against yet. Modeled on H7 (ST describes V8 as a non-pin-compatible H7 update) purely as a structural placeholder. Replace this whole block once ST publishes real RM/DS for V8 — do not build on these numbers.",
+        "dma_model": "BEST-EFFORT: stream-based DMA assumed by analogy with H7, unverified — V8 may use GPDMA/HPDMA instead.",
+        "adc_notes": "BEST-EFFORT, unverified. Cortex-M85, 4-bit NVIC preemption assumed.",
+    },
     "STM32F0": {
         "led_pin": "PA5 (Nucleo-F0 onboard LD2 — active HIGH)",
         "gpio_quirk": "HAS .Alternate field, same as F4/F7/L-series (unlike F1).",

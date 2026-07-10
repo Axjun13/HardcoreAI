@@ -25,6 +25,7 @@ from pathlib import Path
 import re
 
 from schemas import BuildResult, DeviceStatus, FlashResult
+from boards.detector import candidates_for_family, detect_from_workspace
 from boards.registry import registry
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
@@ -50,7 +51,7 @@ board = {board}
 framework = stm32cube
 upload_protocol = stlink
 debug_tool = stlink
-""".format(env=DEFAULT_BOARD, board=DEFAULT_BOARD)
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -274,11 +275,18 @@ def probe_connected_chip() -> DeviceStatus:
             dev_id = int(m.group(1), 16) & 0xFFF
             family = DBGMCU_IDCODE_MAP.get(dev_id)
             if family:
-                suggested = [b.id for b in registry.list() if b.family == family]
+                board_candidates = candidates_for_family(
+                    family,
+                    source="openocd",
+                    reason=f"DBGMCU DEV_ID 0x{dev_id:03x} maps to {family}",
+                    confidence=0.72,
+                )
+                suggested = [c.board.id for c in board_candidates]
                 return DeviceStatus(
                     connected=True, probe="ST-Link V2",
                     detail=f"Detected DEV_ID 0x{dev_id:03x} — matches {family}.",
                     detected_family=family, suggested_boards=suggested,
+                    candidates=[c.as_dict() for c in board_candidates],
                 )
             return DeviceStatus(
                 connected=True, probe="ST-Link V2",
@@ -290,6 +298,49 @@ def probe_connected_chip() -> DeviceStatus:
     if last_detail:
         detail += f" Last attempt said: {last_detail}"
     return DeviceStatus(connected=False, detail=detail)
+
+
+def auto_detect_board(project_id: str | None = None, session=None) -> DeviceStatus:
+    """Project-aware board detection from project files plus a live chip probe."""
+    workspace = workspace_dir(project_id) if project_id else None
+    candidates = detect_from_workspace(workspace)
+    live = probe_connected_chip()
+    candidates = _merge_candidates(
+        candidates
+        + candidates_for_family(
+            live.detected_family,
+            source="openocd",
+            reason=live.detail,
+            confidence=0.72,
+        )
+    )
+    best = candidates[0] if candidates else None
+
+    return DeviceStatus(
+        connected=live.connected,
+        probe=live.probe,
+        target=best.board.label if best else live.target,
+        detail=_detection_detail(candidates, live.detail),
+        detected_family=best.board.family if best else live.detected_family,
+        suggested_boards=[c.board.id for c in candidates],
+        candidates=[c.as_dict() for c in candidates],
+    )
+
+
+def _merge_candidates(candidates):
+    best = {}
+    for candidate in candidates:
+        current = best.get(candidate.board.id)
+        if current is None or candidate.confidence > current.confidence:
+            best[candidate.board.id] = candidate
+    return sorted(best.values(), key=lambda c: (-c.confidence, c.board.family, c.board.label))
+
+
+def _detection_detail(candidates, live_detail: str) -> str:
+    if candidates:
+        top = candidates[0]
+        return f"Best match: {top.board.label} ({top.source}, {top.confidence:.0%})."
+    return live_detail or "No board signal found in project files or connected hardware."
 
 
 def detect_device(board: str | None = None, session=None) -> DeviceStatus:
@@ -376,7 +427,9 @@ def build_project(project_id: str, board: str | None = None, session=None) -> Bu
     )
 
 
-def build_project_stream(project_id: str, board: str = DEFAULT_BOARD):
+def build_project_stream(project_id: str, board: str | None = None):
+    if board is None:
+        board = DEFAULT_BOARD
     """Run a real PlatformIO build, yielding output line-by-line as it runs.
 
     Yields dicts:

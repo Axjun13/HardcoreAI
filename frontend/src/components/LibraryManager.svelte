@@ -185,14 +185,6 @@
     if (t === "installed" || t === "discover") fetchInstalledLibraries();
   }
 
-  function setLibrarySearch(val: string) {
-    librarySearchQuery = val;
-  }
-
-  function setLibraryCategory(cat: string) {
-    librarySelectedCategory = cat;
-  }
-
   function onSearch(e: Event) {
     const val = (e.target as HTMLInputElement).value;
     librarySearchQuery = val;
@@ -1085,47 +1077,6 @@
     border-color: rgba(239, 68, 68, 0.5);
     background: rgba(239, 68, 68, 0.08);
     color: #ef4444;
-  }
-
-  .lib-confirm-row {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-  }
-
-  .lib-confirm-text {
-    font-size: 0.65rem;
-    color: var(--text-muted);
-    white-space: nowrap;
-  }
-
-  .lib-confirm-btn {
-    font-size: 0.65rem;
-    font-weight: 600;
-    padding: 3px 8px;
-    border-radius: 4px;
-    cursor: pointer;
-    transition: all 0.12s;
-  }
-
-  .lib-confirm-btn.yes {
-    background: rgba(16, 185, 129, 0.15);
-    border: 1px solid rgba(16, 185, 129, 0.4);
-    color: #10b981;
-  }
-
-  .lib-confirm-btn.yes:hover {
-    background: rgba(16, 185, 129, 0.3);
-  }
-
-  .lib-confirm-btn.no {
-    background: rgba(239, 68, 68, 0.1);
-    border: 1px solid rgba(239, 68, 68, 0.3);
-    color: #ef4444;
-  }
-
-  .lib-confirm-btn.no:hover {
-    background: rgba(239, 68, 68, 0.2);
   }
 
   .lib-installing-indicator,

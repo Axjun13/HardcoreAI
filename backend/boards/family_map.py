@@ -9,6 +9,10 @@ are added.
 # Longest/most-specific prefixes should be checked first if you ever add
 # overlapping ones — for now these are all disjoint.
 FAMILY_BY_MCU_PREFIX: dict[str, dict[str, str]] = {
+    "STM32C5": {"family": "STM32C5", "core": "cortex-m33",
+                "hal_header": "stm32c5xx_hal.h", "openocd_target": "target/stm32c5x.cfg"},
+    "STM32C0": {"family": "STM32C0", "core": "cortex-m0plus",
+                "hal_header": "stm32c0xx_hal.h", "openocd_target": "target/stm32c0x.cfg"},
     "STM32F1": {"family": "STM32F1", "core": "cortex-m3",
                 "hal_header": "stm32f1xx_hal.h", "openocd_target": "target/stm32f1x.cfg"},
     "STM32F4": {"family": "STM32F4", "core": "cortex-m4",
@@ -33,16 +37,28 @@ FAMILY_BY_MCU_PREFIX: dict[str, dict[str, str]] = {
                 "hal_header": "stm32l1xx_hal.h", "openocd_target": "target/stm32l1.cfg"},
     "STM32L5": {"family": "STM32L5", "core": "cortex-m33",
                 "hal_header": "stm32l5xx_hal.h", "openocd_target": "target/stm32l5x.cfg"},
+    "STM32WB0": {"family": "STM32WB0", "core": "cortex-m0plus",
+                 "hal_header": "stm32wb0x_hal.h", "openocd_target": "target/stm32wb0x.cfg"},
+    "STM32WBA": {"family": "STM32WBA", "core": "cortex-m33",
+                 "hal_header": "stm32wbaxx_hal.h", "openocd_target": "target/stm32wbax.cfg"},
     "STM32WB": {"family": "STM32WB", "core": "cortex-m4",
                 "hal_header": "stm32wbxx_hal.h", "openocd_target": "target/stm32wbx.cfg"},
     "STM32U5": {"family": "STM32U5", "core": "cortex-m33",
                 "hal_header": "stm32u5xx_hal.h", "openocd_target": "target/stm32u5x.cfg"},
+    "STM32U3": {"family": "STM32U3", "core": "cortex-m33",
+                "hal_header": "stm32u3xx_hal.h", "openocd_target": "target/stm32u3x.cfg"},
     "STM32WL": {"family": "STM32WL", "core": "cortex-m4",
                 "hal_header": "stm32wlxx_hal.h", "openocd_target": "target/stm32wlx.cfg"},
     "STM32F2": {"family": "STM32F2", "core": "cortex-m3",
                 "hal_header": "stm32f2xx_hal.h", "openocd_target": "target/stm32f2x.cfg"},
     "STM32H5": {"family": "STM32H5", "core": "cortex-m33",
                 "hal_header": "stm32h5xx_hal.h", "openocd_target": "target/stm32h5x.cfg"},
+    "STM32U0": {"family": "STM32U0", "core": "cortex-m0plus",
+                "hal_header": "stm32u0xx_hal.h", "openocd_target": "target/stm32u0x.cfg"},
+    "STM32N6": {"family": "STM32N6", "core": "cortex-m55",
+                "hal_header": "stm32n6xx_hal.h", "openocd_target": "target/stm32n6x.cfg"},
+    "STM32V8": {"family": "STM32V8", "core": "cortex-m85",
+                "hal_header": "stm32v8xx_hal.h", "openocd_target": "target/stm32v8x.cfg"},
 }
 
 _DEFAULT_ENTRY = {"family": "unknown", "core": "cortex-m4",
@@ -56,7 +72,7 @@ def derive_family_info(mcu: str) -> dict[str, str]:
     metadata, just flagged (see Device.family == "unknown") rather than
     crashing the whole import batch."""
     mcu_upper = mcu.upper()
-    for prefix, info in FAMILY_BY_MCU_PREFIX.items():
+    for prefix, info in sorted(FAMILY_BY_MCU_PREFIX.items(), key=lambda item: len(item[0]), reverse=True):
         if mcu_upper.startswith(prefix):
             return info
     return _DEFAULT_ENTRY

@@ -14,8 +14,10 @@ from pathlib import Path
 from boards.device import Device
 from boards.family_map import derive_family_info
 from boards.pio_importer import import_boards
+from boards.stm32_part import derive_package_pin_count
 
 CACHE_PATH = Path(__file__).resolve().parent.parent / "data" / "boards_cache.json"
+CUSTOM_PATH = Path(__file__).resolve().parent.parent / "data" / "boards_custom.json"
 
 # Curated, hand-verified entries. These always take priority over imported
 # data — if PlatformIO's metadata for a board is ever wrong, override it here
@@ -160,7 +162,9 @@ _SEED: dict[str, Device] = {
 class BoardRegistry:
     def __init__(self) -> None:
         self._imported: dict[str, Device] = {}
+        self._custom: dict[str, Device] = {}
         self._load_cache()
+        self._load_custom()
 
     def _load_cache(self) -> None:
         if not CACHE_PATH.exists():
@@ -173,6 +177,18 @@ class BoardRegistry:
         except Exception as exc:
             print(f"[registry] cache load failed, ignoring: {exc}")
             self._imported = {}
+
+    def _load_custom(self) -> None:
+        if not CUSTOM_PATH.exists():
+            return
+        try:
+            raw = json.loads(CUSTOM_PATH.read_text(encoding="utf-8"))
+            self._custom = {
+                bid: self._reclassify(Device(**data)) for bid, data in raw.items()
+            }
+        except Exception as exc:
+            print(f"[registry] custom board load failed, ignoring: {exc}")
+            self._custom = {}
 
     @staticmethod
     def _reclassify(device: Device) -> Device:
@@ -214,9 +230,14 @@ class BoardRegistry:
         raw = {bid: device.model_dump() for bid, device in self._imported.items()}
         CACHE_PATH.write_text(json.dumps(raw, indent=2), encoding="utf-8")
 
+    def _write_custom(self) -> None:
+        CUSTOM_PATH.parent.mkdir(parents=True, exist_ok=True)
+        raw = {bid: device.model_dump() for bid, device in self._custom.items()}
+        CUSTOM_PATH.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+
     def list(self) -> list[Device]:
-        merged = {**self._imported, **_SEED}  # seed wins on id collision
-        return sorted(merged.values(), key=lambda d: d.id)
+        merged = {**self._imported, **_SEED, **self._custom}  # custom wins
+        return sorted((self._with_pinout_metadata(d) for d in merged.values()), key=lambda d: d.id)
 
     def default(self) -> Device:
         return _SEED["bluepill_f103c8"]
@@ -232,13 +253,53 @@ class BoardRegistry:
         return len(self._imported)
     
     def get(self, board_id: str) -> Device | None:
-        device = _SEED.get(board_id) or self._imported.get(board_id)
+        device = self._custom.get(board_id) or _SEED.get(board_id) or self._imported.get(board_id)
+        if device:
+            device = self._with_pinout_metadata(device)
         if device and device.full_pinout is None:
             from boards.pinout import get_full_pinout
             pinout = get_full_pinout(board_id, mcu=device.mcu)
             if pinout:
-                device = device.model_copy(update={"full_pinout": pinout})
+                device = device.model_copy(update={
+                    "full_pinout": pinout,
+                    "package_pins": len(pinout),
+                    "pinout_status": "verified",
+                })
+        if device and device.full_pinout is None:
+            try:
+                from boards.stm32_metadata import get_mcu_metadata
+                meta = get_mcu_metadata(device.mcu)
+            except Exception:
+                meta = None
+            if meta and meta.get("pins"):
+                pinout = [pin["name"] for pin in meta["pins"]]
+                device = device.model_copy(update={
+                    "full_pinout": pinout,
+                    "package_pins": len(pinout),
+                    "pinout_status": "st_open_pin_data",
+                    "pin_metadata": meta["pins"],
+                })
         return device
+
+    def add_custom(self, device: Device) -> Device:
+        classified = self._with_pinout_metadata(self._reclassify(device))
+        self._custom[classified.id] = classified
+        self._write_custom()
+        return classified
+
+    @staticmethod
+    def _with_pinout_metadata(device: Device) -> Device:
+        package_pins = device.package_pins or derive_package_pin_count(device.mcu)
+        pinout_status = device.pinout_status
+        if device.full_pinout:
+            package_pins = len(device.full_pinout)
+            pinout_status = "verified"
+        elif package_pins:
+            pinout_status = "package_count_only"
+        return device.model_copy(update={
+            "package_pins": package_pins,
+            "pinout_status": pinout_status,
+        })
 
 
 registry = BoardRegistry()

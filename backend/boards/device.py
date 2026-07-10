@@ -17,3 +17,6 @@ class Device(BaseModel):
     openocd_interface: str = "interface/stlink.cfg"
     frameworks: list[str] = ["stm32cube"]
     full_pinout: list[str] | None = None
+    package_pins: int | None = None
+    pinout_status: str = "unavailable"
+    pin_metadata: list[dict] | None = None

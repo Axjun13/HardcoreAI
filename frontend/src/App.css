@@ -2556,6 +2556,10 @@ input, button, select, textarea {
 }
 
 .board-detect-suggestion {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
   background-color: var(--bg-tertiary);
   border: 1px solid var(--accent-violet);
   border-radius: var(--radius-sm);
@@ -2563,10 +2567,28 @@ input, button, select, textarea {
   font-size: 0.68rem;
   padding: 4px 8px;
   cursor: pointer;
+  max-width: 100%;
+  text-align: left;
 }
 
 .board-detect-suggestion:hover {
   background-color: var(--accent-violet);
+}
+
+.board-detect-suggestion span {
+  color: var(--text-dark);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  flex-shrink: 0;
+}
+
+.custom-board-inline {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color);
 }
 
 .config-select {

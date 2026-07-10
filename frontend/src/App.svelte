@@ -50,15 +50,6 @@
     Circle,
   } from "lucide-svelte";
 
-  $: projectId = api.getActiveProject();
-
-  let libraryQuery = "";
-  let libraries = [];
-  let installedLibraries: any[] = [];
-  let librarySearch = "";
-  let selectedCategory = "";
-  let loadingLibraries = false;
-
   let aiInput = "";
   let serialInput = "";
   let selectedPeripheral = "Core Registers";
@@ -74,10 +65,21 @@
   // 15+ STM32 families instead of a handful of boards.
   let boardSearchQuery = "";
   let detectingBoard = false;
+  let refreshingBoards = false;
+  let importingStm32Metadata = false;
+  let addingCustomBoard = false;
+  let customBoardId = "";
+  let customBoardMcu = "";
   let detectResult: {
     family: string | null;
     suggestions: string[];
     detail: string;
+    candidates: {
+      board: any;
+      confidence: number;
+      source: string;
+      reason: string;
+    }[];
   } | null = null;
   async function runBoardDetection() {
     detectingBoard = true;
@@ -88,6 +90,82 @@
   function applyDetectedBoard(id: string) {
     actions.setSelectedBoard(id as any);
     detectResult = null;
+  }
+  async function refreshBoardCatalog() {
+    refreshingBoards = true;
+    try {
+      const result = await actions.refreshBoardCatalog();
+      detectResult = {
+        family: null,
+        suggestions: [],
+        detail: `Imported ${result.imported ?? 0} STM32 board definitions from PlatformIO.`,
+        candidates: [],
+      };
+    } catch (e) {
+      detectResult = {
+        family: null,
+        suggestions: [],
+        detail: e instanceof Error ? e.message : "Board catalog refresh failed.",
+        candidates: [],
+      };
+    } finally {
+      refreshingBoards = false;
+    }
+  }
+  async function addCustomBoard() {
+    const id = customBoardId.trim();
+    const mcu = customBoardMcu.trim();
+    if (!id || !mcu) {
+      detectResult = {
+        family: null,
+        suggestions: [],
+        detail: "Enter both board id and STM32 MCU part number.",
+        candidates: [],
+      };
+      return;
+    }
+    addingCustomBoard = true;
+    try {
+      const board = await actions.addCustomBoard({ id, mcu, label: `${mcu} (${id})` });
+      customBoardId = "";
+      customBoardMcu = "";
+      detectResult = {
+        family: board.family ?? null,
+        suggestions: [],
+        detail: `Added custom board ${board.label}.`,
+        candidates: [],
+      };
+    } catch (e) {
+      detectResult = {
+        family: null,
+        suggestions: [],
+        detail: e instanceof Error ? e.message : "Custom board add failed.",
+        candidates: [],
+      };
+    } finally {
+      addingCustomBoard = false;
+    }
+  }
+  async function importStm32Metadata() {
+    importingStm32Metadata = true;
+    try {
+      const result = await actions.importStm32Metadata();
+      detectResult = {
+        family: null,
+        suggestions: [],
+        detail: `Imported ${result.imported ?? 0} STM32 MCU metadata files.`,
+        candidates: [],
+      };
+    } catch (e) {
+      detectResult = {
+        family: null,
+        suggestions: [],
+        detail: e instanceof Error ? e.message : "STM32 metadata import failed.",
+        candidates: [],
+      };
+    } finally {
+      importingStm32Metadata = false;
+    }
   }
   $: groupedBoards = (() => {
     const q = boardSearchQuery.trim().toLowerCase();
@@ -1171,84 +1249,6 @@
     actions.setActiveFile(path);
   }
 
-  async function loadLibraries() {
-    loadingLibraries = true;
-
-    try {
-      const res = await fetch(
-        `http://127.0.0.1:62018/api/libraries?search=${encodeURIComponent(
-          librarySearch,
-        )}&category=${encodeURIComponent(selectedCategory)}`,
-      );
-
-      libraries = await res.json();
-    } finally {
-      loadingLibraries = false;
-    }
-  }
-
-  async function loadInstalledLibraries() {
-    if (!projectId) return;
-
-    const res = await fetch(
-      `http://127.0.0.1:62018/api/projects/${projectId}/libraries`,
-    );
-
-    installedLibraries = await res.json();
-  }
-  async function installLibrary(id: string) {
-    await fetch(
-      `http://127.0.0.1:62018/api/projects/${projectId}/libraries/install`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          library_id: id,
-        }),
-      },
-    );
-
-    await loadInstalledLibraries();
-  }
-  async function uninstallLibrary(id: string) {
-    await fetch(
-      `http://127.0.0.1:62018/api/projects/${projectId}/libraries/${id}`,
-      {
-        method: "DELETE",
-      },
-    );
-
-    await loadInstalledLibraries();
-  }
-  async function searchLibraries() {
-    if (!libraryQuery.trim()) {
-      libraries = [];
-      return;
-    }
-
-    loadingLibraries = true;
-
-    try {
-      const response = await fetch(
-        "http://127.0.0.1:62018/api/libraries/search",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            query: libraryQuery,
-          }),
-        },
-      );
-
-      libraries = await response.json();
-    } finally {
-      loadingLibraries = false;
-    }
-  }
 </script>
 
 <svelte:window
@@ -2802,23 +2802,65 @@
                       ? "Detecting…"
                       : "🔌 Detect connected board"}
                   </button>
+                  <button
+                    type="button"
+                    class="board-detect-btn"
+                    disabled={refreshingBoards}
+                    onclick={refreshBoardCatalog}
+                  >
+                    {refreshingBoards
+                      ? "Refreshing catalog..."
+                      : "Refresh STM32 board catalog"}
+                  </button>
+                  <button
+                    type="button"
+                    class="board-detect-btn"
+                    disabled={importingStm32Metadata}
+                    onclick={importStm32Metadata}
+                  >
+                    {importingStm32Metadata
+                      ? "Importing ST metadata..."
+                      : "Import official STM32 pin data"}
+                  </button>
+                  <div class="custom-board-inline">
+                    <input
+                      type="text"
+                      class="config-input"
+                      placeholder="custom board id"
+                      bind:value={customBoardId}
+                    />
+                    <input
+                      type="text"
+                      class="config-input"
+                      placeholder="STM32F401RETx"
+                      bind:value={customBoardMcu}
+                    />
+                    <button
+                      type="button"
+                      class="board-detect-btn"
+                      disabled={addingCustomBoard}
+                      onclick={addCustomBoard}
+                    >
+                      {addingCustomBoard ? "Adding..." : "Add custom STM32"}
+                    </button>
+                  </div>
                   {#if detectResult}
                     <div class="board-detect-result">
-                      {#if detectResult.suggestions.length > 0}
+                      {#if detectResult.candidates.length > 0}
                         <span>
                           Detected <strong>{detectResult.family}</strong> — pick
                           a match:
                         </span>
                         <div class="board-detect-suggestions">
-                          {#each detectResult.suggestions as id}
+                          {#each detectResult.candidates.slice(0, 8) as candidate}
                             <button
                               type="button"
                               class="board-detect-suggestion"
-                              onclick={() => applyDetectedBoard(id)}
+                              title={candidate.reason}
+                              onclick={() => applyDetectedBoard(candidate.board.id)}
                             >
-                              {$workspaceStore.boardCatalog.find(
-                                (b) => b.id === id,
-                              )?.label ?? id}
+                              {candidate.board.label}
+                              <span>{Math.round(candidate.confidence * 100)}%</span>
                             </button>
                           {/each}
                         </div>

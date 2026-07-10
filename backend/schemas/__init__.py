@@ -171,6 +171,7 @@ class DeviceStatus(BaseModel):
     detail: str = ""  # human-readable status or error
     detected_family: str | None = None  # e.g. "STM32F4", from a generic chip-ID probe
     suggested_boards: list[str] = []  # registry board ids matching detected_family
+    candidates: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class BuildResult(BaseModel):

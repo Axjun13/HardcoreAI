@@ -14,6 +14,7 @@ import subprocess
 
 from boards.device import Device
 from boards.family_map import derive_family_info, derive_openocd_interface
+from boards.stm32_part import derive_package_pin_count
 
 IMPORT_TIMEOUT_S = 60
 
@@ -67,6 +68,8 @@ def _normalize(raw: dict) -> Device | None:
             openocd_target=family_info["openocd_target"],
             openocd_interface=derive_openocd_interface(debug_tools),
             frameworks=raw.get("frameworks", []),
+            package_pins=derive_package_pin_count(mcu),
+            pinout_status="package_count_only",
         )
     except (KeyError, TypeError, ValueError):
         return None

@@ -58,6 +58,17 @@ def device_status(
             return hardware.detect_device(project.board_id, session=session)
     return hardware.probe_connected_chip()
 
+
+@router.get("/api/device/detect")
+def detect_board(
+    project_id: str | None = None, user_id: str = Depends(get_current_user_id)
+) -> DeviceStatus:
+    """Infer the best STM32 board from project files and connected hardware."""
+    if project_id:
+        with db_session(user_id) as session:
+            get_project_or_404(session, project_id, user_id)
+    return hardware.auto_detect_board(project_id)
+
 @router.post("/api/projects/{project_id}/build")
 def build(project_id: str, user_id: str = Depends(get_current_user_id)) -> BuildResult:
     """Sync the project to disk and run a real PlatformIO build. Returns output."""
@@ -76,13 +87,15 @@ async def build_stream(project_id: str, user_id: str = Depends(get_current_user_
     an asyncio queue the event loop drains.
     """
     _sync_workspace(project_id, user_id)
+    with db_session(user_id) as session:
+        board_id = get_project_or_404(session, project_id, user_id).board_id
 
     queue: asyncio.Queue = asyncio.Queue()
     loop = asyncio.get_running_loop()
 
     def run() -> None:
         try:
-            for event in hardware.build_project_stream(project_id):
+            for event in hardware.build_project_stream(project_id, board_id):
                 loop.call_soon_threadsafe(queue.put_nowait, event)
         except Exception as exc:  # noqa: BLE001 — surface to client
             loop.call_soon_threadsafe(queue.put_nowait, {

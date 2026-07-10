@@ -159,6 +159,15 @@ export interface BoardMeta {
   openocd_interface?: string;
   frameworks?: string[];
   full_pinout?: string[] | null;
+  package_pins?: number | null;
+  pinout_status?: "verified" | "package_count_only" | "unavailable" | string;
+  pin_metadata?: {
+    name: string;
+    raw_name?: string;
+    position?: number;
+    type?: string;
+    signals?: { name: string; af?: string | null; io_modes?: string }[];
+  }[] | null;
 }
 
 // Pin configuration data — STM32F103C8T6 Blue Pill (LQFP48) pinout.
@@ -199,7 +208,40 @@ function buildPinsFromDevice(device: any): PinConfig[] {
   // boards/pinout.py) — return [] rather than silently substituting the Blue
   // Pill's 48-pin layout under a different board's name. Callers (the
   // Pinout tab) show an explicit "not verified" state when pins is empty.
+  const metadata: BoardMeta["pin_metadata"] = device?.pin_metadata ?? null;
+  if (metadata?.length) {
+    return metadata.map((pin, index) => {
+      const signalNames = pin.signals?.map(s => s.name).filter(Boolean) ?? [];
+      const firstPeripheral = signalNames.find(name => name !== "GPIO");
+      const firstAf = pin.signals?.find(s => s.name === firstPeripheral)?.af;
+      const isPower = String(pin.type || "").toLowerCase().includes("power");
+      const isSystem = ["Reset", "Boot", "MonoIO"].some(t => String(pin.type || "").includes(t));
+      return {
+        pin: pin.name,
+        signal: firstPeripheral ?? (isPower ? pin.name : isSystem ? "System" : "Unassigned"),
+        mode: isPower ? "Power" : firstPeripheral ? "Alternate Function" : isSystem ? "System" : "Input Floating",
+        speed: "Low",
+        pull: "No pull-up/down",
+        label: `Pin ${pin.position ?? index + 1}`,
+        af: firstAf ?? "-",
+        enabled: isPower || isSystem || !!firstPeripheral,
+      };
+    });
+  }
+
   const pinList: string[] = device?.full_pinout ?? [];
+  if (pinList.length === 0 && Number.isFinite(device?.package_pins) && device.package_pins > 0) {
+    return Array.from({ length: device.package_pins }, (_, index) => ({
+      pin: `P${index + 1}`,
+      signal: "Unverified package pad",
+      mode: "Input Floating",
+      speed: "Low",
+      pull: "No pull-up/down",
+      label: `Pad ${index + 1}`,
+      af: "-",
+      enabled: false,
+    }));
+  }
   return pinList.map((pin, index) => {
     const defaults: Partial<PinConfig> = {};
     const isPower = ["VSS", "VDD", "VBAT", "VDDA", "VSSA", "VCAP"].includes(pin);
@@ -513,6 +555,24 @@ export const actions = {
     } catch (e) {
       console.warn("Failed to load board catalog", e);
     }
+  },
+  refreshBoardCatalog: async () => {
+    const result = await api.refreshBoards("STM32");
+    await actions.loadBoardCatalog();
+    return result;
+  },
+  addCustomBoard: async (payload: { id: string; mcu: string; label?: string }) => {
+    const board = await api.addCustomBoard(payload);
+    await actions.loadBoardCatalog();
+    await actions.setSelectedBoard(board.id);
+    return board;
+  },
+  importStm32Metadata: async () => {
+    const result = await api.importStm32Metadata();
+    let selectedBoard: string | null = null;
+    workspaceStore.subscribe(s => { selectedBoard = s.selectedBoard; })();
+    if (selectedBoard) await actions.setSelectedBoard(selectedBoard);
+    return result;
   },
   loadProjects: async () => {
     try {
@@ -1146,19 +1206,28 @@ export const actions = {
   // Generic auto-detect: reads whatever chip is actually connected and
   // suggests a matching board. Never auto-applies — caller/UI presents the
   // suggestion and the user confirms via setSelectedBoard.
-  detectBoard: async (): Promise<{ family: string | null; suggestions: string[]; detail: string }> => {
+  detectBoard: async (): Promise<{
+    family: string | null;
+    suggestions: string[];
+    detail: string;
+    candidates: { board: BoardMeta; confidence: number; source: string; reason: string }[];
+  }> => {
+    let projectId: string | null = null;
+    workspaceStore.subscribe(s => { projectId = s.activeProjectId; })();
     try {
-      const res = await api.detectConnectedBoard();
+      const res = await api.detectConnectedBoard(projectId ?? undefined);
       return {
         family: res.detected_family ?? null,
         suggestions: res.suggested_boards ?? [],
         detail: res.detail ?? "",
+        candidates: res.candidates ?? [],
       };
     } catch (e) {
       return {
         family: null,
         suggestions: [],
         detail: e instanceof Error ? e.message : "Detection failed.",
+        candidates: [],
       };
     }
   },
