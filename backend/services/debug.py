@@ -37,7 +37,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Any
-
+from boards.registry import registry
 log = logging.getLogger(__name__)
 
 # ── Registry: one session per project ────────────────────────────────────────
@@ -81,9 +81,16 @@ def _find_elf(project_path: str) -> Path | None:
         return elf
     return None
 
-
 def _board_to_openocd_target(board: str) -> str:
-    """Map a PlatformIO board id to an OpenOCD target config filename."""
+    """Map a board id to an OpenOCD target config filename.
+
+    Registry first (authoritative once a board is registered), falls back
+    to the static heuristic mapping for anything not yet in the registry.
+    """
+    device = registry.get(board)
+    if device:
+        return device.openocd_target
+
     mapping: dict[str, str] = {
         # STM32F1
         "bluepill_f103c8": "target/stm32f1x.cfg",
@@ -348,7 +355,7 @@ class DebugSession:
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
-    async def start(self, board: str = "bluepill_f103c8", probe: str = "ST-Link V2") -> dict:
+    async def start(self, board: str = registry.default().id, probe: str = "ST-Link V2") -> dict:
         """Start OpenOCD and GDB, connect to target, return initial snapshot."""
         from schemas import DebugSnapshot, DebugState
 

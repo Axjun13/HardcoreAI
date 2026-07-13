@@ -146,6 +146,33 @@ export interface GitInfo {
   short_hash: string | null;
 }
 
+export interface BoardMeta {
+  id: string;
+  label: string;
+  vendor?: string;
+  mcu?: string;
+  family?: string;
+  core?: string;
+  flash_bytes?: number;
+  ram_bytes?: number;
+  f_cpu_hz?: number;
+  hal_header?: string;
+  upload_protocol?: string;
+  debug_tool?: string;
+  openocd_target?: string;
+  openocd_interface?: string;
+  frameworks?: string[];
+  full_pinout?: string[] | null;
+  package_pins?: number | null;
+  pinout_status?: "verified" | "package_count_only" | "unavailable" | string;
+  pin_metadata?: {
+    name: string;
+    raw_name?: string;
+    position?: number;
+    type?: string;
+    signals?: { name: string; af?: string | null; io_modes?: string }[];
+  }[] | null;
+}
 
 // Pin configuration data — STM32F103C8T6 Blue Pill (LQFP48) pinout.
 const bluePillPins = [
@@ -180,7 +207,61 @@ const initialPins: PinConfig[] = bluePillPins.map((pin, index) => {
     enabled: defaults.enabled ?? (isPower || isSystem),
   };
 });
+function buildPinsFromDevice(device: any): PinConfig[] {
+  // No verified pinout for this board (device.full_pinout is null/empty from
+  // boards/pinout.py) — return [] rather than silently substituting the Blue
+  // Pill's 48-pin layout under a different board's name. Callers (the
+  // Pinout tab) show an explicit "not verified" state when pins is empty.
+  const metadata: BoardMeta["pin_metadata"] = device?.pin_metadata ?? null;
+  if (metadata?.length) {
+    return metadata.map((pin, index) => {
+      const signalNames = pin.signals?.map(s => s.name).filter(Boolean) ?? [];
+      const firstPeripheral = signalNames.find(name => name !== "GPIO");
+      const firstAf = pin.signals?.find(s => s.name === firstPeripheral)?.af;
+      const isPower = String(pin.type || "").toLowerCase().includes("power");
+      const isSystem = ["Reset", "Boot", "MonoIO"].some(t => String(pin.type || "").includes(t));
+      return {
+        pin: pin.name,
+        signal: firstPeripheral ?? (isPower ? pin.name : isSystem ? "System" : "Unassigned"),
+        mode: isPower ? "Power" : firstPeripheral ? "Alternate Function" : isSystem ? "System" : "Input Floating",
+        speed: "Low",
+        pull: "No pull-up/down",
+        label: `Pin ${pin.position ?? index + 1}`,
+        af: firstAf ?? "-",
+        enabled: isPower || isSystem || !!firstPeripheral,
+      };
+    });
+  }
 
+  const pinList: string[] = device?.full_pinout ?? [];
+  if (pinList.length === 0 && Number.isFinite(device?.package_pins) && device.package_pins > 0) {
+    return Array.from({ length: device.package_pins }, (_, index) => ({
+      pin: `P${index + 1}`,
+      signal: "Unverified package pad",
+      mode: "Input Floating",
+      speed: "Low",
+      pull: "No pull-up/down",
+      label: `Pad ${index + 1}`,
+      af: "-",
+      enabled: false,
+    }));
+  }
+  return pinList.map((pin, index) => {
+    const defaults: Partial<PinConfig> = {};
+    const isPower = ["VSS", "VDD", "VBAT", "VDDA", "VSSA", "VCAP"].includes(pin);
+    const isSystem = ["NRST", "BOOT0", "PD0", "PD1", "PH0", "PH1", "PD2"].includes(pin);
+    return {
+      pin,
+      signal: defaults.signal ?? (isPower ? pin : isSystem ? "System" : "Unassigned"),
+      mode: defaults.mode ?? (isPower ? "Power" : isSystem ? "System" : "Input Floating"),
+      speed: defaults.speed ?? "Low",
+      pull: defaults.pull ?? "No pull-up/down",
+      label: defaults.label ?? `Pin ${index + 1}`,
+      af: defaults.af ?? "-",
+      enabled: defaults.enabled ?? (isPower || isSystem),
+    };
+  });
+}
 // RAG Documents initial mock list
 const initialRagDocs: RagDocument[] = [];
 
@@ -273,9 +354,15 @@ const getInitialShowWelcomeScreen = () => {
   }
 };
 
-// The only supported target is the Blue Pill (STM32F103). Force it even if an
-// older session persisted a different board to localStorage.
-const getInitialSelectedBoard = () => "STM32F103";
+const getInitialSelectedBoard = () => {
+  if (!isBrowser) return "bluepill_f103c8";
+  try {
+    const val = localStorage.getItem("selectedBoard");
+    return val ? JSON.parse(val) : "bluepill_f103c8";
+  } catch {
+    return "bluepill_f103c8";
+  }
+};
 
 const getInitialSelectedProbe = () => {
   if (!isBrowser) return "ST-Link V2";
@@ -423,7 +510,9 @@ export const workspaceStore = writable({
   terminalOpen: getInitialTerminalOpen(),  // whether the bottom drawer (serial/build/etc.) is expanded
   showWelcomeScreen: getInitialShowWelcomeScreen(),
   activeSidebarTab: getInitialActiveSidebarTab() as "explorer" | "search" | "git" | "debug" | "extensions" | "boards" | "rag" | "libraries",
-  selectedBoard: getInitialSelectedBoard() as "STM32F103",
+  selectedBoard: getInitialSelectedBoard() as string,
+  selectedBoardInfo: null as BoardMeta | null,
+  boardCatalog: [] as BoardMeta[],
   selectedProbe: getInitialSelectedProbe() as "ST-Link V2" | "J-Link" | "CMSIS-DAP",
   toolchainPath: getInitialToolchainPath(),
 
@@ -459,13 +548,46 @@ let agentAbortController: AbortController | null = null;
 
 // Helper Actions for Store
 export const actions = {
+  loadBoardCatalog: async () => {
+    try {
+      const boards = await api.listBoards();
+      workspaceStore.update(s => ({
+        ...s,
+        boardCatalog: boards,
+        selectedBoardInfo: boards.find((b: BoardMeta) => b.id === s.selectedBoard) || s.selectedBoardInfo || boards[0] || null,
+      }));
+    } catch (e) {
+      console.warn("Failed to load board catalog", e);
+    }
+  },
+  refreshBoardCatalog: async () => {
+    const result = await api.refreshBoards("STM32");
+    await actions.loadBoardCatalog();
+    return result;
+  },
+  addCustomBoard: async (payload: { id: string; mcu: string; label?: string }) => {
+    const board = await api.addCustomBoard(payload);
+    await actions.loadBoardCatalog();
+    await actions.setSelectedBoard(board.id);
+    return board;
+  },
+  importStm32Metadata: async () => {
+    const result = await api.importStm32Metadata();
+    let selectedBoard: string | null = null;
+    workspaceStore.subscribe(s => { selectedBoard = s.selectedBoard; })();
+    if (selectedBoard) await actions.setSelectedBoard(selectedBoard);
+    return result;
+  },
   loadProjects: async () => {
     try {
       const projects = await api.getProjects();
       workspaceStore.update(s => ({ ...s, projectsList: projects }));
-    } catch (e) {
+      
+    } 
+    catch (e) {
       console.error("Failed to load projects", e);
     }
+    
   },
 
   deleteProject: async (id: string) => {
@@ -528,7 +650,7 @@ export const actions = {
             {
               id: "default-greeting",
               sender: "ai",
-              text: "Hello! I am your HARDCOREAI Copilot. I have loaded context for the **STM32F103C8T6 (Blue Pill)** target, SVD registers, and your current PlatformIO configuration. \n\nHow can I help you write or debug firmware today?",
+              text: "Hello! I am your HARDCOREAI Copilot. I have loaded context for your board target, SVD registers, and your current PlatformIO configuration. \n\nHow can I help you write or debug firmware today?",
               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
             }
           ];
@@ -552,7 +674,9 @@ export const actions = {
           openFiles = [activeFile];
         }
 
-        const savedPins = getSavedPins(id) || initialPins;
+        const project = s.projectsList.find((p: any) => String(p.id) === String(id));
+        const boardId = project?.board_id || "bluepill_f103c8";
+        const savedPins = getSavedPins(id);
 
         return {
           ...s,
@@ -562,7 +686,8 @@ export const actions = {
           activeFile,
           openFiles,
           aiMessages: history,
-          pins: savedPins,
+          selectedBoard: boardId,
+          pins: savedPins || initialPins, // real board pins loaded async below
           // Clear all session-specific state so previous project data doesn't bleed over
           buildLogs: [],
           serialLogs: [],
@@ -584,7 +709,20 @@ export const actions = {
 
         };
       });
-      
+
+      // If no cached pins existed for this project, fetch the real board's
+      // pinout and populate pins from it instead of leaving the stale/default set.
+      if (!getSavedPins(id)) {
+        try {
+          const project = (() => { let p: any; workspaceStore.subscribe(s => { p = s.projectsList.find((x: any) => String(x.id) === String(id)); })(); return p; })();
+          const boardId = project?.board_id || "bluepill_f103c8";
+          const board = await api.getBoard(boardId);
+          workspaceStore.update(s => (s.activeProjectId === id ? { ...s, selectedBoardInfo: board, pins: buildPinsFromDevice(board) } : s));
+        } catch (e) {
+          console.warn("Failed to load board pinout, keeping default pins", e);
+        }
+      }
+
       // Overlay the real working-dir tree (shows .pio/untracked files).
       actions.loadDiskTree(id);
       // Also fetch RAG documents for this project
@@ -605,6 +743,7 @@ export const actions = {
       const openFiles = s.openFiles.includes(path) ? s.openFiles : [...s.openFiles, path];
       // Tracked files have content from the DB; untracked/.pio files don't —
       // fetch their content from disk on demand.
+      
       if (s.fileContents[path] === undefined) {
         needsDiskLoad = true;
         projectId = s.activeProjectId;
@@ -1046,9 +1185,14 @@ export const actions = {
   },
 
   // Poll whether an ST-Link + board is connected; drives the UI status chip.
+  // Poll whether an ST-Link + board is connected; drives the UI status chip.
+  // Passes the active project so we probe the project's real target board
+  // instead of always assuming Blue Pill.
   pollDeviceStatus: async () => {
+    let projectId: string | null = null;
+    workspaceStore.subscribe(s => { projectId = s.activeProjectId; })();
     try {
-      const res = await api.getDeviceStatus();
+      const res = await api.getDeviceStatus(projectId ?? undefined);
       workspaceStore.update(s => ({
         ...s,
         deviceStatus: {
@@ -1060,6 +1204,35 @@ export const actions = {
       }));
     } catch (e) {
       workspaceStore.update(s => ({ ...s, deviceStatus: { ...s.deviceStatus, connected: false } }));
+    }
+  },
+
+  // Generic auto-detect: reads whatever chip is actually connected and
+  // suggests a matching board. Never auto-applies — caller/UI presents the
+  // suggestion and the user confirms via setSelectedBoard.
+  detectBoard: async (): Promise<{
+    family: string | null;
+    suggestions: string[];
+    detail: string;
+    candidates: { board: BoardMeta; confidence: number; source: string; reason: string }[];
+  }> => {
+    let projectId: string | null = null;
+    workspaceStore.subscribe(s => { projectId = s.activeProjectId; })();
+    try {
+      const res = await api.detectConnectedBoard(projectId ?? undefined);
+      return {
+        family: res.detected_family ?? null,
+        suggestions: res.suggested_boards ?? [],
+        detail: res.detail ?? "",
+        candidates: res.candidates ?? [],
+      };
+    } catch (e) {
+      return {
+        family: null,
+        suggestions: [],
+        detail: e instanceof Error ? e.message : "Detection failed.",
+        candidates: [],
+      };
     }
   },
 
@@ -1102,8 +1275,18 @@ export const actions = {
       if (pid) actions.fetchInstalledLibraries(pid);
     }
   },
-  setSelectedBoard: (board: "STM32F103") => {
+  setSelectedBoard: async (board: string) => {
+    let pid: string | null = null;
+    workspaceStore.subscribe(s => { pid = s.activeProjectId; })();
     workspaceStore.update(s => ({ ...s, selectedBoard: board }));
+    try {
+      const deviceInfo = await api.getBoard(board);
+      workspaceStore.update(s => ({ ...s, selectedBoardInfo: deviceInfo, pins: buildPinsFromDevice(deviceInfo) }));
+      if (pid) await api.setProjectBoard(pid, board);
+    } catch (e) {
+      console.error("Failed to switch board", e);
+      workspaceStore.update(s => ({ ...s, selectedBoardInfo: s.selectedBoardInfo || { id: board, label: board } }));
+    }
   },
   setSelectedProbe: (probe: "ST-Link V2" | "J-Link" | "CMSIS-DAP") => {
     workspaceStore.update(s => ({ ...s, selectedProbe: probe }));
@@ -1817,7 +2000,7 @@ export const actions = {
           {
             id: "default-greeting",
             sender: "ai",
-            text: "Hello! I am your HARDCOREAI Copilot. I have loaded context for the **STM32F103C8T6 (Blue Pill)** target, SVD registers, and your current PlatformIO configuration. \n\nHow can I help you write or debug firmware today?",
+            text: "Hello! I am your HARDCOREAI Copilot. I have loaded context for your selected target, SVD registers, and your current PlatformIO configuration. \n\nHow can I help you write or debug firmware today?",
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           }
         ]
@@ -1971,7 +2154,7 @@ export const actions = {
     let board: string = "bluepill_f103c8";
     workspaceStore.subscribe(s => {
       pid = s.activeProjectId;
-      board = s.selectedBoard;
+      board = s.selectedBoard || "bluepill_f103c8";
     })();
     if (!pid) return;
 

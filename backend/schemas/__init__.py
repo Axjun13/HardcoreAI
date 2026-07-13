@@ -48,7 +48,7 @@ class ProjectCreate(SQLModel):
     name: str
     description: str = ""
     path: str | None = None
-
+    board_id: str | None = None
 
 class ProjectUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=80)
@@ -60,9 +60,9 @@ class ProjectOut(SQLModel):
     name: str
     description: str
     path: str | None = None
+    board_id: str
     created_at: datetime
     updated_at: datetime
-
 
 # ---------------------------------------------------------------------------
 # Workbench & code files
@@ -169,6 +169,9 @@ class DeviceStatus(BaseModel):
     probe: str | None = None  # e.g. "ST-Link V2"
     target: str | None = None  # e.g. "STM32F103 (Blue Pill)"
     detail: str = ""  # human-readable status or error
+    detected_family: str | None = None  # e.g. "STM32F4", from a generic chip-ID probe
+    suggested_boards: list[str] = []  # registry board ids matching detected_family
+    candidates: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class BuildResult(BaseModel):
@@ -199,8 +202,7 @@ class FlashResult(BaseModel):
 
 class DebugStartRequest(BaseModel):
     """Request body for POST /debug/start."""
-    board: str = "bluepill_f103c8"
-
+    board: str | None = None  # None = resolve from the project's stored board_id
 
 class DebugBreakpointRequest(BaseModel):
     """Set a breakpoint at file:line."""

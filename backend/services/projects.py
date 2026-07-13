@@ -72,12 +72,17 @@ def build_disk_tree(root: Path) -> list[dict]:
     return walk(root, "")
 
 
-def default_files(project_name: str) -> list[tuple[str, str, str]]:
+def default_files(project_name: str, board_id: str | None = None) -> list[tuple[str, str, str]]:
     """(path, language, content) tuples for a new project."""
+    from boards.registry import registry
+    device = registry.get(board_id) if board_id else None
+    device = device or registry.default()
+
     main_c = f"""/* Firmware for {project_name}
  * Generate component-aware code from the Workbench tab.
  */
-#include "stm32f1xx_hal.h"
+ #include "{device.hal_header}"
+
 
 int main(void) {{
     HAL_Init();
@@ -116,11 +121,18 @@ int main(void) {{
         ".vscode/\n"
         ".DS_Store\n"
     )
+    platformio_ini = f"""[env:{device.id}]
+platform = ststm32
+board = {device.id}
+framework = stm32cube
+"""
+
     return [
-        ("src/main.c", "c", main_c),
-        ("README.md", "markdown", readme),
-        (".gitignore", "ignore", gitignore),
-    ]
+    ("src/main.c", "c", main_c),
+    ("README.md", "markdown", readme),
+    (".gitignore", "ignore", gitignore),
+    ("platformio.ini", "ini", platformio_ini),
+]
 
 
 def project_out(project: ProjectRow) -> ProjectOut:
@@ -129,6 +141,7 @@ def project_out(project: ProjectRow) -> ProjectOut:
         name=project.name,
         description=project.description or "",
         path=project.path,
+        board_id=project.board_id,
         created_at=project.created_at,
         updated_at=project.updated_at,
     )

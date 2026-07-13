@@ -31,6 +31,9 @@ from api.routers import (
     projects,
     rag,
     workbench,
+    library_search,
+    search,
+    boards,
 )
 from db.migrations import lifespan
 
@@ -62,8 +65,10 @@ app.include_router(git.router)
 app.include_router(hardware.router)
 app.include_router(debug.router)
 app.include_router(libraries.router)
+app.include_router(library_search.router)
 app.include_router(hal_generate.router) 
-
+app.include_router(search.router)
+app.include_router(boards.router)
 if FRONTEND_ASSETS_DIR.exists():
     app.mount(
         "/assets",

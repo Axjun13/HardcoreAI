@@ -4,13 +4,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from core.security import get_current_user_id
-from services import library_service
-from services.projects import get_project_or_404
-from db.session import db_session
+import services.library_service as library_service
+
+# from core.security import get_current_user_id
+# from services import library_service
+# from services.projects import get_project_or_404
+# from db.session import db_session
 
 router = APIRouter()
 
@@ -30,20 +32,27 @@ class LibraryInstallRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+
 @router.get("/api/libraries")
 def list_libraries(
     search: str = "",
     category: str = "",
-    _: str = Depends(get_current_user_id),
 ) -> list[dict[str, Any]]:
     """Return available libraries from the curated registry, with optional filtering."""
-    return library_service.search_registry(query=search, category=category)
+    try:
+        return library_service.search_registry(query=search, category=category)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Registry error: {exc}") from exc
+
 
 
 @router.get("/api/libraries/categories")
-def list_categories(_: str = Depends(get_current_user_id)) -> list[str]:
+def list_categories() -> list[str]:
     """Return the distinct categories present in the registry."""
-    registry = library_service.load_registry()
+    try:
+        registry = library_service.load_registry()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Registry error: {exc}") from exc
     categories = sorted({lib.get("category", "") for lib in registry if lib.get("category")})
     return categories
 
@@ -54,13 +63,7 @@ def list_categories(_: str = Depends(get_current_user_id)) -> list[str]:
 
 
 @router.get("/api/projects/{project_id}/libraries")
-def get_installed_libraries(
-    project_id: str,
-    user_id: str = Depends(get_current_user_id),
-) -> list[dict[str, Any]]:
-    """Return the libraries currently installed in a project (from platformio.ini)."""
-    with db_session(user_id) as session:
-        get_project_or_404(session, project_id, user_id)  # auth check
+def get_installed_libraries(project_id: str):
     return library_service.list_installed(project_id)
 
 
@@ -68,22 +71,25 @@ def get_installed_libraries(
 def install_library(
     project_id: str,
     payload: LibraryInstallRequest,
-    user_id: str = Depends(get_current_user_id),
 ) -> dict[str, Any]:
     """Install a library into the project. Pass library_id (registry) or git_url (custom)."""
-    with db_session(user_id) as session:
-        get_project_or_404(session, project_id, user_id)
+
 
     if not payload.library_id and not payload.git_url:
         raise HTTPException(status_code=422, detail="Provide library_id or git_url.")
 
-    result = library_service.install_library(
-        project_id=project_id,
-        library_id=payload.library_id,
-        git_url=payload.git_url,
-    )
+    try:
+        result = library_service.install_library(
+            project_id=project_id,
+            library_id=payload.library_id,
+            git_url=payload.git_url,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
     if not result["success"]:
-        raise HTTPException(status_code=500, detail=result["message"])
+        # Client errors (workspace missing, not in registry, pio failed) → 400
+        raise HTTPException(status_code=400, detail=result["message"])
     return result
 
 
@@ -91,13 +97,14 @@ def install_library(
 def uninstall_library(
     project_id: str,
     library_id: str,
-    user_id: str = Depends(get_current_user_id),
 ) -> dict[str, Any]:
-    """Uninstall a library from the project."""
-    with db_session(user_id) as session:
-        get_project_or_404(session, project_id, user_id)
 
-    result = library_service.uninstall_library(project_id=project_id, library_id=library_id)
+
+    try:
+        result = library_service.uninstall_library(project_id=project_id, library_id=library_id)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
     if not result["success"]:
         raise HTTPException(status_code=400, detail=result["message"])
     return result

@@ -147,7 +147,10 @@ async def agent_solve(project_id: str, payload: AgentRequest, user_id: str = Dep
         catalogue = catalogue_index(session)
         saved_state = read_workbench(session, project)
         files_dict = _files_as_dict(session, project)
-        
+
+        from agent.board_context import get_device_for_project
+        device = get_device_for_project(project_id, session)
+
         from agent.git_manager import GitManager
         git_mgr = GitManager(project_id)
         git_mgr.sync_db_to_disk(files_dict)
@@ -168,6 +171,7 @@ async def agent_solve(project_id: str, payload: AgentRequest, user_id: str = Dep
             messages=prior_history,
             build_output=payload.build_output,
             auto_approve=payload.auto_approve,
+            device=device,
         )
     except llm.LLMError as exc:
         raise HTTPException(status_code=502, detail=f"LLM error: {exc}")
@@ -224,7 +228,10 @@ async def agent_stream(project_id: str, payload: AgentRequest, user_id: str = De
         saved_state = read_workbench(session, project)
         files_dict = _files_as_dict(session, project)
         project_name = project.name
-        
+
+        from agent.board_context import get_device_for_project
+        device = get_device_for_project(project_id, session)
+
     from agent.git_manager import GitManager
     git_mgr = GitManager(project_id)
     git_mgr.sync_db_to_disk(files_dict)
@@ -257,6 +264,7 @@ async def agent_stream(project_id: str, payload: AgentRequest, user_id: str = De
                 build_output=payload.build_output,
                 auto_approve=payload.auto_approve,
                 on_event=on_event,
+                device=device,
             )
             # Stage, don't commit: the agent's file changes are surfaced as
             # proposals for the user to Allow/Reject in the chat. We persist

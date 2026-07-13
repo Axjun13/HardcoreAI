@@ -53,9 +53,144 @@
   let aiInput = "";
   let serialInput = "";
   let selectedPeripheral = "Core Registers";
+  let boardLabel = "Select a board";
 
-  // Human-readable target label. The only board is the Blue Pill (STM32F103C8T6).
-  const boardLabel = "STM32F103C8T6";
+  $: boardLabel =
+    $workspaceStore.selectedBoardInfo?.label ||
+    $workspaceStore.selectedBoard ||
+    "Select a board";
+
+  // Multi-board target picker: group the flat board catalog by family
+  // (STM32F1, STM32H7, ...) so the dropdown stays usable now that it spans
+  // 15+ STM32 families instead of a handful of boards.
+  let boardSearchQuery = "";
+  let detectingBoard = false;
+  let refreshingBoards = false;
+  let importingStm32Metadata = false;
+  let addingCustomBoard = false;
+  let customBoardId = "";
+  let customBoardMcu = "";
+  let detectResult: {
+    family: string | null;
+    suggestions: string[];
+    detail: string;
+    candidates: {
+      board: any;
+      confidence: number;
+      source: string;
+      reason: string;
+    }[];
+  } | null = null;
+  async function runBoardDetection() {
+    detectingBoard = true;
+    detectResult = null;
+    detectResult = await actions.detectBoard();
+    detectingBoard = false;
+  }
+  function applyDetectedBoard(id: string) {
+    actions.setSelectedBoard(id as any);
+    detectResult = null;
+  }
+  async function refreshBoardCatalog() {
+    refreshingBoards = true;
+    try {
+      const result = await actions.refreshBoardCatalog();
+      detectResult = {
+        family: null,
+        suggestions: [],
+        detail: `Imported ${result.imported ?? 0} STM32 board definitions from PlatformIO.`,
+        candidates: [],
+      };
+    } catch (e) {
+      detectResult = {
+        family: null,
+        suggestions: [],
+        detail: e instanceof Error ? e.message : "Board catalog refresh failed.",
+        candidates: [],
+      };
+    } finally {
+      refreshingBoards = false;
+    }
+  }
+  async function addCustomBoard() {
+    const id = customBoardId.trim();
+    const mcu = customBoardMcu.trim();
+    if (!id || !mcu) {
+      detectResult = {
+        family: null,
+        suggestions: [],
+        detail: "Enter both board id and STM32 MCU part number.",
+        candidates: [],
+      };
+      return;
+    }
+    addingCustomBoard = true;
+    try {
+      const board = await actions.addCustomBoard({ id, mcu, label: `${mcu} (${id})` });
+      customBoardId = "";
+      customBoardMcu = "";
+      detectResult = {
+        family: board.family ?? null,
+        suggestions: [],
+        detail: `Added custom board ${board.label}.`,
+        candidates: [],
+      };
+    } catch (e) {
+      detectResult = {
+        family: null,
+        suggestions: [],
+        detail: e instanceof Error ? e.message : "Custom board add failed.",
+        candidates: [],
+      };
+    } finally {
+      addingCustomBoard = false;
+    }
+  }
+  async function importStm32Metadata() {
+    importingStm32Metadata = true;
+    try {
+      const result = await actions.importStm32Metadata();
+      detectResult = {
+        family: null,
+        suggestions: [],
+        detail: `Imported ${result.imported ?? 0} STM32 MCU metadata files.`,
+        candidates: [],
+      };
+    } catch (e) {
+      detectResult = {
+        family: null,
+        suggestions: [],
+        detail: e instanceof Error ? e.message : "STM32 metadata import failed.",
+        candidates: [],
+      };
+    } finally {
+      importingStm32Metadata = false;
+    }
+  }
+  $: groupedBoards = (() => {
+    const q = boardSearchQuery.trim().toLowerCase();
+    const filtered = q
+      ? $workspaceStore.boardCatalog.filter(
+          (b) =>
+            b.label.toLowerCase().includes(q) ||
+            b.id.toLowerCase().includes(q) ||
+            (b.mcu ?? "").toLowerCase().includes(q) ||
+            (b.family ?? "").toLowerCase().includes(q),
+        )
+      : $workspaceStore.boardCatalog;
+    const byFamily = new Map<string, typeof filtered>();
+    for (const board of filtered) {
+      const key = board.family || "Other";
+      if (!byFamily.has(key)) byFamily.set(key, []);
+      byFamily.get(key)!.push(board);
+    }
+    return [...byFamily.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([family, boards]) => [
+        family,
+        boards.slice().sort((a, b) => a.label.localeCompare(b.label)),
+      ]) as [string, typeof filtered][];
+  })();
 
   let showConfigurator = true;
   let showCopilot = true;
@@ -296,6 +431,7 @@
   }
 
   onMount(async () => {
+    await actions.loadBoardCatalog();
     await actions.loadProjects();
     if (typeof window !== "undefined") {
       const script = document.createElement("script");
@@ -499,36 +635,50 @@
     };
   }
 
-  let debugDecorationsCollection: monaco.editor.IEditorDecorationsCollection | null = null;
+  let debugDecorationsCollection: monaco.editor.IEditorDecorationsCollection | null =
+    null;
   $: if (monacoEditor) {
     const decs: monaco.editor.IModelDeltaDecoration[] = [];
     if ($workspaceStore.activeFile) {
       for (const bp of $workspaceStore.debugBreakpoints) {
-        if (bp.file.endsWith($workspaceStore.activeFile.split('/').pop() || '')) {
+        if (
+          bp.file.endsWith($workspaceStore.activeFile.split("/").pop() || "")
+        ) {
           decs.push({
             range: new monaco.Range(bp.line, 1, bp.line, 1),
             options: {
               isWholeLine: false,
               glyphMarginClassName: "gutter-breakpoint",
-            }
+            },
           });
         }
       }
-      if ($workspaceStore.debugHalted && $workspaceStore.debugCurrentFile?.endsWith($workspaceStore.activeFile.split('/').pop() || '')) {
+      if (
+        $workspaceStore.debugHalted &&
+        $workspaceStore.debugCurrentFile?.endsWith(
+          $workspaceStore.activeFile.split("/").pop() || "",
+        )
+      ) {
         if ($workspaceStore.debugCurrentLine) {
           decs.push({
-            range: new monaco.Range($workspaceStore.debugCurrentLine, 1, $workspaceStore.debugCurrentLine, 1),
+            range: new monaco.Range(
+              $workspaceStore.debugCurrentLine,
+              1,
+              $workspaceStore.debugCurrentLine,
+              1,
+            ),
             options: {
               isWholeLine: true,
               className: "debug-line-highlight",
               glyphMarginClassName: "gutter-current-line",
-            }
+            },
           });
         }
       }
     }
     if (!debugDecorationsCollection) {
-      debugDecorationsCollection = monacoEditor.createDecorationsCollection(decs);
+      debugDecorationsCollection =
+        monacoEditor.createDecorationsCollection(decs);
     } else {
       debugDecorationsCollection.set(decs);
     }
@@ -1019,6 +1169,86 @@
       actions.addBuildLog("[HAL] Failed to refresh project: " + e.message);
     }
   }
+  let searchQuery = "";
+  let includePattern = "*.c,*.h";
+  let searching = false;
+
+  type SearchResult = {
+    file: string;
+    line: number;
+    column: number;
+    text: string;
+  };
+
+  let searchResults: SearchResult[] = [];
+
+  async function searchWorkspace() {
+    if (!searchQuery.trim()) {
+      searchResults = [];
+      return;
+    }
+
+    const projectId = api.getActiveProject();
+
+    if (!projectId) {
+      console.warn("No active project selected.");
+      searchResults = [];
+      return;
+    }
+
+    searching = true;
+
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:62018/api/projects/${projectId}/search`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            query: searchQuery,
+            include: includePattern,
+          }),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(`Search failed (${response.status})`);
+      }
+
+      searchResults = await response.json();
+    } catch (err) {
+      console.error("Workspace search failed:", err);
+      searchResults = [];
+    } finally {
+      searching = false;
+    }
+  }
+  type SearchGroup = {
+    file: string;
+    matches: SearchResult[];
+  };
+
+  $: groupedSearchResults = Object.values(
+    searchResults.reduce<Record<string, SearchGroup>>((acc, result) => {
+      if (!acc[result.file]) {
+        acc[result.file] = {
+          file: result.file,
+          matches: [],
+        };
+      }
+
+      acc[result.file].matches.push(result);
+      return acc;
+    }, {}),
+  );
+  function openSearchResult(result: SearchResult) {
+    const path = result.file.startsWith("/") ? result.file : "/" + result.file;
+
+    actions.setActiveFile(path);
+  }
+
 </script>
 
 <svelte:window
@@ -1389,7 +1619,7 @@
                     style="flex: 1; border: none; margin-bottom: 0; background: transparent; text-align: left; cursor: pointer;"
                     onclick={async () => {
                       await actions.loadProject(project.id);
-                      actions.setSelectedBoard("STM32F103");
+                      actions.setSelectedBoard("bluepill_f103c8");
                       actions.setSelectedProbe("ST-Link V2");
                       actions.setShowWelcomeScreen(false);
                     }}
@@ -1560,7 +1790,8 @@
         <!-- svelte-ignore a11y-click-events-have-key-events -->
         <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
         <button
-          class="activity-item {$workspaceStore.activeSidebarTab === 'debug' && showSidebar
+          class="activity-item {$workspaceStore.activeSidebarTab === 'debug' &&
+          showSidebar
             ? 'active'
             : ''}"
           onclick={() => handleActivityTabClick("debug")}
@@ -1674,7 +1905,9 @@
                     type="button"
                     class="close-ai-btn"
                     class:active={$workspaceStore.showHiddenFiles}
-                    title={$workspaceStore.showHiddenFiles ? "Hide dotfiles (.gitignore, .pio, …)" : "Show dotfiles (.gitignore, .pio, …)"}
+                    title={$workspaceStore.showHiddenFiles
+                      ? "Hide dotfiles (.gitignore, .pio, …)"
+                      : "Show dotfiles (.gitignore, .pio, …)"}
                     onclick={() => actions.toggleHiddenFiles()}
                   >
                     {#if $workspaceStore.showHiddenFiles}
@@ -1742,7 +1975,8 @@
 
                     {#snippet fileNodeSnippet(item: FileItem)}
                       {#if item.isFolder}
-                        {@const isOpen = !!$workspaceStore.expandedFolders[item.path]}
+                        {@const isOpen =
+                          !!$workspaceStore.expandedFolders[item.path]}
                         <div style="margin-bottom: 2px;">
                           <!-- svelte-ignore a11y-click-events-have-key-events -->
                           <!-- svelte-ignore a11y-no-static-element-interactions -->
@@ -1756,7 +1990,9 @@
                             >
                               <ChevronRight
                                 size={13}
-                                style="color: var(--text-muted); transition: transform 0.12s; transform: rotate({isOpen ? 90 : 0}deg); flex-shrink: 0;"
+                                style="color: var(--text-muted); transition: transform 0.12s; transform: rotate({isOpen
+                                  ? 90
+                                  : 0}deg); flex-shrink: 0;"
                               />
                               <Folder
                                 size={14}
@@ -2024,17 +2260,76 @@
             <div class="panel-header">
               <div class="panel-title">Search Workspace</div>
             </div>
+
             <div class="panel-body">
               <div class="sidebar-search-panel">
-                <input type="text" placeholder="Search string..." />
-                <input type="text" placeholder="Files to include (e.g. *.c)" />
-                <div
-                  style="font-size: 0.75rem; color: var(--text-dark); margin-top: 10px;"
-                >
-                  No active search results. Press Enter to search.
-                </div>
+                <input
+                  bind:value={searchQuery}
+                  type="text"
+                  placeholder="Search string..."
+                  onkeydown={(e) => {
+                    if (e.key === "Enter") {
+                      searchWorkspace();
+                    }
+                  }}
+                />
+
+                <input
+                  bind:value={includePattern}
+                  type="text"
+                  placeholder="Files to include (e.g. *.c)"
+                  onkeydown={(e) => e.key === "Enter" && searchWorkspace()}
+                />
+
+                {#if searching}
+                  <div class="search-status">Searching...</div>
+                {:else if searchResults.length === 0}
+                  <div class="search-status">
+                    No active search results. Press Enter to search.
+                  </div>
+                {:else}
+                  <div class="search-summary">
+                    {searchResults.length} result{searchResults.length === 1
+                      ? ""
+                      : "s"}
+                  </div>
+
+                  <div class="search-results">
+                    {#each groupedSearchResults as group}
+                      <div class="search-group">
+                        <div class="search-group-header">
+                          <span class="search-file-icon">📄</span>
+
+                          <span class="search-file-name">{group.file}</span>
+
+                          <span class="search-count">
+                            ({group.matches.length})
+                          </span>
+                        </div>
+
+                        {#each group.matches as match}
+                          <button
+                            class="search-match"
+                            onclick={() => openSearchResult(match)}
+                          >
+                            <span class="search-line-number">
+                              {match.line}
+                            </span>
+
+                            <span class="search-line-text">
+                              {match.text}
+                            </span>
+                          </button>
+                        {/each}
+                      </div>
+                    {/each}
+                  </div>
+                  <!-- search-results -->
+                {/if}
               </div>
+              <!-- sidebar-search-panel -->
             </div>
+            <!-- panel-body -->
           {/if}
 
           {#if $workspaceStore.activeSidebarTab === "git"}
@@ -2462,15 +2757,118 @@
               <div class="boards-config-panel">
                 <div class="config-group">
                   <!-- svelte-ignore a11y-label-has-associated-control -->
-                  <label>MCU Board Target</label>
+                  <label>
+                    MCU Board Target
+                    {#if $workspaceStore.boardCatalog.length > 0}
+                      <span class="config-group-count"
+                        >{$workspaceStore.boardCatalog.length} boards</span
+                      >
+                    {/if}
+                  </label>
+                  {#if $workspaceStore.boardCatalog.length > 8}
+                    <input
+                      type="text"
+                      class="board-search-input"
+                      placeholder="Filter by board, MCU, or family…"
+                      bind:value={boardSearchQuery}
+                    />
+                  {/if}
                   <select
                     class="config-select"
                     value={$workspaceStore.selectedBoard}
                     onchange={(e) =>
                       actions.setSelectedBoard(e.currentTarget.value as any)}
                   >
-                    <option value="STM32F103">STM32F103C8T6 — Blue Pill (Cortex-M3)</option>
+                    {#each groupedBoards as [family, boards]}
+                      <optgroup label={family}>
+                        {#each boards as board}
+                          <option value={board.id}>{board.label}</option>
+                        {/each}
+                      </optgroup>
+                    {/each}
+                    {#if $workspaceStore.boardCatalog.length === 0 && $workspaceStore.selectedBoard}
+                      <option value={$workspaceStore.selectedBoard}>
+                        {$workspaceStore.selectedBoard}
+                      </option>
+                    {/if}
                   </select>
+                  <button
+                    type="button"
+                    class="board-detect-btn"
+                    disabled={detectingBoard}
+                    onclick={runBoardDetection}
+                  >
+                    {detectingBoard
+                      ? "Detecting…"
+                      : "🔌 Detect connected board"}
+                  </button>
+                  <button
+                    type="button"
+                    class="board-detect-btn"
+                    disabled={refreshingBoards}
+                    onclick={refreshBoardCatalog}
+                  >
+                    {refreshingBoards
+                      ? "Refreshing catalog..."
+                      : "Refresh STM32 board catalog"}
+                  </button>
+                  <button
+                    type="button"
+                    class="board-detect-btn"
+                    disabled={importingStm32Metadata}
+                    onclick={importStm32Metadata}
+                  >
+                    {importingStm32Metadata
+                      ? "Importing ST metadata..."
+                      : "Import official STM32 pin data"}
+                  </button>
+                  <div class="custom-board-inline">
+                    <input
+                      type="text"
+                      class="config-input"
+                      placeholder="custom board id"
+                      bind:value={customBoardId}
+                    />
+                    <input
+                      type="text"
+                      class="config-input"
+                      placeholder="STM32F401RETx"
+                      bind:value={customBoardMcu}
+                    />
+                    <button
+                      type="button"
+                      class="board-detect-btn"
+                      disabled={addingCustomBoard}
+                      onclick={addCustomBoard}
+                    >
+                      {addingCustomBoard ? "Adding..." : "Add custom STM32"}
+                    </button>
+                  </div>
+                  {#if detectResult}
+                    <div class="board-detect-result">
+                      {#if detectResult.candidates.length > 0}
+                        <span>
+                          Detected <strong>{detectResult.family}</strong> — pick
+                          a match:
+                        </span>
+                        <div class="board-detect-suggestions">
+                          {#each detectResult.candidates.slice(0, 8) as candidate}
+                            <button
+                              type="button"
+                              class="board-detect-suggestion"
+                              title={candidate.reason}
+                              onclick={() => applyDetectedBoard(candidate.board.id)}
+                            >
+                              {candidate.board.label}
+                              <span>{Math.round(candidate.confidence * 100)}%</span>
+                            </button>
+                          {/each}
+                        </div>
+                      {:else}
+                        <span>{detectResult.detail}</span>
+                      {/if}
+                    </div>
+                  {/if}
                 </div>
                 <div class="config-group">
                   <!-- svelte-ignore a11y-label-has-associated-control -->
@@ -2514,16 +2912,29 @@
           {/if}
 
           {#if $workspaceStore.activeSidebarTab === "debug"}
-            <div class="panel-header" style="height: auto; padding: 10px 14px; border-bottom: 1px solid var(--border-color);">
+            <div
+              class="panel-header"
+              style="height: auto; padding: 10px 14px; border-bottom: 1px solid var(--border-color);"
+            >
               <div class="panel-title">DEBUG & RUN</div>
             </div>
-            <div class="panel-body flex-container-explorer" style="padding: 10px;">
+            <div
+              class="panel-body flex-container-explorer"
+              style="padding: 10px;"
+            >
               <div class="debug-status-chip">
-                <Circle size={10} style="color: {$workspaceStore.debugHalted ? 'var(--accent-orange)' : 'var(--accent-success)'};" />
+                <Circle
+                  size={10}
+                  style="color: {$workspaceStore.debugHalted
+                    ? 'var(--accent-orange)'
+                    : 'var(--accent-success)'};"
+                />
                 <span>
                   {#if $workspaceStore.isDebugging}
                     {#if $workspaceStore.debugHalted}
-                      Halted @ {$workspaceStore.debugCurrentFile?.split('/').pop()}:{$workspaceStore.debugCurrentLine}
+                      Halted @ {$workspaceStore.debugCurrentFile
+                        ?.split("/")
+                        .pop()}:{$workspaceStore.debugCurrentLine}
                     {:else}
                       Running
                     {/if}
@@ -2534,19 +2945,44 @@
               </div>
 
               <div class="debug-toolbar">
-                <button class="debug-btn" disabled={!$workspaceStore.debugHalted} onclick={actions.continueExecution} title="Continue (F5)">
+                <button
+                  class="debug-btn"
+                  disabled={!$workspaceStore.debugHalted}
+                  onclick={actions.continueExecution}
+                  title="Continue (F5)"
+                >
                   <Play size={14} />
                 </button>
-                <button class="debug-btn" disabled={!$workspaceStore.debugHalted} onclick={actions.stepOver} title="Step Over (F10)">
+                <button
+                  class="debug-btn"
+                  disabled={!$workspaceStore.debugHalted}
+                  onclick={actions.stepOver}
+                  title="Step Over (F10)"
+                >
                   <CornerRightDown size={14} />
                 </button>
-                <button class="debug-btn" disabled={!$workspaceStore.debugHalted} onclick={actions.stepInto} title="Step Into (F11)">
+                <button
+                  class="debug-btn"
+                  disabled={!$workspaceStore.debugHalted}
+                  onclick={actions.stepInto}
+                  title="Step Into (F11)"
+                >
                   <CornerDownRight size={14} />
                 </button>
-                <button class="debug-btn" disabled={!$workspaceStore.debugHalted} onclick={actions.stepOut} title="Step Out (Shift+F11)">
+                <button
+                  class="debug-btn"
+                  disabled={!$workspaceStore.debugHalted}
+                  onclick={actions.stepOut}
+                  title="Step Out (Shift+F11)"
+                >
                   <CornerRightUp size={14} />
                 </button>
-                <button class="debug-btn stop" disabled={!$workspaceStore.isDebugging} onclick={actions.stopDebugging} title="Stop (Shift+F5)">
+                <button
+                  class="debug-btn stop"
+                  disabled={!$workspaceStore.isDebugging}
+                  onclick={actions.stopDebugging}
+                  title="Stop (Shift+F5)"
+                >
                   <Square size={14} fill="currentColor" />
                 </button>
               </div>
@@ -2560,7 +2996,9 @@
                     <div class="debug-item">
                       <span class="debug-function">{frame.function}</span>
                       {#if frame.file}
-                        <span class="debug-file">{frame.file.split('/').pop()}:{frame.line}</span>
+                        <span class="debug-file"
+                          >{frame.file.split("/").pop()}:{frame.line}</span
+                        >
                       {/if}
                     </div>
                   {/each}
@@ -2588,11 +3026,21 @@
                 {:else}
                   {#each $workspaceStore.debugBreakpoints as bp}
                     <div class="debug-item bp-item">
-                      <div style="display: flex; align-items: center; gap: 6px;">
-                        <Circle size={8} fill="var(--accent-red)" style="color: var(--accent-red);" />
-                        <span>{bp.file.split('/').pop()}:{bp.line}</span>
+                      <div
+                        style="display: flex; align-items: center; gap: 6px;"
+                      >
+                        <Circle
+                          size={8}
+                          fill="var(--accent-red)"
+                          style="color: var(--accent-red);"
+                        />
+                        <span>{bp.file.split("/").pop()}:{bp.line}</span>
                       </div>
-                      <button class="remove-bp-btn" onclick={() => actions.toggleBreakpoint(bp.file, bp.line)}>
+                      <button
+                        class="remove-bp-btn"
+                        onclick={() =>
+                          actions.toggleBreakpoint(bp.file, bp.line)}
+                      >
                         <X size={12} />
                       </button>
                     </div>
@@ -2692,10 +3140,8 @@
                   <button
                     class="proposal-btn reject"
                     onclick={() =>
-                      actions.rejectProposal(
-                        activeDiff.msgId,
-                        activeDiff.path,
-                      )}>Reject</button
+                      actions.rejectProposal(activeDiff.msgId, activeDiff.path)}
+                    >Reject</button
                   >
                   <button
                     class="proposal-btn allow"
@@ -2745,7 +3191,11 @@
                 <span>Spaces: 4</span>
                 <span>UTF-8</span>
                 <span>LF</span>
-                <span>{languageForFile($workspaceStore.activeFile).toUpperCase()}</span>
+                <span
+                  >{languageForFile(
+                    $workspaceStore.activeFile,
+                  ).toUpperCase()}</span
+                >
                 <span>{boardLabel}</span>
               </div>
             {:else}
@@ -2919,53 +3369,63 @@
                         </div>
                       {/each}
                       {#if $workspaceStore.debugRegisters.length === 0}
-                        <div style="padding: 1rem; color: var(--text-muted); font-size: 0.8rem;">Registers unavailable. Target must be halted.</div>
+                        <div
+                          style="padding: 1rem; color: var(--text-muted); font-size: 0.8rem;"
+                        >
+                          Registers unavailable. Target must be halted.
+                        </div>
                       {/if}
                     </div>
                   {:else}
                     <div class="peripheral-list">
                       {#each $workspaceStore.registers as reg}
-                      <!-- svelte-ignore a11y-click-events-have-key-events -->
-                      <!-- svelte-ignore a11y-no-static-element-interactions -->
-                      <div
-                        class="peripheral-item {selectedPeripheral === reg.name
-                          ? 'active'
-                          : ''}"
-                        onclick={() => (selectedPeripheral = reg.name)}
-                      >
+                        <!-- svelte-ignore a11y-click-events-have-key-events -->
+                        <!-- svelte-ignore a11y-no-static-element-interactions -->
                         <div
-                          style="display: flex; align-items: center; gap: 8px;"
+                          class="peripheral-item {selectedPeripheral ===
+                          reg.name
+                            ? 'active'
+                            : ''}"
+                          onclick={() => (selectedPeripheral = reg.name)}
                         >
-                          <Cpu size={12} style="color: var(--accent-violet);" />
-                          <span>{reg.name}</span>
-                        </div>
-                        <span class="peripheral-address">{reg.value}</span>
-                      </div>
-                    {/each}
-                  </div>
-
-                  <div class="register-details-grid">
-                    {#each $workspaceStore.registers as reg}
-                      {#if selectedPeripheral === reg.name}
-                        {#each reg.bits || [] as bit}
-                          <div class="register-row">
-                            <div class="register-row-header">
-                              <span class="register-name">{bit.name}</span>
-                              <span class="register-value"
-                                >0x{bit.value.toString(16).toUpperCase()}</span
-                              >
-                            </div>
-                            <div class="register-desc">{bit.description}</div>
-                            <div
-                              style="display: flex; justify-content: space-between; align-items: center; font-size: 0.65rem; color: var(--text-dark); margin-top: 4px;"
-                            >
-                              <span>Range: {bit.range}</span>
-                            </div>
+                          <div
+                            style="display: flex; align-items: center; gap: 8px;"
+                          >
+                            <Cpu
+                              size={12}
+                              style="color: var(--accent-violet);"
+                            />
+                            <span>{reg.name}</span>
                           </div>
-                        {/each}
-                      {/if}
-                    {/each}
-                  </div>
+                          <span class="peripheral-address">{reg.value}</span>
+                        </div>
+                      {/each}
+                    </div>
+
+                    <div class="register-details-grid">
+                      {#each $workspaceStore.registers as reg}
+                        {#if selectedPeripheral === reg.name}
+                          {#each reg.bits || [] as bit}
+                            <div class="register-row">
+                              <div class="register-row-header">
+                                <span class="register-name">{bit.name}</span>
+                                <span class="register-value"
+                                  >0x{bit.value
+                                    .toString(16)
+                                    .toUpperCase()}</span
+                                >
+                              </div>
+                              <div class="register-desc">{bit.description}</div>
+                              <div
+                                style="display: flex; justify-content: space-between; align-items: center; font-size: 0.65rem; color: var(--text-dark); margin-top: 4px;"
+                              >
+                                <span>Range: {bit.range}</span>
+                              </div>
+                            </div>
+                          {/each}
+                        {/if}
+                      {/each}
+                    </div>
                   {/if}
                 </div>
               {/if}
@@ -3742,7 +4202,11 @@
                 title="When on, the agent runs build/flash and applies file changes without asking each time."
               >
                 <Zap size={11} />
-                <span>Auto-approve {$workspaceStore.autoApproveAgent ? "on" : "off"}</span>
+                <span
+                  >Auto-approve {$workspaceStore.autoApproveAgent
+                    ? "on"
+                    : "off"}</span
+                >
               </button>
               <form
                 class="chat-input-form"
