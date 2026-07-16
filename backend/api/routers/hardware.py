@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlmodel import select
 
@@ -27,6 +27,21 @@ router = APIRouter()
 def _sse(event: dict) -> str:
     """Format one dict as a Server-Sent Events frame (same shape as the agent stream)."""
     return f"data: {json.dumps(event)}\n\n"
+
+
+def _offline_project_detection(project_id: str, reason: Exception) -> DeviceStatus:
+    """Keep device polling alive when the project DB is temporarily unreachable."""
+    try:
+        status = hardware.auto_detect_board(project_id)
+        prefix = "Project database unavailable; ran generic detection instead."
+        status.detail = f"{prefix} {status.detail}".strip()
+        return status
+    except Exception:
+        return DeviceStatus(
+            connected=False,
+            probe="Database",
+            detail=f"Project database unavailable while checking device status: {reason}",
+        )
 
 
 def _sync_workspace(project_id: str, user_id: str) -> None:
@@ -53,9 +68,14 @@ def device_status(
     chip-ID probe and suggests a matching board instead of assuming one.
     """
     if project_id:
-        with db_session(user_id) as session:
-            project = get_project_or_404(session, project_id, user_id)
-            return hardware.detect_device(project.board_id, session=session)
+        try:
+            with db_session(user_id) as session:
+                project = get_project_or_404(session, project_id, user_id)
+                return hardware.detect_device(project.board_id, session=session)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            return _offline_project_detection(project_id, exc)
     return hardware.probe_connected_chip()
 
 
@@ -65,8 +85,13 @@ def detect_board(
 ) -> DeviceStatus:
     """Infer the best STM32 board from project files and connected hardware."""
     if project_id:
-        with db_session(user_id) as session:
-            get_project_or_404(session, project_id, user_id)
+        try:
+            with db_session(user_id) as session:
+                get_project_or_404(session, project_id, user_id)
+        except HTTPException:
+            raise
+        except Exception:
+            pass
     return hardware.auto_detect_board(project_id)
 
 @router.post("/api/projects/{project_id}/build")

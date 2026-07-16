@@ -359,6 +359,14 @@ class DebugSession:
         """Start OpenOCD and GDB, connect to target, return initial snapshot."""
         from schemas import DebugSnapshot, DebugState
 
+        device = registry.get(board)
+        if device and not device.supports_live_debug:
+            return self._error_snapshot(
+                f"{device.label} has no on-chip debug interface over its "
+                "bootloader — breakpoint/step debugging isn't available for "
+                "this board. Use Build + Upload and the serial monitor instead."
+            )
+
         elf = _find_elf(self.project_path)
         if not elf:
             return self._error_snapshot("No firmware .elf found. Please build the project first.")

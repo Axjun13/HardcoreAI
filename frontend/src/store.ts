@@ -149,12 +149,15 @@ export interface BoardMeta {
   mcu?: string;
   family?: string;
   core?: string;
+  arch?: string;
+  pio_platform?: string | null;
   flash_bytes?: number;
   ram_bytes?: number;
   f_cpu_hz?: number;
   hal_header?: string;
   upload_protocol?: string;
   debug_tool?: string;
+  avrdude_programmer?: string | null;
   openocd_target?: string;
   openocd_interface?: string;
   frameworks?: string[];
@@ -505,7 +508,7 @@ export const workspaceStore = writable({
   activeBottomTab: getInitialActiveBottomTab() as "terminal" | "plotter" | "registers" | "memory",
   terminalOpen: getInitialTerminalOpen(),  // whether the bottom drawer (serial/build/etc.) is expanded
   showWelcomeScreen: getInitialShowWelcomeScreen(),
-  activeSidebarTab: getInitialActiveSidebarTab() as "explorer" | "search" | "git" | "debug" | "extensions" | "boards" | "rag" | "libraries",
+  activeSidebarTab: getInitialActiveSidebarTab() as "explorer" | "search" | "git" | "debug" | "extensions" | "boards" | "rag" | "research" | "libraries",
   selectedBoard: getInitialSelectedBoard() as string,
   selectedBoardInfo: null as BoardMeta | null,
   boardCatalog: [] as BoardMeta[],
@@ -543,6 +546,12 @@ export const workspaceStore = writable({
 let agentAbortController: AbortController | null = null;
 
 // Helper Actions for Store
+const _INTERFACE_CFG_TO_PROBE: Record<string, "ST-Link V2" | "J-Link" | "CMSIS-DAP"> = {
+  "interface/stlink.cfg": "ST-Link V2",
+  "interface/jlink.cfg": "J-Link",
+  "interface/cmsis-dap.cfg": "CMSIS-DAP",
+};
+
 export const actions = {
   loadBoardCatalog: async () => {
     try {
@@ -557,11 +566,11 @@ export const actions = {
     }
   },
   refreshBoardCatalog: async () => {
-    const result = await api.refreshBoards("STM32");
+    const result = await api.refreshAllBoards();
     await actions.loadBoardCatalog();
     return result;
   },
-  addCustomBoard: async (payload: { id: string; mcu: string; label?: string }) => {
+  addCustomBoard: async (payload: { id: string; mcu: string; label?: string; arch?: string }) => {
     const board = await api.addCustomBoard(payload);
     await actions.loadBoardCatalog();
     await actions.setSelectedBoard(board.id);
@@ -1277,7 +1286,23 @@ export const actions = {
     workspaceStore.update(s => ({ ...s, selectedBoard: board }));
     try {
       const deviceInfo = await api.getBoard(board);
-      workspaceStore.update(s => ({ ...s, selectedBoardInfo: deviceInfo, pins: buildPinsFromDevice(deviceInfo) }));
+      // Auto-default the debug probe to whatever this specific board
+      // actually uses (e.g. Arduino Zero's onboard EDBG -> CMSIS-DAP)
+      // instead of leaving whatever probe was selected for the
+      // previously-selected board — that's how a SAMD board silently
+      // inherited "ST-Link V2" and failed to debug even after
+      // supports_live_debug was turned on for it. The dropdown still
+      // lets the user override afterward, e.g. for an external J-Link
+      // instead of a board's onboard debugger.
+      const impliedProbe = deviceInfo.openocd_interface
+        ? _INTERFACE_CFG_TO_PROBE[deviceInfo.openocd_interface]
+        : undefined;
+      workspaceStore.update(s => ({
+        ...s,
+        selectedBoardInfo: deviceInfo,
+        pins: buildPinsFromDevice(deviceInfo),
+        selectedProbe: impliedProbe ?? s.selectedProbe,
+      }));
       if (pid) await api.setProjectBoard(pid, board);
     } catch (e) {
       console.error("Failed to switch board", e);

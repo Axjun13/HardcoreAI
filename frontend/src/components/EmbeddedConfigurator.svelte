@@ -323,11 +323,163 @@
   };
   $: boardDisplayLabel = boardMeta?.label || selectedBoard || "Selected board";
   $: boardModel = boardMeta?.mcu || selectedBoard || "STM32";
+  // Historically this only ever distinguished AVR from "everything else",
+  // which silently mislabeled ESP32/ESP8266 (arch "xtensa") and SAMD (arch
+  // "arm-samd") boards with STM32-only fields (STM32Cube HAL version, a
+  // .ld linker file, arm-none-eabi-gcc as the toolchain) even though those
+  // boards are actually flashed via esptool/bossac and built with the
+  // Arduino framework (see ARDUINO_FRAMEWORK_ARCHES in boards/device.py on
+  // the backend). Kept as a boolean for the AVR-specific bootloader string
+  // below, but every other branch now keys off `archKind` so each arch
+  // shows its own real toolchain/upload method instead of falling into the
+  // STM32 branch by default.
+  $: archKind = boardMeta?.arch ?? "arm-stm32";
+  $: boardFrameworks = boardMeta?.frameworks ?? [];
+  $: isArduinoFramework =
+    boardFrameworks.includes("arduino") &&
+    (archKind === "avr" ||
+      archKind === "xtensa" ||
+      archKind === "arm-samd" ||
+      archKind === "arduino-generic");
+  $: isEspIdfFramework = archKind === "xtensa" && boardFrameworks.includes("espidf");
   $: projectName = `blinky-${(selectedBoard || "board").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`;
   $: linkerFile = `${boardModel.replace(/[^a-zA-Z0-9]+/g, "") || "STM32"}_FLASH.ld`;
   $: halVersion = boardMeta?.family
     ? `STM32Cube ${boardMeta.family.replace("STM32", "")}`
     : "STM32Cube F1";
+
+  // Per-arch project metadata for the Project tab. STM32 keeps its existing
+  // row list (HAL version/linker file/heap+stack are genuinely per-board
+  // there); the other three architectures all build through the Arduino
+  // framework, but their toolchain/upload/core details differ from each
+  // other and from STM32, not just from AVR.
+  $: archProjectRows =
+    isEspIdfFramework
+      ? [
+          {
+            label: "Target Framework",
+            value: "ESP-IDF via PlatformIO",
+          },
+          {
+            label: "Target Toolchain compiler",
+            value:
+              boardMeta?.core === "riscv32"
+                ? "riscv32-esp-elf-gcc"
+                : "xtensa-esp32-elf-gcc",
+          },
+          {
+            label: "Upload method",
+            value: "esptool serial bootloader",
+          },
+          {
+            label: "Entrypoint",
+            value: "app_main()",
+          },
+          {
+            label: "Runtime",
+            value: "FreeRTOS + ESP-IDF drivers",
+          },
+        ]
+      : archKind === "avr"
+      ? [
+          { label: "Target Toolchain compiler", value: "avr-gcc" },
+          {
+            label: "Upload method",
+            value: `avrdude (${boardMeta?.avrdude_programmer ?? "arduino"} bootloader)`,
+          },
+          {
+            label: "Processor Heap Limit",
+            value: "n/a — AVR has no MMU/heap config",
+          },
+          {
+            label: "Processor Stack Limit",
+            value: "n/a — shares SRAM with heap",
+          },
+          {
+            label: "Arduino Core Version",
+            value: "arduino-avr-core (via PlatformIO)",
+          },
+        ]
+      : archKind === "xtensa"
+        ? [
+            {
+              label: "Target Toolchain compiler",
+              value:
+                "xtensa-esp32-elf-gcc (or riscv32-esp-elf-gcc on C-series)",
+            },
+            {
+              label: "Upload method",
+              value: "esptool (serial bootloader sync)",
+            },
+            {
+              label: "Processor Heap Limit",
+              value: "Dynamic FreeRTOS heap — no fixed limit set here",
+            },
+            {
+              label: "Processor Stack Limit",
+              value: "Per-task stack, sized by Arduino core defaults",
+            },
+            {
+              label: "Arduino Core Version",
+              value: "arduino-esp32 core (via PlatformIO)",
+            },
+          ]
+        : archKind === "arm-samd"
+          ? [
+              {
+                label: "Target Toolchain compiler",
+                value: "arm-none-eabi-gcc",
+              },
+              {
+                label: "Upload method",
+                value: "bossac (SAM-BA/UF2 bootloader, 1200bps touch-reset)",
+              },
+              {
+                label: "Processor Heap Limit",
+                value: "n/a — shares SRAM with heap, Arduino core default",
+              },
+              {
+                label: "Processor Stack Limit",
+                value: "n/a — shares SRAM with heap",
+              },
+              {
+                label: "Arduino Core Version",
+                value: "arduino-samd-core (via PlatformIO)",
+              },
+            ]
+          : archKind === "arduino-generic"
+            ? [
+                {
+                  label: "Target Framework",
+                  value: `Arduino via PlatformIO ${boardMeta?.pio_platform ?? "platform"}`,
+                },
+                {
+                  label: "Upload method",
+                  value: boardMeta?.upload_protocol ?? "PlatformIO board default",
+                },
+                {
+                  label: "Processor Heap Limit",
+                  value: "Board/core default",
+                },
+                {
+                  label: "Processor Stack Limit",
+                  value: "Board/core default",
+                },
+                {
+                  label: "Arduino Core Version",
+                  value: "Resolved by selected PlatformIO platform",
+                },
+              ]
+          : [
+              {
+                label: "Target Toolchain compiler",
+                value: "arm-none-eabi-gcc",
+              },
+              { label: "Microcontroller Linker File", value: linkerFile },
+              { label: "Processor Heap Limit", value: "0x200" },
+              { label: "Processor Stack Limit", value: "0x400" },
+              { label: "STM32Cube HAL Version", value: `${halVersion} v1.8.6` },
+            ];
 
   // Oscillator + PLL setup used by each family's SystemClock_Config()
   // template in hal_codegen.py. Mirrors the backend's per-family choices so
@@ -826,37 +978,61 @@
   <!-- ── CLOCK TAB ── -->
   {#if activeTab === "Clock"}
     <div class="ec-content ec-clock-tab">
-      <div class="ec-section-title">Clock Tree Configuration</div>
-      <div class="ec-clock-tree">
-        {#each clockTreeRows as row}
-          <div class="ec-clock-row">
-            <span class="ec-clock-src">{row.src}</span>
-            <span class="ec-clock-arrow">{row.arrow}</span>
-            <span class="ec-clock-node">{row.node}</span>
-            <span class="ec-clock-result">{row.result}</span>
+      {#if isArduinoFramework || isEspIdfFramework}
+        <div class="ec-pinout-unavailable">
+          <AlertTriangle size={28} />
+          <div class="ec-pinout-unavailable-title">
+            No RCC/PLL tree for {boardDisplayLabel}
+          </div>
+          <p>
+            {isEspIdfFramework ? "ESP-IDF" : "The Arduino framework"} configures
+            the system clock for you at startup — there's no
+            SystemClock_Config()-style RCC/PLL tree to expose here, the way
+            there is for STM32Cube HAL boards. This board runs at a
+            fixed <strong>{specs.speed}</strong> core clock set by the {archKind ===
+            "avr"
+              ? "AVR"
+              : archKind === "xtensa"
+                ? "Espressif"
+                : archKind === "arm-samd"
+                  ? "SAMD"
+                  : boardMeta?.pio_platform ?? "Arduino"}
+            board definition.
+          </p>
+        </div>
+      {:else}
+        <div class="ec-section-title">Clock Tree Configuration</div>
+        <div class="ec-clock-tree">
+          {#each clockTreeRows as row}
+            <div class="ec-clock-row">
+              <span class="ec-clock-src">{row.src}</span>
+              <span class="ec-clock-arrow">{row.arrow}</span>
+              <span class="ec-clock-node">{row.node}</span>
+              <span class="ec-clock-result">{row.result}</span>
+            </div>
+          {/each}
+        </div>
+        <div class="ec-clock-note">
+          Exact prescaler tree is family-specific — see the generated
+          SystemClock_Config() in the Project tab for the full breakdown.
+        </div>
+
+        <div class="ec-section-title" style="margin-top: 16px;">
+          Clock Source Frequencies
+        </div>
+        {#each clockSourceRows as row}
+          <div class="ec-param-row">
+            <label class="ec-param-label" for={makeFieldId(row.label)}
+              >{row.label}</label
+            >
+            <input
+              id={makeFieldId(row.label)}
+              class="ec-param-input"
+              value={row.value}
+            />
           </div>
         {/each}
-      </div>
-      <div class="ec-clock-note">
-        Exact prescaler tree is family-specific — see the generated
-        SystemClock_Config() in the Project tab for the full breakdown.
-      </div>
-
-      <div class="ec-section-title" style="margin-top: 16px;">
-        Clock Source Frequencies
-      </div>
-      {#each clockSourceRows as row}
-        <div class="ec-param-row">
-          <label class="ec-param-label" for={makeFieldId(row.label)}
-            >{row.label}</label
-          >
-          <input
-            id={makeFieldId(row.label)}
-            class="ec-param-input"
-            value={row.value}
-          />
-        </div>
-      {/each}
+      {/if}
     </div>
   {/if}
 
@@ -1176,7 +1352,7 @@
   {#if activeTab === "Project"}
     <div class="ec-content ec-project-tab">
       <div class="ec-section-title">Project Directives</div>
-      {#each [{ label: "Firmware Project Name", value: projectName }, { label: "Target Toolchain compiler", value: "arm-none-eabi-gcc" }, { label: "Microcontroller Linker File", value: linkerFile }, { label: "Processor Heap Limit", value: "0x200" }, { label: "Processor Stack Limit", value: "0x400" }, { label: "STM32Cube HAL Version", value: `${halVersion} v1.8.6` }] as row}
+      {#each [{ label: "Firmware Project Name", value: projectName }, ...archProjectRows] as row}
         <div class="ec-param-row">
           <label class="ec-param-label" for={makeFieldId(row.label)}
             >{row.label}</label
@@ -1192,7 +1368,7 @@
       <div class="ec-section-title" style="margin-top: 16px;">
         Core Generated Source Layout
       </div>
-      {#each ["src/main.c", "src/hal/main_init.c", "src/hal/rcc_init.c", "platformio.ini"] as f}
+      {#each isArduinoFramework ? ["src/main.cpp", "platformio.ini"] : isEspIdfFramework ? ["src/main.c", "platformio.ini"] : ["src/main.c", "src/hal/main_init.c", "src/hal/rcc_init.c", "platformio.ini"] as f}
         <div class="ec-file-row">
           <FileCode size={12} style="color: var(--accent-violet-hover);" />
           <span>{f}</span>

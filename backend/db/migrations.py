@@ -71,6 +71,17 @@ async def lifespan(app: FastAPI):
               ADD COLUMN IF NOT EXISTS color text;
         """))
 
+        # Component catalogue metadata used by the research/component-selection
+        # flow. Existing deployments keep working because all columns are
+        # nullable or default to empty JSON arrays.
+        session.exec(text("""
+            ALTER TABLE public.components
+              ADD COLUMN IF NOT EXISTS library_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
+              ADD COLUMN IF NOT EXISTS buy_links jsonb NOT NULL DEFAULT '[]'::jsonb,
+              ADD COLUMN IF NOT EXISTS datasheet_url text,
+              ADD COLUMN IF NOT EXISTS aliases jsonb NOT NULL DEFAULT '[]'::jsonb;
+        """))
+
         # Agent chat history — one JSON blob per project. New table (not seeded by
         # the Supabase migration), so create it here if missing.
         session.exec(text("""

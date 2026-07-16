@@ -7,6 +7,8 @@ loop parses the whole reply at once).
   - llamacpp   — local OpenAI-compatible server (Prism Bonsai 8B, 1-bit quant)
   - openrouter — OpenRouter cloud (gpt-oss-120b)
   - gemini     — Google Gemini API (gemini-2.5-flash)
+  - deepseek   — DeepSeek chat API
+  - sarvam     — Sarvam chat-compatible API (configurable URL/model)
 
 Keys/URLs come from backend/.env. A provider raises RuntimeError if its key is
 missing, so the failure is explicit rather than a confusing 401 later.
@@ -41,6 +43,14 @@ OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "openai/gpt-oss-120b")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "").strip()
+DEEPSEEK_URL = os.environ.get("DEEPSEEK_URL", "https://api.deepseek.com/v1/chat/completions").strip()
+DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
+
+SARVAM_API_KEY = os.environ.get("SARVAM_API_KEY", "").strip()
+SARVAM_URL = os.environ.get("SARVAM_URL", "https://api.sarvam.ai/v1/chat/completions").strip()
+SARVAM_MODEL = os.environ.get("SARVAM_MODEL", "sarvam-m")
+
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434").rstrip("/")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5-coder:7b")
 
@@ -60,6 +70,16 @@ PROVIDERS = {
     "gemini": {
         "label": "Gemini 2.5 Flash",
         "model": GEMINI_MODEL,
+        "local": False,
+    },
+    "deepseek": {
+        "label": "DeepSeek",
+        "model": DEEPSEEK_MODEL,
+        "local": False,
+    },
+    "sarvam": {
+        "label": "Sarvam",
+        "model": SARVAM_MODEL,
         "local": False,
     },
     "ollama": {
@@ -88,6 +108,10 @@ def available_providers() -> list[dict]:
             available = bool(OPENROUTER_API_KEY)
         elif key == "gemini":
             available = bool(GEMINI_API_KEY)
+        elif key == "deepseek":
+            available = bool(DEEPSEEK_API_KEY)
+        elif key == "sarvam":
+            available = bool(SARVAM_API_KEY)
         else:  # llamacpp and ollama need no key — availability is "is the server up?",
             available = True  # which we can't know without a probe, so assume yes.
         out.append({"id": key, "available": available, **meta})
@@ -196,11 +220,35 @@ async def _gemini_complete(messages: list[dict]) -> str:
         raise LLMError(f"Unexpected Gemini response: {data}") from exc
 
 
+async def _deepseek_complete(messages: list[dict]) -> str:
+    if not DEEPSEEK_API_KEY:
+        raise LLMError("DEEPSEEK_API_KEY is not set in backend/.env.")
+    return await _openai_style_complete(
+        DEEPSEEK_URL,
+        DEEPSEEK_MODEL,
+        messages,
+        headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}"},
+    )
+
+
+async def _sarvam_complete(messages: list[dict]) -> str:
+    if not SARVAM_API_KEY:
+        raise LLMError("SARVAM_API_KEY is not set in backend/.env.")
+    return await _openai_style_complete(
+        SARVAM_URL,
+        SARVAM_MODEL,
+        messages,
+        headers={"Authorization": f"Bearer {SARVAM_API_KEY}", "api-subscription-key": SARVAM_API_KEY},
+    )
+
+
 _DISPATCH = {
     "llamacpp": _llamacpp_complete,
     "ollama": _ollama_complete,
     "openrouter": _openrouter_complete,
     "gemini": _gemini_complete,
+    "deepseek": _deepseek_complete,
+    "sarvam": _sarvam_complete,
 }
 
 

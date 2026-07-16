@@ -163,6 +163,158 @@ LQFP144_STM32U5 = [
 ]
 
 # Maps a board's package (derived below) to its pin list.
+# ---------------------------------------------------------------------------
+# Arduino / AVR — silkscreen header pin labels.
+#
+# These are NOT chip-package pinouts (that would be the raw ATmega TQFP/DIP
+# pin order, which nobody wiring an Arduino ever looks at). What matters to
+# a user of these boards is the silkscreen label printed on the board's
+# header — D0-D13, A0-A5, 5V, GND, etc. — in physical left-header /
+# right-header order as printed on the board, which is a different data
+# shape from PACKAGE_PINOUTS below. Kept as a separate table + separate
+# accessor (get_arduino_pinout) rather than shoehorned into
+# PACKAGE_PINOUTS/get_full_pinout, which is chip-package-shaped and whose
+# frontend renderer draws a 4-sided QFP chip — the wrong visual for a
+# 2-row Arduino header. Not wired into Device.full_pinout yet; that needs a
+# matching header-style renderer on the frontend first (see board_context
+# gap tracking).
+UNO_HEADER = {
+    "left": ["D8", "D7", "D6", "D5", "D4", "D3", "D2", "GND", "RESET", "RX0/D0", "TX1/D1"],
+    "right": ["IOREF", "RESET", "3V3", "5V", "GND", "GND", "VIN",
+              "A0", "A1", "A2", "A3", "A4/SDA", "A5/SCL"],
+    "digital_pwm": ["D3", "D5", "D6", "D9", "D10", "D11"],  # ~PWM-marked pins
+}
+
+NANO_HEADER = {
+    "left": ["D13", "3V3", "REF", "A0", "A1", "A2", "A3", "A4/SDA", "A5/SCL", "A6", "A7"],
+    "right": ["D12", "D11", "D10", "D9", "D8", "D7", "D6", "D5", "D4", "D3", "D2", "GND", "RESET", "RX0/D0", "TX1/D1"],
+    "digital_pwm": ["D3", "D5", "D6", "D9", "D10", "D11"],
+}
+
+MEGA2560_HEADER = {
+    # Mega has far more pins than Uno/Nano — digital 0-53, analog A0-A15.
+    "digital": [f"D{i}" for i in range(54)],
+    "analog": [f"A{i}" for i in range(16)],
+    "digital_pwm": [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 44, 45, 46],
+    "serial": ["Serial (D0/D1)", "Serial1 (D19/D18)", "Serial2 (D17/D16)", "Serial3 (D15/D14)"],
+}
+
+LEONARDO_MICRO_HEADER = {
+    # 32U4 boards: D0-D13 digital, A0-A5 analog, plus A6-A11 shared with
+    # some digital pins (board-silkscreened as D4/D6/D8/D9/D10/D12 doubling
+    # as A6-A11) — kept explicit rather than merged since both labels are
+    # legitimately printed on the board.
+    "digital": [f"D{i}" for i in range(14)],
+    "analog": ["A0", "A1", "A2", "A3", "A4", "A5", "A6(D4)", "A7(D6)", "A8(D8)", "A9(D9)", "A10(D10)", "A11(D12)"],
+    "digital_pwm": [3, 5, 6, 9, 10, 11, 13],
+}
+
+ARDUINO_HEADER_PINOUTS: dict[str, dict] = {
+    "uno": UNO_HEADER,
+    "nanoatmega328": NANO_HEADER,
+    "megaatmega2560": MEGA2560_HEADER,
+    "leonardo": LEONARDO_MICRO_HEADER,
+    "micro": LEONARDO_MICRO_HEADER,
+}
+
+
+def _generic_avr_pinout(mcu: str) -> dict:
+    mcu_upper = (mcu or "").upper()
+    if "2560" in mcu_upper or "1280" in mcu_upper:
+        return {
+            **MEGA2560_HEADER,
+            "status": "generic_arduino_api",
+            "note": "Generic Arduino Mega-style API pins. Physical header order is board-variant specific.",
+        }
+    if "32U4" in mcu_upper:
+        return {
+            **LEONARDO_MICRO_HEADER,
+            "status": "generic_arduino_api",
+            "note": "Generic ATmega32U4 Arduino API pins. Physical header order is board-variant specific.",
+        }
+    if "ATTINY" in mcu_upper:
+        return {
+            "digital": [f"D{i}" for i in range(6)],
+            "analog": [f"A{i}" for i in range(4)],
+            "digital_pwm": [0, 1, 4],
+            "status": "generic_arduino_api",
+            "note": "Generic ATtiny Arduino-core pin namespace; check the selected core variant for physical pins.",
+        }
+    return {
+        "digital": [f"D{i}" for i in range(14)],
+        "analog": [f"A{i}" for i in range(6)],
+        "digital_pwm": [3, 5, 6, 9, 10, 11],
+        "i2c": ["SDA", "SCL"],
+        "spi": ["MOSI", "MISO", "SCK", "SS"],
+        "status": "generic_arduino_api",
+        "note": "Generic Arduino AVR API pins. Curated boards may have exact silkscreen header order.",
+    }
+
+
+def _generic_samd_pinout(mcu: str) -> dict:
+    analog_count = 8 if "SAMD21" in (mcu or "").upper() else 12
+    return {
+        "digital": [f"D{i}" for i in range(22)],
+        "analog": [f"A{i}" for i in range(analog_count)],
+        "i2c": ["SDA", "SCL"],
+        "spi": ["MOSI", "MISO", "SCK"],
+        "serial": ["Serial", "Serial1"],
+        "status": "generic_arduino_api",
+        "note": "Generic SAMD Arduino API pins. Physical header labels come from the board's PlatformIO variant.",
+    }
+
+
+def _generic_esp_pinout(mcu: str) -> dict:
+    is_esp8266 = "8266" in (mcu or "").lower()
+    gpio_count = 17 if is_esp8266 else 40
+    return {
+        "digital": [f"GPIO{i}" for i in range(gpio_count)],
+        "analog": ["A0"] if is_esp8266 else [f"ADC{i}" for i in range(1, 19)],
+        "i2c": ["SDA", "SCL"],
+        "spi": ["MOSI", "MISO", "SCK", "SS"],
+        "serial": ["Serial", "Serial1", "Serial2"] if not is_esp8266 else ["Serial"],
+        "status": "generic_arduino_api",
+        "note": "Generic ESP Arduino-core GPIO namespace. Avoid strapping/flash pins unless the board variant marks them safe.",
+    }
+
+
+def _generic_arduino_framework_pinout(mcu: str) -> dict:
+    return {
+        "digital": [f"D{i}" for i in range(32)],
+        "analog": [f"A{i}" for i in range(16)],
+        "i2c": ["SDA", "SCL"],
+        "spi": ["MOSI", "MISO", "SCK", "SS"],
+        "serial": ["Serial", "Serial1"],
+        "status": "generic_arduino_api",
+        "note": (
+            "Generic Arduino framework pin namespace for this PlatformIO board. "
+            "Use the board package/variant docs for exact physical header order."
+        ),
+    }
+
+
+def get_arduino_pinout(board_id: str, *, mcu: str = "", arch: str = "") -> dict | None:
+    """Arduino-framework pin labels.
+
+    Curated boards return physical/silkscreen layouts. Every imported
+    Arduino-framework board gets a generic API namespace fallback so the IDE can
+    still reason about D/A/GPIO constants without pretending it knows exact
+    physical header order.
+    """
+    curated = ARDUINO_HEADER_PINOUTS.get(board_id)
+    if curated:
+        return {**curated, "status": "verified"}
+    if arch == "avr":
+        return _generic_avr_pinout(mcu)
+    if arch == "arm-samd":
+        return _generic_samd_pinout(mcu)
+    if arch == "xtensa":
+        return _generic_esp_pinout(mcu)
+    if arch == "arduino-generic":
+        return _generic_arduino_framework_pinout(mcu)
+    return None
+
+
 PACKAGE_PINOUTS: dict[str, list[str]] = {
     "LQFP48": LQFP48_F1,
     "LQFP64": LQFP64_NUCLEO64,

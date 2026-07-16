@@ -284,6 +284,37 @@ class Toolbox:
         return f"{len(wires)} wire(s):\n" + "\n".join(out)
 
     @tool
+    def component_context(self) -> str:
+        """Show selected components, resolved pin layout, inferred libraries, datasheets, and buy links."""
+        from services.component_resolution import context_to_markdown, resolve_component_context
+
+        return context_to_markdown(
+            resolve_component_context(catalogue=self.catalogue, workbench=self.workbench)
+        )
+
+    @tool
+    def prepare_component_libraries(self) -> str:
+        """Store the resolved component snapshot and add inferred libraries to platformio.ini."""
+        if not self.project_id:
+            return "ERROR: No project is associated with this run; cannot prepare component libraries."
+        from services.component_resolution import (
+            install_component_libraries,
+            resolve_component_context,
+            write_component_manifest,
+        )
+
+        context = resolve_component_context(catalogue=self.catalogue, workbench=self.workbench)
+        manifest = write_component_manifest(self.project_id, context)
+        results = install_component_libraries(self.project_id, context)
+        if not results:
+            return f"Stored component context at {manifest}. No installable libraries were inferred."
+        lines = [
+            f"- {'OK' if result.get('success') else 'FAILED'}: {result.get('message', '')}"
+            for result in results
+        ]
+        return f"Stored component context at {manifest}.\nLibrary results:\n" + "\n".join(lines)
+
+    @tool
     def describe_component(self, component: str) -> str:
         """Show one placed component's details and the role of each of its pins."""
         c = self._find_component(component)
@@ -401,6 +432,9 @@ class Toolbox:
           peripherals: comma-separated peripheral ids to enable. Supported ids:
                        rcc, gpio, usart1, usart2, spi1, i2c1, tim1, adc1, dma, nvic.
                        Example: "rcc, gpio, usart2".
+                       (For Arduino/AVR boards rcc/dma/nvic have no framework
+                       equivalent and are skipped with a note — the framework
+                       configures those itself.)
 
         The generated files are staged as normal diff proposals for the user to
         Allow/Reject — nothing is written until approved.
@@ -409,6 +443,10 @@ class Toolbox:
         #include / clock / DMA code will be for the wrong MCU family and will not
         compile."""
         from api.routers.hal_codegen import generate_hal_files, SUPPORTED_FAMILIES, UnsupportedFamilyError
+        from api.routers.arduino_codegen import generate_arduino_files
+        from api.routers.espidf_codegen import generate_espidf_files
+        from boards.registry import registry as _registry
+        from boards.device import uses_arduino_framework, uses_espidf_framework
 
         board = (board or "").strip()
         if not board:
@@ -419,8 +457,14 @@ class Toolbox:
             return "ERROR: no peripherals given. Pass a comma-separated list, e.g. \"rcc, gpio, usart2\"."
 
         peripheral_dicts = [{"id": pid, "label": pid.upper(), "mode": "", "params": {}} for pid in ids]
+        device = _registry.get(board)
         try:
-            generated = generate_hal_files(board=board, peripherals=peripheral_dicts)
+            if uses_arduino_framework(device):
+                generated = generate_arduino_files(board=board, peripherals=peripheral_dicts)
+            elif uses_espidf_framework(device):
+                generated = generate_espidf_files(board=board, peripherals=peripheral_dicts)
+            else:
+                generated = generate_hal_files(board=board, peripherals=peripheral_dicts)
         except UnsupportedFamilyError as exc:
             return f"ERROR: {exc}"
         except Exception as exc:  # noqa: BLE001 — surface generation errors to the model
@@ -435,7 +479,8 @@ class Toolbox:
         # Stage each file into the working set so it flows through the standard
         # proposal/Allow-Reject diff path, exactly like write_file does.
         for rel_path, content in generated.items():
-            self.files[rel_path] = {"language": "c", "content": content}
+            language = "cpp" if rel_path.endswith((".cpp", ".ino")) else "c"
+            self.files[rel_path] = {"language": language, "content": content}
 
         paths = ", ".join(sorted(generated))
         return (

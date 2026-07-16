@@ -24,6 +24,10 @@ class Component(SQLModel, table=True):
     slug: str
     name: str
     library_name: str | None = None
+    library_ids: list[str] = SQLField(default_factory=list, sa_column=Column(JSON))
+    buy_links: list[dict[str, Any]] = SQLField(default_factory=list, sa_column=Column(JSON))
+    datasheet_url: str | None = None
+    aliases: list[str] = SQLField(default_factory=list, sa_column=Column(JSON))
     description: str | None = None
     is_controller: bool = False
     cpp_class_name: str | None = None

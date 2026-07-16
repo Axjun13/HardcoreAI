@@ -30,6 +30,7 @@ from api.routers import (
     libraries,
     projects,
     rag,
+    research,
     workbench,
     library_search,
     search,
@@ -61,6 +62,7 @@ app.include_router(files.router)
 app.include_router(agent.router)
 app.include_router(conversations.router)
 app.include_router(rag.router)
+app.include_router(research.router)
 app.include_router(git.router)
 app.include_router(hardware.router)
 app.include_router(debug.router)
