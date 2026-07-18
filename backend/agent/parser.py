@@ -346,7 +346,60 @@ def _cast(value: Any, type_name: str) -> Any:
 # 3. AGENT LOOP
 # ---------------------------------------------------------------------------
 
-MAX_STEPS = 16
+LOW_CONTEXT_PERCENT = 20.0
+
+
+def estimate_text_tokens(text: str) -> int:
+    """Conservative dependency-free token estimate for unreported providers."""
+    if not text:
+        return 0
+    return max(1, (len(text.encode("utf-8")) + 3) // 4)
+
+
+def estimate_message_tokens(messages: list[dict]) -> int:
+    # Chat templates add role/separator tokens around every message.
+    return 3 + sum(4 + estimate_text_tokens(str(message.get("content") or "")) for message in messages)
+
+
+def _context_status(
+    *,
+    provider: str,
+    model: str,
+    context_window: int,
+    context_used_tokens: int,
+    total_input_tokens: int,
+    total_output_tokens: int,
+    last_input_tokens: int,
+    last_output_tokens: int,
+    estimated: bool,
+    warning_percent: float,
+) -> dict[str, Any]:
+    used = max(0, context_used_tokens)
+    remaining = max(0, context_window - used)
+    remaining_percent = (remaining / context_window * 100.0) if context_window else 0.0
+    used_percent = min(100.0, 100.0 - remaining_percent) if context_window else 0.0
+    return {
+        "provider": provider,
+        "model": model or provider or "unknown",
+        "context_window": context_window,
+        "context_used_tokens": used,
+        "context_remaining_tokens": remaining,
+        "context_used_percent": round(used_percent, 1),
+        "context_remaining_percent": round(remaining_percent, 1),
+        "total_input_tokens": total_input_tokens,
+        "total_output_tokens": total_output_tokens,
+        "total_tokens": total_input_tokens + total_output_tokens,
+        "last_input_tokens": last_input_tokens,
+        "last_output_tokens": last_output_tokens,
+        "estimated": estimated,
+        "warning_percent": warning_percent,
+        "low": remaining_percent <= warning_percent,
+    }
+
+
+def _low_context_message(status: dict[str, Any]) -> str:
+    percent = round(float(status.get("context_remaining_percent") or 0))
+    return f"{percent}% context left. Please use another session."
 
 
 def _strip_code_fence(body: str) -> str:
@@ -379,6 +432,7 @@ class AgentTrace:
     question: str = ""
     options: list[str] = field(default_factory=list)
     messages: list[dict] = field(default_factory=list)
+    context_usage: dict[str, Any] = field(default_factory=dict)
     # Set when the run paused on a build/flash approval prompt ("build" | "flash").
     confirm_action: str = ""
 
@@ -400,12 +454,17 @@ async def run_phase(
     toolbox: "Toolbox",
     complete_fn: Callable,
     on_event: Callable | None = None,
+    provider: str = "",
+    model: str = "",
+    context_window: int = 0,
+    context_warning_percent: float = LOW_CONTEXT_PERCENT,
 ) -> AgentTrace:
     """Drive one isolated THINK/CALL phase to completion.
 
     `complete_fn(messages)` is an async callable returning the model's text —
     this is `functools.partial(llm.complete, provider)` in practice. The phase
-    ends when the model emits a reply with no CALL, or the step cap is hit.
+    ends when the model emits a reply with no CALL, asks for user input, or the
+    active model reaches the configured low-context threshold.
 
     `on_event`, if given, is an async callable invoked with a small dict for
     each meaningful step (think / call / code / result / question / plan / note /
@@ -445,8 +504,52 @@ async def run_phase(
     toolbox.user_confirmed = answered_yes
         
     trace = AgentTrace(phase=phase)
+    total_input_tokens = 0
+    total_output_tokens = 0
+    step = 0
 
-    for step in range(MAX_STEPS):
+    if context_window > 0:
+        initial_tokens = estimate_message_tokens(messages)
+        trace.context_usage = _context_status(
+            provider=provider,
+            model=model,
+            context_window=context_window,
+            context_used_tokens=initial_tokens,
+            total_input_tokens=0,
+            total_output_tokens=0,
+            last_input_tokens=initial_tokens,
+            last_output_tokens=0,
+            estimated=True,
+            warning_percent=context_warning_percent,
+        )
+        await emit({"type": "context", **trace.context_usage})
+        if trace.context_usage["low"]:
+            trace.status = "context_low"
+            trace.final = _low_context_message(trace.context_usage)
+            await emit({"type": "final", "text": trace.final})
+            return trace
+
+    while True:
+        if step > 0 and context_window > 0 and trace.context_usage.get("last_output_tokens", 0) > 0:
+            next_prompt_tokens = estimate_message_tokens(messages)
+            trace.context_usage = _context_status(
+                provider=provider,
+                model=model,
+                context_window=context_window,
+                context_used_tokens=next_prompt_tokens,
+                total_input_tokens=total_input_tokens,
+                total_output_tokens=total_output_tokens,
+                last_input_tokens=next_prompt_tokens,
+                last_output_tokens=0,
+                estimated=True,
+                warning_percent=context_warning_percent,
+            )
+            await emit({"type": "context", **trace.context_usage})
+            if trace.context_usage["low"]:
+                trace.status = "context_low"
+                trace.final = _low_context_message(trace.context_usage)
+                await emit({"type": "final", "text": trace.final})
+                return trace
         try:
             raw = await complete_fn(messages)
             print("RAW LLM OUTPUT:", repr(raw))
@@ -454,6 +557,32 @@ async def run_phase(
             print("LLM CALL FAILED:", repr(e))
             import traceback; traceback.print_exc()
             raise
+
+        usage = getattr(raw, "usage", {}) or {}
+        reported_prompt_tokens = int(usage.get("prompt_tokens") or 0)
+        reported_completion_tokens = int(usage.get("completion_tokens") or 0)
+        input_tokens = reported_prompt_tokens or estimate_message_tokens(messages)
+        output_tokens = reported_completion_tokens or estimate_text_tokens(str(raw))
+        total_input_tokens += input_tokens
+        total_output_tokens += output_tokens
+        response_model = str(getattr(raw, "model", "") or model or provider or "unknown")
+        response_context_window = int(getattr(raw, "context_window", 0) or context_window or 0)
+        if response_context_window > 0:
+            context_window = response_context_window
+            model = response_model
+            trace.context_usage = _context_status(
+                provider=provider,
+                model=response_model,
+                context_window=context_window,
+                context_used_tokens=input_tokens + output_tokens,
+                total_input_tokens=total_input_tokens,
+                total_output_tokens=total_output_tokens,
+                last_input_tokens=input_tokens,
+                last_output_tokens=output_tokens,
+                estimated=not bool(reported_prompt_tokens and reported_completion_tokens),
+                warning_percent=context_warning_percent,
+            )
+            await emit({"type": "context", **trace.context_usage})
         
         try:
             parsed = parse_call(raw, specs_by_name)
@@ -462,6 +591,7 @@ async def run_phase(
             await emit({"type": "error", "step": step, "message": f"ParseError: {exc}"})
             messages.append({"role": "assistant", "content": raw})
             messages.append({"role": "user", "content": f"TOOL RESULT: ParseError: {exc}. Ensure you format your tool call as CALL tool_name(args)."})
+            step += 1
             continue
 
         if parsed is None:
@@ -484,6 +614,7 @@ async def run_phase(
                         "```c\n...code...\n```\n"
                         "Re-send your code that way if you intended to save it."
                     )})
+                    step += 1
                     continue
 
             if parsed is None and trace.phase == "wiring":
@@ -491,10 +622,14 @@ async def run_phase(
                     trace.log_think_call(step, "", "parse_error", {}, "ERROR: Code blocks are not allowed in the wiring phase.")
                     messages.append({"role": "assistant", "content": raw})
                     messages.append({"role": "user", "content": "TOOL RESULT: ERROR: Do not write Python or C code. You must use the provided tools like CALL wire_pins(...) to wire the circuit. When you are completely done wiring, output a plain text summary without any code blocks."})
+                    step += 1
                     continue
                     
         if parsed is None:
             trace.final = raw.strip()
+            if trace.context_usage.get("low"):
+                trace.status = "context_low"
+                trace.final = f"{trace.final}\n\n{_low_context_message(trace.context_usage)}".strip()
             await emit({"type": "final", "text": trace.final})
             return trace
 
@@ -580,11 +715,34 @@ async def run_phase(
         # Feed the model its own emission plus the tool result, then loop.
         messages.append({"role": "assistant", "content": raw})
         messages.append({"role": "user", "content": f"TOOL RESULT: {result_str}"})
-
-    trace.final = "Reached the step limit before finishing."
-    trace.log_note("Step limit reached.")
-    await emit({"type": "final", "text": trace.final})
-    return trace
+        if context_window > 0:
+            # Keep the estimate monotonic relative to provider-reported usage;
+            # local tokenisation approximations must never make context appear
+            # to shrink after a tool result is appended.
+            next_prompt_tokens = max(
+                estimate_message_tokens(messages),
+                input_tokens + output_tokens + estimate_text_tokens(f"TOOL RESULT: {result_str}") + 4,
+            )
+            trace.context_usage = _context_status(
+                provider=provider,
+                model=model,
+                context_window=context_window,
+                context_used_tokens=next_prompt_tokens,
+                total_input_tokens=total_input_tokens,
+                total_output_tokens=total_output_tokens,
+                last_input_tokens=next_prompt_tokens,
+                last_output_tokens=0,
+                estimated=True,
+                warning_percent=context_warning_percent,
+            )
+            await emit({"type": "context", **trace.context_usage})
+            if trace.context_usage["low"]:
+                trace.status = "context_low"
+                trace.final = _low_context_message(trace.context_usage)
+                trace.log_note(trace.final)
+                await emit({"type": "final", "text": trace.final})
+                return trace
+        step += 1
 
 
 # Imported lazily to avoid a circular import (tools.py imports from parser.py).

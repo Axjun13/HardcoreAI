@@ -153,6 +153,7 @@ class Toolbox:
         project_id: str | None = None,
         build_output: str = "",
         auto_approve: bool = False,
+        target_board_id: str | None = None,
     ) -> None:
         self.project_name = project_name
         self.problem = problem
@@ -166,6 +167,10 @@ class Toolbox:
         self.user_id = user_id
         self.project_id = project_id
         self.build_output = build_output or ""
+        # Immutable unless select_project_board succeeds.  Tool-level target
+        # validation is the backstop when a model ignores the prompt and tries
+        # to generate firmware for another MCU family.
+        self.target_board_id = target_board_id
         # Session-level "auto-approve everything" toggle. When true, gated tools
         # (build/flash/delete) run without raising for confirmation. Treated the
         # same as a per-call user_confirmed=True.
@@ -317,6 +322,15 @@ class Toolbox:
         )
         manifest = write_component_manifest(self.project_id, context)
         results = install_component_libraries(self.project_id, context)
+        # Keep the agent's in-memory/DB proposal state aligned with the service,
+        # which writes lib_deps to the on-disk project workspace.
+        from services.hardware import workspace_dir
+        ini_path = workspace_dir(self.project_id) / "platformio.ini"
+        if ini_path.exists():
+            self.files["platformio.ini"] = {
+                "language": "ini",
+                "content": ini_path.read_text(encoding="utf-8"),
+            }
         if not results:
             return f"Stored component context at {manifest}. No installable libraries were inferred."
         lines = [
@@ -480,17 +494,19 @@ class Toolbox:
 
     @tool
     def generate_hal(self, board: str, peripherals: str) -> str:
-        """Generate ready-made STM32 HAL init files (src/hal/*.c and *.h) from
-        templates — the same output as the Embedded Configurator's Generate button.
+        """Generate framework-specific firmware scaffolding for the project board.
 
-        Use this when the user wants the structured per-peripheral HAL setup files
-        (e.g. gpio_init.c, uart2_init.c, rcc_init.c, main_init.c) rather than a
-        single hand-written src/main.c. For a simple one-file blink demo, prefer
-        write_file("src/main.c") instead.
+        STM32 targets receive HAL init files; Arduino targets receive
+        src/main.cpp; ESP-IDF targets receive src/main.c. This is the same
+        target-aware output as the Embedded Configurator's Generate button.
+
+        Use this for supported peripheral setup rather than inventing register
+        initialization. For application behavior, extend the entry file named in
+        RULE 1 (src/main.cpp for Arduino; src/main.c for STM32/ESP-IDF).
 
         Args:
           board:       this project's board REGISTRY ID exactly as given in the
-                       board context block (e.g. "bluepill_f103c8", "nucleo_f446re")
+                       board context block (e.g. "esp32dev", "bluepill_f103c8")
                        — NOT a bare family name like "STM32F4" or "F103".
           peripherals: comma-separated peripheral ids to enable. Supported ids:
                        rcc, gpio, usart1, usart2, spi1, i2c1, tim1, adc1, dma, nvic.
@@ -514,6 +530,12 @@ class Toolbox:
         board = (board or "").strip()
         if not board:
             return "ERROR: no board given. Pass this project's board id exactly as shown in the board context block."
+        if self.target_board_id and board != self.target_board_id:
+            return (
+                f"ERROR: refused code generation for '{board}': this project's target "
+                f"is '{self.target_board_id}'. Use the exact project board id from RULE 1, "
+                "or call select_project_board first when the user explicitly requests a target change."
+            )
 
         ids = [p.strip().lower() for p in peripherals.split(",") if p.strip()]
         if not ids:
@@ -531,7 +553,7 @@ class Toolbox:
         except UnsupportedFamilyError as exc:
             return f"ERROR: {exc}"
         except Exception as exc:  # noqa: BLE001 — surface generation errors to the model
-            return f"ERROR: HAL generation failed: {exc}"
+            return f"ERROR: firmware generation failed: {exc}"
 
         if not generated:
             return (
@@ -547,7 +569,7 @@ class Toolbox:
 
         paths = ", ".join(sorted(generated))
         return (
-            f"Generated {len(generated)} HAL file(s) for {board} "
+            f"Generated {len(generated)} framework-specific file(s) for {board} "
             f"({', '.join(ids)}): {paths}. Staged as diff proposals for approval."
         )
 
@@ -690,7 +712,7 @@ class WiringToolbox(Toolbox):
 
 
 class CodingToolbox(Toolbox):
-    """Inspect the finished netlist and write STM32 firmware into the code files."""
+    """Inspect the finished netlist and write target-specific firmware files."""
 
     @tool(wants_body=True)
     def write_file(self, path: str) -> str:
@@ -699,7 +721,7 @@ class CodingToolbox(Toolbox):
         # Only applies to C/H files that have no directory component at all.
         if "/" not in path and "\\" not in path and (path.endswith(".c") or path.endswith(".h")):
             path = "src/" + path
-        is_code = path.endswith(".c") or path.endswith(".h")
+        is_code = path.endswith((".c", ".h", ".cpp", ".hpp", ".cc", ".cxx"))
         # Markdown bodies routinely contain nested ``` code fences (e.g. example
         # C inside the README). The non-greedy fence extractor would truncate at
         # the first inner closing fence, so only unwrap a markdown body when it is
@@ -709,6 +731,41 @@ class CodingToolbox(Toolbox):
         else:
             content = _extract_fenced_code(self.call_body)
         existing = self.files.get(path)
+
+        # Deterministic framework safety: prompt instructions alone are not
+        # enough to stop an ESP project from accepting hallucinated STM32 HAL.
+        if self.target_board_id and path.startswith("src/"):
+            from boards.device import uses_arduino_framework, uses_espidf_framework
+            from boards.registry import registry
+
+            target = registry.get(self.target_board_id)
+            stm32_markers = (
+                "HAL_Init(", "__HAL_RCC_", "STM32Cube", "stm32f", "stm32g",
+                "stm32h", "stm32l", "stm32u", "stm32w", "stm32c", "stm32n",
+            )
+            lowered = content.casefold()
+            if target and target.arch != "arm-stm32" and any(
+                marker.casefold() in lowered for marker in stm32_markers
+            ):
+                return (
+                    f"ERROR: refused STM32 HAL code for project board {target.label} "
+                    f"({target.id}, {target.family}). Write firmware for the project's "
+                    "authoritative framework instead."
+                )
+            if target and uses_arduino_framework(target) and path == "src/main.c":
+                return (
+                    f"ERROR: {target.label} uses the Arduino framework, whose entry point "
+                    "must be src/main.cpp (setup()/loop()), not src/main.c."
+                )
+            if target and uses_espidf_framework(target) and (
+                "void setup(" in lowered
+                or "void loop(" in lowered
+                or "#include <arduino.h>" in lowered
+            ):
+                return (
+                    f"ERROR: {target.label} uses ESP-IDF. Write src/main.c with app_main() "
+                    "and ESP-IDF APIs, not an Arduino sketch."
+                )
 
         # Guard 1: never write an empty body — that would silently blank a file.
         if not content:
@@ -738,7 +795,12 @@ class CodingToolbox(Toolbox):
                     "or re-send the entire file (every function, every include) with write_file."
                 )
 
-        language = "markdown" if path.endswith(".md") else "c"
+        if path.endswith(".md"):
+            language = "markdown"
+        elif path.endswith((".cpp", ".hpp", ".cc", ".cxx")):
+            language = "cpp"
+        else:
+            language = "c"
         if existing is not None:
             language = existing.get("language", language)
             
@@ -761,6 +823,151 @@ class CodingToolbox(Toolbox):
             lang = self.files[path].get("language", "c")
             lines.append(f"  - {path} ({size} bytes, language: {lang})")
         return "Files in workspace:\n" + "\n".join(lines)
+
+    @tool
+    def search_libraries(self, query: str = "", category: str = "") -> str:
+        """Search the embedded library registry by name, description, author, or category."""
+        from services.library_service import search_registry
+        matches = search_registry(query=query, category=category)[:20]
+        if not matches:
+            return "No matching libraries were found."
+        return "Available libraries:\n" + "\n".join(
+            f"- {item['id']}: {item['name']} ({item.get('category', 'Other')}) — {item.get('description', '')}"
+            for item in matches
+        )
+
+    @tool
+    def list_installed_libraries(self) -> str:
+        """List libraries currently declared in this project's platformio.ini."""
+        from services.library_service import _get_lib_deps
+        ini = self.files.get("platformio.ini", {}).get("content", "")
+        deps = _get_lib_deps(ini)
+        return "Installed library dependencies:\n" + "\n".join(f"- {dep}" for dep in deps) if deps else "No external libraries are installed."
+
+    @tool
+    def install_library(self, library_id: str = "", git_url: str = "") -> str:
+        """Install a registry library or Git library URL by adding it to platformio.ini lib_deps."""
+        from services.library_service import get_library, _get_lib_deps, _set_lib_deps
+        dep_name = git_url.strip()
+        if library_id.strip():
+            library = get_library(library_id.strip())
+            if not library:
+                return f"ERROR: Library '{library_id}' was not found. Use search_libraries first."
+            dep_name = library.get("pio_name") or ""
+            if not dep_name:
+                return library.get("note", f"{library['name']} is bundled with the selected framework; no installation is needed.")
+        if not dep_name:
+            return "ERROR: Provide a library_id or git_url."
+        meta = self.files.setdefault("platformio.ini", {"language": "ini", "content": ""})
+        deps = _get_lib_deps(meta.get("content", ""))
+        if dep_name in deps:
+            return f"'{dep_name}' is already installed."
+        meta["content"] = _set_lib_deps(meta.get("content", ""), deps + [dep_name])
+        return f"Installed '{dep_name}' in platformio.ini. PlatformIO will download it during the next build."
+
+    @tool
+    def uninstall_library(self, library_id: str) -> str:
+        """Uninstall a library by removing its registry package from platformio.ini lib_deps."""
+        from services.library_service import get_library, _get_lib_deps, _set_lib_deps
+        library = get_library(library_id.strip())
+        dep_name = library.get("pio_name") if library else library_id.strip()
+        meta = self.files.get("platformio.ini")
+        if not meta:
+            return "ERROR: platformio.ini does not exist."
+        deps = _get_lib_deps(meta.get("content", ""))
+        if dep_name not in deps:
+            return f"'{dep_name}' is not installed."
+        meta["content"] = _set_lib_deps(meta.get("content", ""), [dep for dep in deps if dep != dep_name])
+        return f"Uninstalled '{dep_name}' from platformio.ini."
+
+    @tool
+    def read_project_config(self) -> str:
+        """Read the complete PlatformIO project configuration used for build, upload, debug, and libraries."""
+        content = self.files.get("platformio.ini", {}).get("content", "")
+        return f"platformio.ini:\n{content}" if content else "platformio.ini is missing."
+
+    @tool
+    def set_project_config(self, section: str, key: str, value: str) -> str:
+        """Set any PlatformIO configuration option, such as board, framework, upload_protocol, debug_tool, monitor_speed, or build_flags."""
+        import configparser
+        import io
+        meta = self.files.setdefault("platformio.ini", {"language": "ini", "content": ""})
+        parser = configparser.ConfigParser(interpolation=None, strict=False)
+        try:
+            parser.read_string(meta.get("content", "") or "[platformio]\n")
+        except configparser.Error as exc:
+            return f"ERROR: platformio.ini could not be parsed: {exc}"
+        target = section.strip().strip("[]") or "platformio"
+        if not parser.has_section(target):
+            parser.add_section(target)
+        parser.set(target, key.strip(), value.strip())
+        output = io.StringIO()
+        parser.write(output, space_around_delimiters=True)
+        meta["content"] = output.getvalue()
+        return f"Set [{target}] {key.strip()} = {value.strip()}."
+
+    @tool
+    def remove_project_config(self, section: str, key: str) -> str:
+        """Remove a PlatformIO configuration option from a section."""
+        import configparser
+        import io
+        meta = self.files.get("platformio.ini")
+        if not meta:
+            return "ERROR: platformio.ini is missing."
+        parser = configparser.ConfigParser(interpolation=None, strict=False)
+        try:
+            parser.read_string(meta.get("content", ""))
+        except configparser.Error as exc:
+            return f"ERROR: platformio.ini could not be parsed: {exc}"
+        target = section.strip().strip("[]")
+        if not parser.has_section(target) or not parser.remove_option(target, key.strip()):
+            return f"No option '{key}' exists in [{target}]."
+        output = io.StringIO()
+        parser.write(output, space_around_delimiters=True)
+        meta["content"] = output.getvalue()
+        return f"Removed '{key}' from [{target}]."
+
+    @tool
+    def get_board_details(self, board_id: str) -> str:
+        """Get complete target metadata and available pin data for one board registry id."""
+        import json
+        from boards.registry import registry
+        device = registry.get(board_id.strip())
+        if not device:
+            return f"ERROR: Unknown board '{board_id}'. Use list_supported_boards first."
+        return json.dumps(device.model_dump(), indent=2)
+
+    @tool
+    def select_project_board(self, board_id: str) -> str:
+        """Select and persist the project's target board, then stage its matching PlatformIO configuration."""
+        if not self.project_id or not self.user_id:
+            return "ERROR: This agent run is not associated with an authenticated project."
+        from boards.registry import registry
+        from db.session import db_session
+        from services.hardware import configure_project_environment
+        from services.library_service import _get_lib_deps
+        device = registry.get(board_id.strip())
+        if not device:
+            return f"ERROR: Unknown board '{board_id}'. Use list_supported_boards first."
+        with db_session(str(self.user_id)) as session:
+            configured, generated, _path = configure_project_environment(
+                str(self.project_id),
+                device.id,
+                session=session,
+            )
+            session.commit()
+        self.target_board_id = device.id
+        self.files["platformio.ini"] = {"language": "ini", "content": generated}
+        deps = _get_lib_deps(generated)
+        return f"Selected {configured.label} ({configured.id}) and updated the root platformio.ini while preserving {len(deps)} library dependency/dependencies."
+
+    @tool
+    def detect_connected_board(self) -> str:
+        """Detect connected hardware and return target candidates for this project."""
+        import json
+        from services.hardware import auto_detect_board
+        result = auto_detect_board(str(self.project_id) if self.project_id else None)
+        return json.dumps(result.model_dump(), indent=2)
 
     @tool
     def view_file(self, path: str, start_line: int = 1, end_line: int = -1) -> str:

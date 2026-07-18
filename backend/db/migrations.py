@@ -79,7 +79,18 @@ async def lifespan(app: FastAPI):
               ADD COLUMN IF NOT EXISTS library_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
               ADD COLUMN IF NOT EXISTS buy_links jsonb NOT NULL DEFAULT '[]'::jsonb,
               ADD COLUMN IF NOT EXISTS datasheet_url text,
-              ADD COLUMN IF NOT EXISTS aliases jsonb NOT NULL DEFAULT '[]'::jsonb;
+              ADD COLUMN IF NOT EXISTS aliases jsonb NOT NULL DEFAULT '[]'::jsonb,
+              ADD COLUMN IF NOT EXISTS source_url text,
+              ADD COLUMN IF NOT EXISTS source_name text,
+              ADD COLUMN IF NOT EXISTS image_source_url text,
+              ADD COLUMN IF NOT EXISTS discovery_query text,
+              ADD COLUMN IF NOT EXISTS discovered_at timestamptz,
+              ADD COLUMN IF NOT EXISTS verified_at timestamptz;
+        """))
+        session.exec(text("""
+            ALTER TABLE public.components
+              ADD COLUMN IF NOT EXISTS protocols jsonb NOT NULL DEFAULT '[]'::jsonb,
+              ADD COLUMN IF NOT EXISTS verification_sources jsonb NOT NULL DEFAULT '[]'::jsonb;
         """))
 
         # Agent chat history — one JSON blob per project. New table (not seeded by

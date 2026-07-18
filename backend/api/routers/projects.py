@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
@@ -13,7 +14,7 @@ from core.security import get_current_user_id
 from db.models import CodeFileRow, ProjectRow
 from db.session import db_session
 from schemas import ProjectCreate, ProjectOut, ProjectUpdate
-from services.projects import default_files, get_project_or_404, project_out
+from services.projects import default_files, default_project_path, get_project_or_404, project_out
 from agent.git_manager import GitManager
 
 router = APIRouter()
@@ -50,14 +51,21 @@ def list_projects(user_id: str = Depends(get_current_user_id)) -> list[ProjectOu
 
 @router.post("/api/projects", response_model=ProjectOut)
 def create_project(payload: ProjectCreate, user_id: str = Depends(get_current_user_id)) -> ProjectOut:
+    project_name = payload.name.strip()
+    if not project_name:
+        raise HTTPException(status_code=422, detail="Project name cannot be empty.")
+    # New projects always have a local home. An explicit path is retained for
+    # imports/backwards compatibility; the normal UI sends only the name.
+    local_path = Path(payload.path).expanduser() if payload.path else default_project_path(project_name)
+    local_path.mkdir(parents=True, exist_ok=bool(payload.path))
     with db_session(user_id) as session:
         from boards.registry import registry
         resolved_board_id = payload.board_id or registry.default().id
         project = ProjectRow(
-            name=payload.name.strip(),
+            name=project_name,
             description=payload.description.strip(),
             user_id=UUID(user_id),
-            path=payload.path,
+            path=str(local_path),
             board_id=resolved_board_id,
         )
         session.add(project)

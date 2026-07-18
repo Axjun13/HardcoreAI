@@ -5,7 +5,6 @@
   import * as monaco from "monaco-editor";
   import EmbeddedConfigurator from "./components/EmbeddedConfigurator.svelte";
   import RagUploadPanel from "./components/RagUploadPanel.svelte";
-  import LibraryManager from "./components/LibraryManager.svelte";
   import ResearchPanel from "./components/ResearchPanel.svelte";
 
   import {
@@ -36,7 +35,6 @@
     MonitorPlay,
     Copy,
     Check,
-    Package,
     Camera,
     ArrowDown,
     RefreshCw,
@@ -50,6 +48,7 @@
     CornerRightUp,
     Circle,
     Brain,
+    Gauge,
   } from "lucide-svelte";
 
   let aiInput = "";
@@ -215,12 +214,33 @@
   // workspace on every launch.
   let showConfigurator = false;
   let showCopilot = true;
+  let workspaceView: "ide" | "research" = "ide";
+  let actModeHandoff: any = null;
+  let actHandoffProjectId = "";
+
+  async function loadActModeHandoff(projectId: string) {
+    try {
+      const research = await api.getResearchState(projectId);
+      if (actHandoffProjectId === projectId) {
+        actModeHandoff = research?.stage === "act" ? research : null;
+      }
+    } catch {
+      if (actHandoffProjectId === projectId) actModeHandoff = null;
+    }
+  }
+
+  $: if (($workspaceStore.activeProjectId || "") !== actHandoffProjectId) {
+    actHandoffProjectId = $workspaceStore.activeProjectId || "";
+    actModeHandoff = null;
+    if (actHandoffProjectId) loadActModeHandoff(actHandoffProjectId);
+  }
   type AgentProvider = {
     id: string;
     label: string;
     model: string;
     available: boolean;
     local: boolean;
+    context_window?: number;
   };
   const selectableProviderIds = new Set(["gemini", "deepseek", "sarvam"]);
   let agentProviders: AgentProvider[] = [
@@ -236,8 +256,16 @@
     if (typeof localStorage !== "undefined") {
       localStorage.setItem("selectedProvider", providerId);
     }
-    workspaceStore.update((s) => ({ ...s, selectedProvider: providerId }));
+    workspaceStore.update((s) => ({
+      ...s,
+      selectedProvider: providerId,
+      agentContextStatus: null,
+    }));
   }
+
+  let showAgentContextStatus = false;
+  const formatTokenCount = (value: number | undefined) =>
+    new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(value || 0);
 
   let rightPaneSplit = 55;
 
@@ -1388,6 +1416,17 @@
         {/if}
         <span>{$workspaceStore.isDebugging ? "Stop" : "Debug"}</span>
       </button>
+
+      <div class="divider-line"></div>
+
+      <button
+        class="capsule-btn research {workspaceView === 'research' ? 'active' : ''}"
+        onclick={() => (workspaceView = workspaceView === "research" ? "ide" : "research")}
+        title={workspaceView === "research" ? "Return to IDE" : "Open Research"}
+      >
+        <Brain size={12} />
+        <span>{workspaceView === "research" ? "IDE" : "Research"}</span>
+      </button>
     </div>
 
     <!-- Connectivity Status & Controls -->
@@ -1664,19 +1703,18 @@
                     const projectName =
                       inputEl?.value?.trim() || "My Embedded Project";
                     try {
-                      const folderPath = await api.pickFolder();
-                      if (!folderPath) return; // user cancelled
                       const project = await api.createProject(
                         projectName,
                         "Created from IDE",
-                        folderPath,
+                        null,
+                        $workspaceStore.selectedBoard || null,
                       );
                       await actions.loadProject(project.id);
                       await actions.loadProjects(); // Refresh the list
                       actions.setActiveSidebarTab("explorer");
                       actions.setShowWelcomeScreen(false);
                       actions.addBuildLog(
-                        "Created new embedded project template successfully.",
+                        `Created project locally at ${project.path} and saved it to Supabase.`,
                       );
                     } catch (e: any) {
                       actions.addBuildLog(
@@ -1762,6 +1800,8 @@
                   await api.createProject(
                     "My Embedded Project",
                     "Created from IDE",
+                    null,
+                    $workspaceStore.selectedBoard || null,
                   );
                   await actions.loadProjects();
                   const newProj = $workspaceStore.projectsList[0];
@@ -1782,6 +1822,24 @@
       </div>
     </div>
   {:else}
+    {#if workspaceView === "research"}
+      <div class="research-workspace-view">
+        <ResearchPanel onActMode={(startAgent = false, handoff: any = null) => {
+          workspaceView = "ide";
+          showCopilot = true;
+          showConfigurator = false;
+          actModeHandoff = handoff;
+          if (handoff?.target_board_id && handoff.target_board_id !== $workspaceStore.selectedBoard) {
+            actions.setSelectedBoard(handoff.target_board_id);
+          }
+          if (startAgent) {
+            actions.setAutoApproveAgent(true);
+            const pending = (handoff?.todos || []).filter((todo: any) => todo.status !== "completed").map((todo: any) => `- ${todo.label}`).join("\n");
+            actions.sendAiMessage(`The final research plan is approved. Enter Act mode now. Read final-review.md, plan.md, components.md, verification.md, pin-diagram.md, connection-diagram.md, configuration.md, pin-config.json, and .hardcoreai/component_context.json. Execute the mandatory TODO in order and keep the user informed:\n${pending}\nImplement the firmware and run a build. Fix build errors until it succeeds. If a compatible device is connected, flash it; otherwise report that the successful build is waiting for a device and a flash command. This message explicitly approves the required file changes, dependency installation, configuration, and build.`);
+          }
+        }} />
+      </div>
+    {:else}
     <!-- 2. Main Workspace Layout -->
     <div
       class="helix-main-workspace {showConfigurator || showCopilot
@@ -1852,18 +1910,6 @@
         <!-- svelte-ignore a11y-click-events-have-key-events -->
         <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
         <button
-          class="activity-item {$workspaceStore.activeSidebarTab === 'research' &&
-          showSidebar
-            ? 'active'
-            : ''}"
-          onclick={() => handleActivityTabClick("research")}
-          title="Research & Ideation"
-        >
-          <Brain size={18} />
-        </button>
-        <!-- svelte-ignore a11y-click-events-have-key-events -->
-        <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
-        <button
           class="activity-item {$workspaceStore.activeSidebarTab === 'boards' &&
           showSidebar
             ? 'active'
@@ -1872,18 +1918,6 @@
           title="Target Config"
         >
           <Settings size={18} />
-        </button>
-        <!-- svelte-ignore a11y-click-events-have-key-events -->
-        <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
-        <button
-          class="activity-item {$workspaceStore.activeSidebarTab ===
-            'libraries' && showSidebar
-            ? 'active'
-            : ''}"
-          onclick={() => handleActivityTabClick("libraries")}
-          title="Library Manager"
-        >
-          <Package size={18} />
         </button>
         <!-- svelte-ignore a11y-click-events-have-key-events -->
         <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
@@ -2847,10 +2881,6 @@
             <RagUploadPanel />
           {/if}
 
-          {#if $workspaceStore.activeSidebarTab === "research"}
-            <ResearchPanel />
-          {/if}
-
           {#if $workspaceStore.activeSidebarTab === "boards"}
             <div class="panel-header">
               <div class="panel-title">Target Config</div>
@@ -3010,10 +3040,6 @@
                 </div>
               </div>
             </div>
-          {/if}
-
-          {#if $workspaceStore.activeSidebarTab === "libraries"}
-            <LibraryManager />
           {/if}
 
           {#if $workspaceStore.activeSidebarTab === "debug"}
@@ -3640,6 +3666,15 @@
                 </div>
               </div>
               <div style="display: flex; gap: 6px;">
+                <button
+                  class="close-ai-btn"
+                  class:active={showAgentContextStatus}
+                  onclick={() => (showAgentContextStatus = !showAgentContextStatus)}
+                  title="Show model context and token status"
+                  aria-label="Show model context and token status"
+                >
+                  <Gauge size={13} />
+                </button>
                 {#if $workspaceStore.activeProjectId}
                   <button
                     class="close-ai-btn"
@@ -3660,12 +3695,70 @@
               </div>
             </div>
 
+            {#if showAgentContextStatus}
+              <section class="agent-context-status" aria-live="polite" aria-label="Model context status">
+                {#if $workspaceStore.agentContextStatus}
+                  {@const context = $workspaceStore.agentContextStatus}
+                  <div class="agent-context-status-head">
+                    <div>
+                      <strong>{context.model}</strong>
+                      <small>{context.provider}{context.estimated ? " · estimated" : " · provider reported"}</small>
+                    </div>
+                    <span class:low={context.low}>{Math.round(context.context_remaining_percent)}% left</span>
+                  </div>
+                  <div class="agent-context-meter" aria-label={`${context.context_used_percent}% context used`}>
+                    <span class:low={context.low} style={`width:${Math.min(100, context.context_used_percent)}%`}></span>
+                  </div>
+                  <div class="agent-context-grid">
+                    <div><small>Context used</small><strong>{formatTokenCount(context.context_used_tokens)} / {formatTokenCount(context.context_window)}</strong></div>
+                    <div><small>Context left</small><strong>{formatTokenCount(context.context_remaining_tokens)}</strong></div>
+                    <div><small>Run input</small><strong>{formatTokenCount(context.total_input_tokens)}</strong></div>
+                    <div><small>Run output</small><strong>{formatTokenCount(context.total_output_tokens)}</strong></div>
+                    <div><small>Total processed</small><strong>{formatTokenCount(context.total_tokens)}</strong></div>
+                    <div><small>Warning at</small><strong>{context.warning_percent}% left</strong></div>
+                  </div>
+                  {#if context.low}
+                    <div class="agent-context-inline-warning"><AlertTriangle size={13} /> Please use another session.</div>
+                  {/if}
+                {:else}
+                  <div class="agent-context-empty">
+                    <strong>{selectedProviderMeta?.model ?? "Selected model"}</strong>
+                    <span>Context window: {formatTokenCount(selectedProviderMeta?.context_window)} tokens</span>
+                    <small>Token usage appears here when the next run starts.</small>
+                  </div>
+                {/if}
+              </section>
+            {/if}
+
             <!-- Chat messages view -->
             <div
               class="ai-copilot-chat-content"
               bind:this={chatContentEl}
               onscroll={handleChatScroll}
             >
+              {#if $workspaceStore.agentContextStatus?.low}
+                <section class="agent-context-warning" role="alert">
+                  <AlertTriangle size={15} />
+                  <div>
+                    <strong>{Math.round($workspaceStore.agentContextStatus.context_remaining_percent)}% context left</strong>
+                    <span>Please use another session.</span>
+                  </div>
+                </section>
+              {/if}
+              {#if actModeHandoff?.todos?.length}
+                <section class="act-todo-card" aria-label="Approved mandatory TODO list">
+                  <div class="act-todo-head">
+                    <span>ACT MODE · MANDATORY TODO</span>
+                    <small>{actModeHandoff.todos.filter((todo: any) => todo.status === "completed").length}/{actModeHandoff.todos.length}</small>
+                  </div>
+                  {#each actModeHandoff.todos as todo, index}
+                    <div class="act-todo-row {todo.status || 'pending'}">
+                      <span class="act-todo-status">{todo.status === "completed" ? "✓" : todo.status === "in_progress" ? "●" : todo.status === "warning" ? "!" : index + 1}</span>
+                      <div><p>{todo.label}</p>{#if todo.detail}<small>{todo.detail}</small>{/if}</div>
+                    </div>
+                  {/each}
+                </section>
+              {/if}
               {#if !$workspaceStore.aiMessages.some((m) => m.sender === "user")}
                 <div class="copilot-welcome-container">
                   <div class="copilot-welcome-title">
@@ -4478,6 +4571,7 @@
         </button>
       </div>
     </footer>
+    {/if}
   {/if}
 </div>
 
@@ -4675,18 +4769,17 @@
                   } else if (inputPromptModal.actionType === "project") {
                     (async () => {
                       try {
-                        const folderPath = await api.pickFolder();
-                        if (!folderPath) return; // user cancelled
                         const project = await api.createProject(
                           inputPromptModal.value.trim(),
                           "Created from IDE",
-                          folderPath,
+                          null,
+                          $workspaceStore.selectedBoard || null,
                         );
                         await actions.loadProject(project.id);
                         await actions.loadProjects();
                         actions.setActiveSidebarTab("explorer");
                         actions.addBuildLog(
-                          "Created new embedded project template successfully.",
+                          `Created project locally at ${project.path} and saved it to Supabase.`,
                         );
                       } catch (e: any) {
                         actions.addBuildLog(
@@ -4726,18 +4819,17 @@
               } else if (inputPromptModal.actionType === "project") {
                 (async () => {
                   try {
-                    const folderPath = await api.pickFolder();
-                    if (!folderPath) return; // user cancelled
                     const project = await api.createProject(
                       inputPromptModal.value.trim(),
                       "Created from IDE",
-                      folderPath,
+                      null,
+                      $workspaceStore.selectedBoard || null,
                     );
                     await actions.loadProject(project.id);
                     await actions.loadProjects();
                     actions.setActiveSidebarTab("explorer");
                     actions.addBuildLog(
-                      "Created new embedded project template successfully.",
+                      `Created project locally at ${project.path} and saved it to Supabase.`,
                     );
                   } catch (e: any) {
                     actions.addBuildLog(
@@ -4769,6 +4861,14 @@
     cursor: col-resize;
     z-index: 1000;
     transition: background-color 0.2s ease;
+  }
+
+  .research-workspace-view {
+    position: absolute;
+    inset: 50px 0 0;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--bg-primary);
   }
 
   .vertical-handle:hover {

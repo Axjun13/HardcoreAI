@@ -1,9 +1,4 @@
-"""Database models — mapped onto the existing Supabase ``public`` schema.
-
-The catalogue (components, pins) is read-only from the API's point of view;
-it is populated by the seed migration. Projects, their placed components,
-connections, and code files are read/write.
-"""
+"""Database models — mapped onto the existing Supabase ``public`` schema."""
 
 from __future__ import annotations
 
@@ -28,6 +23,14 @@ class Component(SQLModel, table=True):
     buy_links: list[dict[str, Any]] = SQLField(default_factory=list, sa_column=Column(JSON))
     datasheet_url: str | None = None
     aliases: list[str] = SQLField(default_factory=list, sa_column=Column(JSON))
+    source_url: str | None = None
+    source_name: str | None = None
+    image_source_url: str | None = None
+    discovery_query: str | None = None
+    discovered_at: datetime | None = None
+    verified_at: datetime | None = None
+    protocols: list[str] = SQLField(default_factory=list, sa_column=Column(JSON))
+    verification_sources: list[str] = SQLField(default_factory=list, sa_column=Column(JSON))
     description: str | None = None
     is_controller: bool = False
     cpp_class_name: str | None = None

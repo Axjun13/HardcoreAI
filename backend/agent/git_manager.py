@@ -171,18 +171,18 @@ class GitManager:
 
         disk_files: set[str] = set()
         for root, dirs, filenames in os.walk(self.workspace_dir):
-            for ignored in [".git", ".vscode", "__pycache__", "node_modules", ".venv", "venv", "env", "dist", "build", ".pytest_cache", ".svelte-kit", "data", "backend/data"]:
+            for ignored in [".git", ".hardcoreai", ".vscode", "__pycache__", "node_modules", ".venv", "venv", "env", "dist", "build", ".pytest_cache", ".svelte-kit", "data", "backend/data"]:
                 if ignored in dirs:
                     dirs.remove(ignored)
             for f in filenames:
-                if f == "platformio.ini":
-                    continue
                 full_path = Path(root) / f
                 rel_path = full_path.relative_to(self.workspace_dir)
                 disk_files.add(rel_path.as_posix())
 
-        # Files that are managed exclusively by library_service — never overwrite from DB
-        _DISK_OWNED = {"platformio.ini", "libraries.json"}
+        # libraries.json is service-owned. platformio.ini is deliberately NOT
+        # excluded: it is a normal mirrored project file, so editor/agent/board
+        # changes must reach the root file that PlatformIO actually builds.
+        _DISK_OWNED = {"libraries.json"}
 
         for path, meta in files.items():
             if Path(path).name in _DISK_OWNED:
@@ -201,10 +201,7 @@ class GitManager:
                 disk_files.remove(posix_path)
 
         for path in disk_files:
-            if path in (
-        "platformio.ini",
-        "libraries.json",
-    ):
+            if path == "libraries.json":
                 continue
 
             file_path = self.workspace_dir / path
@@ -217,12 +214,12 @@ class GitManager:
             return
         from db.session import engine
         from sqlmodel import Session, select
-        from db.models import CodeFileRow
+        from db.models import CodeFileRow, ProjectRow
         from core.config import now_utc
 
         disk_files = {}
         for root, dirs, filenames in os.walk(self.workspace_dir):
-            for ignored in [".git", ".vscode", "__pycache__", "node_modules", ".venv", "venv", "env", "dist", "build", ".pytest_cache", ".svelte-kit", "data", "backend/data"]:
+            for ignored in [".git", ".hardcoreai", ".vscode", "__pycache__", "node_modules", ".venv", "venv", "env", "dist", "build", ".pytest_cache", ".svelte-kit", "data", "backend/data"]:
                 if ignored in dirs:
                     dirs.remove(ignored)
             for f in filenames:
@@ -238,6 +235,18 @@ class GitManager:
                     pass
 
         with Session(engine) as session:
+            # A root platformio.ini edited outside the IDE is authoritative for
+            # its board. Keep agent context/build routing on that same target.
+            from boards.registry import registry
+            from services.hardware import platformio_board_id
+
+            selected_board = platformio_board_id(disk_files.get("platformio.ini", ""))
+            project = session.get(ProjectRow, int(self.project_id))
+            if project and selected_board and registry.get(selected_board):
+                project.board_id = selected_board
+                project.updated_at = now_utc()
+                session.add(project)
+
             existing_rows = session.exec(
                 select(CodeFileRow).where(CodeFileRow.project_id == int(self.project_id))
             ).all()

@@ -191,6 +191,7 @@ async def agent_solve(project_id: str, payload: AgentRequest, user_id: str = Dep
             question=getattr(t, "question", ""),
             options=getattr(t, "options", []),
             messages=getattr(t, "messages", []),
+            context_usage=getattr(t, "context_usage", {}),
         )
 
     return AgentRunResult(
@@ -278,6 +279,7 @@ async def agent_stream(project_id: str, payload: AgentRequest, user_id: str = De
                 "question": getattr(agent_trace, "question", ""),
                 "options": getattr(agent_trace, "options", []),
                 "confirm_action": getattr(agent_trace, "confirm_action", ""),
+                "context_usage": getattr(agent_trace, "context_usage", {}),
                 "proposals": proposals,
             })
         except llm.LLMError as exc:

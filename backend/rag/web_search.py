@@ -18,6 +18,7 @@ Two backends, selected automatically:
 Public surface::
 
     search_web(query: str, num_results: int = 5) -> list[dict]
+    search_images(query: str, num_results: int = 5) -> list[dict]
 
 Returns ``[{"title", "url", "snippet"}, ...]``. Never raises — on failure it
 returns a single-element list ``[{"error": <msg>, "title": "", "url": "",
@@ -32,6 +33,7 @@ import os
 # Licensed search API key (Brave). When set, we use Brave instead of ddgs.
 BRAVE_API_KEY = os.getenv("BRAVE_API_KEY", "").strip()
 BRAVE_ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
+BRAVE_IMAGES_ENDPOINT = "https://api.search.brave.com/res/v1/images/search"
 
 
 def _err(msg: str) -> list[dict]:
@@ -105,3 +107,59 @@ def search_web(query: str, num_results: int = 5) -> list[dict]:
     if BRAVE_API_KEY:
         return _search_brave(query, num_results)
     return _search_ddg(query, num_results)
+
+
+def search_images(query: str, num_results: int = 5) -> list[dict]:
+    """Find remotely hosted product images for catalogue cards.
+
+    Each result contains ``image`` (the actual image URL), ``url`` (the source
+    page), and ``title``. Like :func:`search_web`, failures are returned as an
+    error record so component discovery can degrade without breaking Research.
+    """
+    query = (query or "").strip()
+    if not query:
+        return _err("Empty image search query.")
+    limit = max(1, min(int(num_results), 20))
+    if BRAVE_API_KEY:
+        import httpx
+
+        try:
+            with httpx.Client(timeout=15.0) as client:
+                response = client.get(
+                    BRAVE_IMAGES_ENDPOINT,
+                    headers={
+                        "Accept": "application/json",
+                        "X-Subscription-Token": BRAVE_API_KEY,
+                    },
+                    params={"q": query, "count": limit, "safesearch": "strict"},
+                )
+                response.raise_for_status()
+                payload = response.json()
+        except Exception as exc:
+            return _err(f"Brave Image Search API request failed: {exc}")
+        return [
+            {
+                "title": item.get("title", ""),
+                "url": item.get("url", "") or item.get("source", ""),
+                "image": (item.get("properties") or {}).get("url", "")
+                or (item.get("thumbnail") or {}).get("src", ""),
+            }
+            for item in (payload.get("results") or [])[:limit]
+        ]
+
+    try:
+        from ddgs import DDGS
+        with DDGS() as ddgs:
+            hits = list(ddgs.images(query, max_results=limit, safesearch="on"))
+    except ImportError:
+        return _err("Image search is unavailable because the 'ddgs' package is not installed.")
+    except Exception as exc:
+        return _err(f"DuckDuckGo image search failed: {exc}")
+    return [
+        {
+            "title": item.get("title", ""),
+            "url": item.get("url", "") or item.get("source", ""),
+            "image": item.get("image", "") or item.get("thumbnail", ""),
+        }
+        for item in hits[:limit]
+    ]

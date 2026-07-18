@@ -14,7 +14,13 @@ import re
 from pathlib import Path
 from typing import Any
 
-from services.hardware import workspace_dir, ensure_platformio_ini, DEFAULT_BOARD
+from services.hardware import (
+    DEFAULT_BOARD,
+    ensure_platformio_ini,
+    persist_platformio_content,
+    project_board_id,
+    workspace_dir,
+)
 
 # ---------------------------------------------------------------------------
 # Registry helpers
@@ -140,7 +146,7 @@ def install_library(
         return {"success": False, "message": "Provide either library_id or git_url."}
 
     # Ensure platformio.ini exists with at least a minimal board env
-    ensure_platformio_ini(workspace, DEFAULT_BOARD)
+    ensure_platformio_ini(workspace, project_board_id(project_id) or DEFAULT_BOARD)
 
     ini_path = workspace / "platformio.ini"
     ini_content = _read_ini(ini_path)
@@ -152,7 +158,7 @@ def install_library(
     # Write dep into lib_deps — PIO will download it on next build
     updated_deps = current_deps + [dep_name]
     new_ini = _set_lib_deps(ini_content, updated_deps)
-    ini_path.write_text(new_ini, encoding="utf-8")
+    persist_platformio_content(project_id, new_ini)
 
     return {
         "success": True,
@@ -187,7 +193,7 @@ def uninstall_library(project_id: str, library_id: str) -> dict[str, Any]:
 
     updated_deps = [d for d in current_deps if d != dep_name]
     new_ini = _set_lib_deps(ini_content, updated_deps)
-    ini_path.write_text(new_ini, encoding="utf-8")
+    persist_platformio_content(project_id, new_ini)
 
     return {"success": True, "message": f"Removed '{dep_name}' from lib_deps.", "dep_name": dep_name}
 

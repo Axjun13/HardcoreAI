@@ -466,18 +466,22 @@ class BoardRegistry:
                     "package_pins": len(pinout),
                     "pinout_status": "verified",
                 })
-        if device and device.full_pinout is None:
+        # A curated package pin list and signal-level MCU metadata complement
+        # each other. Previously, having full_pinout suppressed the metadata
+        # lookup, so even well-known Nucleo boards lost all alternate-function
+        # information before Phase 3 tried to assign I2C/SPI/UART pins.
+        if device and device.arch == "arm-stm32" and device.pin_metadata is None:
             try:
                 from boards.stm32_metadata import get_mcu_metadata
                 meta = get_mcu_metadata(device.mcu)
             except Exception:
                 meta = None
             if meta and meta.get("pins"):
-                pinout = [pin["name"] for pin in meta["pins"]]
+                pinout = device.full_pinout or [pin["name"] for pin in meta["pins"]]
                 device = device.model_copy(update={
                     "full_pinout": pinout,
                     "package_pins": len(pinout),
-                    "pinout_status": "st_open_pin_data",
+                    "pinout_status": device.pinout_status if device.full_pinout else "st_open_pin_data",
                     "pin_metadata": meta["pins"],
                 })
         if device and device.arch in {"avr", "xtensa", "arm-samd", "arduino-generic"} and device.arduino_pinout is None:

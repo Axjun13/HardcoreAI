@@ -4,6 +4,16 @@ const DEFAULT_BACKEND_URL = import.meta.env.DEV
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || DEFAULT_BACKEND_URL;
 let activeProjectId: string | null = null; // Default to null so Landing Page shows
 
+async function responseError(res: Response): Promise<string> {
+  const text = await res.text();
+  try {
+    const parsed = JSON.parse(text);
+    return parsed.detail || parsed.message || text || `Request failed (${res.status})`;
+  } catch {
+    return text || `Request failed (${res.status})`;
+  }
+}
+
 export const api = {
   setActiveProject(id: string) {
     activeProjectId = id;
@@ -97,11 +107,16 @@ export const api = {
   return data.path;
 },
 
-async createProject(name: string, description: string = "", path: string | null = null) {
+async createProject(
+  name: string,
+  description: string = "",
+  path: string | null = null,
+  boardId: string | null = null,
+) {
   const res = await fetch(`${BACKEND_URL}/api/projects`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "Authorization": "Bearer TEST_TOKEN" },
-    body: JSON.stringify({ name, description, path })
+    body: JSON.stringify({ name, description, path, board_id: boardId })
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
@@ -623,7 +638,7 @@ async createProject(name: string, description: string = "", path: string | null 
     const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/research`, {
       headers: { "Authorization": "Bearer TEST_TOKEN" }
     });
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) throw new Error(await responseError(res));
     return res.json();
   },
 
@@ -633,7 +648,7 @@ async createProject(name: string, description: string = "", path: string | null 
       headers: { "Content-Type": "application/json", "Authorization": "Bearer TEST_TOKEN" },
       body: JSON.stringify({ title })
     });
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) throw new Error(await responseError(res));
     return res.json();
   },
 
@@ -642,7 +657,16 @@ async createProject(name: string, description: string = "", path: string | null 
       method: "POST",
       headers: { "Authorization": "Bearer TEST_TOKEN" }
     });
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) throw new Error(await responseError(res));
+    return res.json();
+  },
+
+  async deleteResearchContext(projectId: string, contextId: string) {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/research/contexts/${contextId}`, {
+      method: "DELETE",
+      headers: { "Authorization": "Bearer TEST_TOKEN" }
+    });
+    if (!res.ok) throw new Error(await responseError(res));
     return res.json();
   },
 
@@ -652,8 +676,47 @@ async createProject(name: string, description: string = "", path: string | null 
       headers: { "Content-Type": "application/json", "Authorization": "Bearer TEST_TOKEN" },
       body: JSON.stringify({ idea, provider, context_id: contextId })
     });
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) throw new Error(await responseError(res));
     return res.json();
+  },
+
+  /** Stream a Research reply as provider text deltas over POSTed SSE. */
+  async streamResearch(
+    projectId: string,
+    idea: string,
+    provider: string,
+    contextId: string | undefined,
+    onEvent: (event: any) => void,
+    signal?: AbortSignal
+  ) {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/research/ideate/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer TEST_TOKEN" },
+      body: JSON.stringify({ idea, provider, context_id: contextId }),
+      signal
+    });
+    if (!res.ok || !res.body) throw new Error(await responseError(res));
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let separator: number;
+      while ((separator = buffer.indexOf("\n\n")) !== -1) {
+        const frame = buffer.slice(0, separator);
+        buffer = buffer.slice(separator + 2);
+        const line = frame.split("\n").find(item => item.startsWith("data:"));
+        if (!line) continue;
+        try {
+          onEvent(JSON.parse(line.slice(5).trim()));
+        } catch (error) {
+          console.warn("Failed to parse Research SSE frame", line, error);
+        }
+      }
+    }
   },
 
   async selectResearchComponents(projectId: string, selectedComponentIds: string[], notes = "", installLibraries = false, contextId?: string) {
@@ -662,8 +725,75 @@ async createProject(name: string, description: string = "", path: string | null 
       headers: { "Content-Type": "application/json", "Authorization": "Bearer TEST_TOKEN" },
       body: JSON.stringify({ selected_component_ids: selectedComponentIds, notes, install_libraries: installLibraries, context_id: contextId })
     });
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) throw new Error(await responseError(res));
     return res.json();
+  },
+
+  async advanceResearch(projectId: string, action = "confirm", selectedComponentIds: string[] = [], notes = "", message = "", provider = "deepseek", expectedStage = "") {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 45_000);
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/research/advance`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer TEST_TOKEN" },
+        body: JSON.stringify({ action, selected_component_ids: selectedComponentIds, notes, message, provider, expected_stage: expectedStage }),
+        signal: controller.signal
+      });
+      if (!res.ok) throw new Error(await responseError(res));
+      return res.json();
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        throw new Error("Component confirmation timed out. The latest workflow state has been reloaded.");
+      }
+      throw error;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  },
+
+  /** Run sequential Phase-3 verification while receiving persisted TODO updates. */
+  async streamResearchVerification(
+    projectId: string,
+    selectedComponentIds: string[],
+    notes: string,
+    provider: string,
+    expectedStage: string,
+    onEvent: (event: any) => void,
+    signal?: AbortSignal
+  ) {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/research/verify/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer TEST_TOKEN" },
+      body: JSON.stringify({
+        action: "confirm",
+        selected_component_ids: selectedComponentIds,
+        notes,
+        provider,
+        expected_stage: expectedStage,
+      }),
+      signal,
+    });
+    if (!res.ok || !res.body) throw new Error(await responseError(res));
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let separator: number;
+      while ((separator = buffer.indexOf("\n\n")) !== -1) {
+        const frame = buffer.slice(0, separator);
+        buffer = buffer.slice(separator + 2);
+        const line = frame.split("\n").find(item => item.startsWith("data:"));
+        if (!line) continue;
+        try {
+          onEvent(JSON.parse(line.slice(5).trim()));
+        } catch (error) {
+          console.warn("Failed to parse Phase-3 SSE frame", line, error);
+        }
+      }
+    }
   },
 
   async prepareResearchPhase3(projectId: string, installLibraries = true) {

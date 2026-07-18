@@ -38,8 +38,25 @@ def load_catalogue(session: Session) -> list[ComponentDefinition]:
                 buy_links=_json_list(component.buy_links),
                 datasheet_url=component.datasheet_url,
                 aliases=_json_list(component.aliases),
+                source_url=component.source_url,
+                source_name=component.source_name,
+                image_source_url=component.image_source_url,
+                discovery_query=component.discovery_query,
+                discovered_at=component.discovered_at,
+                verified_at=component.verified_at,
+                protocols=_json_list(component.protocols),
+                verification_sources=_json_list(component.verification_sources),
                 pins=[
-                    Pin(name=p.name, label=p.label, side=p.side, x=p.x, y=p.y, role=p.role)
+                    Pin(
+                        name=p.name,
+                        label=p.label,
+                        side=p.side,
+                        x=p.x,
+                        y=p.y,
+                        role=p.role,
+                        voltage=p.voltage,
+                        capabilities=p.capabilities,
+                    )
                     for p in pins_by_component.get(component.id, [])
                 ],
             )

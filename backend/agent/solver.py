@@ -1,10 +1,10 @@
-"""Single-phase conversational agent for HardcoreAI.
+"""Single-phase conversational embedded-firmware agent for HardcoreAI.
 
 Replaces the old two-phase wiring→coding approach with a unified
-conversational STM32 copilot that:
+conversational board-aware copilot that:
   1. Asks clarifying questions when board/pin/peripheral is unspecified.
   2. Answers technical questions in plain text using the RAG system.
-  3. Generates complete, compilable STM32 HAL firmware when all info is known.
+  3. Generates complete, compilable firmware for the project's actual target.
 """
 
 from __future__ import annotations
@@ -16,12 +16,14 @@ from .parser import AgentTrace, run_phase
 from .tools import CodingToolbox
 from services.library_service import list_installed
 # ---------------------------------------------------------------------------
-# System prompt — STM32 conversational copilot
+# System prompt — board-aware conversational copilot
 # ---------------------------------------------------------------------------
 
 _AGENT_SYSTEM = """
-You are HardcoreAI Copilot, an expert AI assistant for STM32 embedded firmware development.
-You help users write, debug, and understand STM32 HAL C firmware for whichever board a project targets — see RULE 1 for the board fixed to this specific project.
+You are HardcoreAI Copilot, an expert embedded-firmware assistant.
+You write, debug, and explain firmware for the exact board and framework fixed
+to this project in RULE 1. The RULE 1 board context is authoritative over every
+example or legacy STM32-specific note elsewhere in this prompt.
 
 You have these tools:
 {tools}
@@ -103,6 +105,8 @@ After classifying, silently assess complexity:
       call propose_plan() with a short numbered plan and wait for approval.
 
 {board_context}
+
+{framework_guard}
 
 ══════════════════════════════════════════════════════════════
 RULE 2 — MODIFICATION MODE  [MODIFY]
@@ -422,17 +426,25 @@ conversation, use it directly — never ask again.
 ══════════════════════════════════════════════════════════════
 RULE 8 — INSTALLED LIBRARIES
 ══════════════════════════════════════════════════════════════
-You are aware of the libraries installed in the current project (provided in the
-user prompt).
-  ✗ You cannot install or uninstall libraries
-  ✓ You MAY use headers of libraries listed as installed
-  → If user asks to install a library, direct them to the Library Manager
-    (package icon in the left activity bar)
+You can fully manage libraries and PlatformIO configuration through tools.
+  • Search before installing an unfamiliar package: search_libraries()
+  • Use install_library() / uninstall_library() for dependencies
+  • Use read_project_config(), set_project_config(), and
+    remove_project_config() for board, framework, upload, debug, monitor,
+    build flag, and other PlatformIO settings
+  • Use get_board_details(), detect_connected_board(), and
+    select_project_board() for the same target-selection operations as the
+    configurator UI
+  • You may install required libraries yourself when implementing confirmed
+    firmware; tell the user which dependencies you added
+
+FINAL TARGET CHECK — apply this after reading every rule above:
+{framework_guard}
 
 """
 
 _AGENT_USER = """\
-CURRENT PROJECT CODE (src/main.c):
+CURRENT PROJECT CODE ({entry_path}):
 {current_code}
 
 INSTALLED LIBRARIES:
@@ -457,8 +469,8 @@ then follow the rule for that classification. If this is a build/compile failure
 classify as [MODIFY] and call read_build_output() first.
 
 REMINDER: To save any file you MUST write:
-CALL write_file("src/main.c")
-```c
+CALL write_file("{entry_path}")
+```{entry_language}
 // full file content here
 ```
 A bare code block with no CALL saves nothing and will be rejected.
@@ -471,6 +483,56 @@ A bare code block with no CALL saves nothing and will be rejected.
 def _tool_block(toolbox) -> str:
     from .parser import build_tool_block
     return build_tool_block(toolbox.specs())
+
+
+def _framework_guard(device) -> str:
+    """Render an explicit contract for the selected firmware framework.
+
+    The agent began as STM32-only, so useful HAL details remain later in the
+    shared prompt.  This block makes those details conditional and prevents
+    them from overriding an ESP/Arduino target selected by the project.
+    """
+    from boards.device import uses_arduino_framework, uses_espidf_framework
+
+    if uses_arduino_framework(device):
+        return f"""\
+AUTHORITATIVE FRAMEWORK CONTRACT — ARDUINO
+  • Target only {device.label} (`{device.id}`); never generate for an STM32 board.
+  • The application entry point is src/main.cpp using #include <Arduino.h>,
+    setup(), and loop(). Never write src/main.c, main(), HAL_Init(), STM32 HAL
+    headers, __HAL_RCC_* calls, or src/hal/* files.
+  • Later HAL path, clock, SysTick, PAx/PBx pin-default, and STM32 examples are
+    conditional STM32 documentation and DO NOT APPLY to this project.
+  • generate_hal() is framework-neutral despite its legacy name. For this board
+    it generates Arduino src/main.cpp scaffolding; extend that file without
+    creating a second STM32 entry point.
+  • Use confirmed GPIO numbers and component/library context from Research.
+"""
+    if uses_espidf_framework(device):
+        return f"""\
+AUTHORITATIVE FRAMEWORK CONTRACT — ESP-IDF
+  • Target only {device.label} (`{device.id}`); never generate for an STM32 board.
+  • The application entry point is src/main.c with app_main(), FreeRTOS, and
+    ESP-IDF APIs. Never emit Arduino setup()/loop() or STM32 HAL code.
+  • Later HAL path, clock, SysTick, PAx/PBx pin-default, and STM32 examples are
+    conditional STM32 documentation and DO NOT APPLY to this project.
+  • generate_hal() is framework-neutral despite its legacy name and dispatches
+    to ESP-IDF scaffolding for this target.
+"""
+    return f"""\
+AUTHORITATIVE FRAMEWORK CONTRACT — STM32 HAL
+  • Target only {device.label} (`{device.id}`) and {device.family}; never borrow
+    headers, pins, or initialization code from another MCU family.
+  • The STM32 HAL rules below apply to this project.
+"""
+
+
+def _entrypoint_for(device) -> tuple[str, str]:
+    from boards.device import uses_arduino_framework
+
+    if uses_arduino_framework(device):
+        return "src/main.cpp", "cpp"
+    return "src/main.c", "c"
 
 
 # ---------------------------------------------------------------------------
@@ -493,12 +555,17 @@ async def run_agent_phase(
     on_event=None,
     device=None,
 ) -> tuple[AgentTrace, dict]:
-    """Run the conversational STM32 copilot. Returns (trace, mutated-files).
+    """Run the board-aware firmware copilot. Returns (trace, mutated-files).
 
     `on_event`, if provided, is an async callback forwarded to run_phase that
     receives a dict per agent step so callers (the SSE endpoint) can stream live
     progress. When omitted the run is fully blocking, exactly as before.
     """
+    from boards.registry import registry
+    if device is None:
+        device = registry.default()
+    entry_path, entry_language = _entrypoint_for(device)
+
     toolbox = CodingToolbox(
         project_name=project_name,
         problem=problem,
@@ -509,10 +576,12 @@ async def run_agent_phase(
         project_id=project_id,
         build_output=build_output,
         auto_approve=auto_approve,
+        target_board_id=device.id,
     )
 
-    # Include the current main.c so the agent can see existing code (capped to save tokens)
-    current_code = files.get("src/main.c", {}).get("content", "(empty \u2014 no code written yet)")
+    # Show the selected framework's real entry point. A stale main.c left from a
+    # previous board must not drag an Arduino/ESP32 run back toward STM32.
+    current_code = files.get(entry_path, {}).get("content", "(empty \u2014 no code written yet)")
     if len(current_code) > 2500:
         current_code = current_code[:2500] + "\n... (truncated for brevity)"
 
@@ -529,12 +598,10 @@ async def run_agent_phase(
     )
 
     from agent.board_context import build_board_context
-    from boards.registry import registry
-    if device is None:
-        device = registry.default()
 
     system = _AGENT_SYSTEM.replace("{tools}", _tool_block(toolbox))
     system = system.replace("{board_context}", build_board_context(device))
+    system = system.replace("{framework_guard}", _framework_guard(device))
 
     from services.component_resolution import context_to_markdown, resolve_component_context
     from services.research import load_research_state, selected_component_ids
@@ -568,13 +635,15 @@ async def run_agent_phase(
             "Review the conversation history above. "
             "If this turn is about a build/compile/link failure, call read_build_output() first. "
             "If you now know the board, pins, and all required parameters — generate the "
-            "firmware IMMEDIATELY: use generate_hal for peripheral setup (RULE 3.3), or "
-            'write_file("src/main.c") for pure application logic. '
+            "firmware IMMEDIATELY: use generate_hal for framework-specific peripheral setup, or "
+            f'write_file("{entry_path}") for application logic. '
             "Do NOT ask any more questions. Do NOT re-confirm anything. Just generate the code."
         )
     else:
         # First turn: send the full structured context so the agent has everything it needs.
         user_prompt = _AGENT_USER.format(
+            entry_path=entry_path,
+            entry_language=entry_language,
             current_code=current_code,
             installed_libraries=lib_list_str,
             component_context=component_context,
@@ -592,6 +661,9 @@ async def run_agent_phase(
         toolbox=toolbox,
         complete_fn=partial(llm.complete, provider),
         on_event=on_event,
+        provider=provider,
+        model=llm.model_for_provider(provider),
+        context_window=llm.context_window_for_provider(provider),
     )
     return trace, toolbox.files
 

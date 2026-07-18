@@ -95,6 +95,24 @@ export interface ChatMessage {
   proposals?: FileProposal[]; // staged file changes awaiting Allow/Reject
 }
 
+export interface AgentContextStatus {
+  provider: string;
+  model: string;
+  context_window: number;
+  context_used_tokens: number;
+  context_remaining_tokens: number;
+  context_used_percent: number;
+  context_remaining_percent: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_tokens: number;
+  last_input_tokens: number;
+  last_output_tokens: number;
+  estimated: boolean;
+  warning_percent: number;
+  low: boolean;
+}
+
 export interface PlotDataPoint {
   time: string;
   temp: number;
@@ -391,7 +409,8 @@ const getInitialActiveSidebarTab = () => {
   if (!isBrowser) return "explorer";
   try {
     const val = localStorage.getItem("activeSidebarTab");
-    return val ? JSON.parse(val) : "explorer";
+    const saved = val ? JSON.parse(val) : "explorer";
+    return saved === "research" || saved === "libraries" ? "explorer" : saved;
   } catch {
     return "explorer";
   }
@@ -516,6 +535,7 @@ export const workspaceStore = writable({
   aiWaiting: false,
   queuedAiFollowup: null as string | null,
   selectedProvider: getInitialSelectedProvider(),
+  agentContextStatus: null as AgentContextStatus | null,
   // When true, the agent runs build/flash without pausing for a Yes/No prompt
   // and auto-allows file diffs. Per-session toggle in the chat UI.
   autoApproveAgent: false,
@@ -524,7 +544,7 @@ export const workspaceStore = writable({
   activeBottomTab: getInitialActiveBottomTab() as "terminal" | "plotter" | "registers" | "memory",
   terminalOpen: getInitialTerminalOpen(),  // whether the bottom drawer (serial/build/etc.) is expanded
   showWelcomeScreen: getInitialShowWelcomeScreen(),
-  activeSidebarTab: getInitialActiveSidebarTab() as "explorer" | "search" | "git" | "debug" | "extensions" | "boards" | "rag" | "research" | "libraries",
+  activeSidebarTab: getInitialActiveSidebarTab() as "explorer" | "search" | "git" | "debug" | "extensions" | "boards" | "rag",
   selectedBoard: getInitialSelectedBoard() as string,
   selectedBoardInfo: null as BoardMeta | null,
   boardCatalog: [] as BoardMeta[],
@@ -1281,19 +1301,12 @@ export const actions = {
   setShowWelcomeScreen: (val: boolean) => {
     workspaceStore.update(s => ({ ...s, showWelcomeScreen: val }));
   },
-  setActiveSidebarTab: (tab: "explorer" | "search" | "git" | "debug" | "extensions" | "boards" | "rag" | "libraries") => {
+  setActiveSidebarTab: (tab: "explorer" | "search" | "git" | "debug" | "extensions" | "boards" | "rag") => {
     workspaceStore.update(s => ({ ...s, activeSidebarTab: tab }));
     if (tab === "git") {
       actions.loadGitInfo();
       actions.loadGitStatus();
       actions.loadGitLog();
-    }
-    if (tab === "libraries") {
-      actions.fetchAvailableLibraries();
-      actions.fetchLibraryCategories();
-      let pid: string | null = null;
-      workspaceStore.subscribe(s => { pid = s.activeProjectId; })();
-      if (pid) actions.fetchInstalledLibraries(pid);
     }
   },
   setSelectedBoard: async (board: string) => {
@@ -1319,7 +1332,14 @@ export const actions = {
         pins: buildPinsFromDevice(deviceInfo),
         selectedProbe: impliedProbe ?? s.selectedProbe,
       }));
-      if (pid) await api.setProjectBoard(pid, board);
+      if (pid) {
+        await api.setProjectBoard(pid, board);
+        // Replace any open/editor copy of platformio.ini with the newly
+        // generated target config. Otherwise a later autosave could put the
+        // previous board back after the root file was correctly retargeted.
+        await actions.refreshProjectFiles(pid);
+        await actions.loadProjects();
+      }
     } catch (e) {
       console.error("Failed to switch board", e);
       workspaceStore.update(s => ({ ...s, selectedBoardInfo: s.selectedBoardInfo || { id: board, label: board } }));
@@ -1819,6 +1839,7 @@ export const actions = {
       workspaceStore.update(s => ({
         ...s,
         aiWaiting: false,            // dots handled by the streaming placeholder now
+        agentContextStatus: null,
         aiMessages: [...s.aiMessages, {
           id: aiMsgId, sender: "ai", text: "",
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -1845,6 +1866,12 @@ export const actions = {
       await api.streamAgent(cleanText, (ev: any) => {
         sawAnyEvent = true;
         switch (ev.type) {
+          case "context":
+            workspaceStore.update(s => ({
+              ...s,
+              agentContextStatus: ev as AgentContextStatus,
+            }));
+            break;
           case "think":
             patchAiMsg(m => {
               m.thinking = ev.text;
@@ -1937,6 +1964,12 @@ export const actions = {
             });
             break;
           case "done":
+            if (ev.context_usage) {
+              workspaceStore.update(s => ({
+                ...s,
+                agentContextStatus: ev.context_usage as AgentContextStatus,
+              }));
+            }
             patchAiMsg(m => {
               m.streaming = false;
               m.thinkingDone = true;
@@ -2033,6 +2066,7 @@ export const actions = {
       await api.deleteConversationHistory(projectId);
       workspaceStore.update(s => ({
         ...s,
+        agentContextStatus: null,
         aiMessages: [
           {
             id: "default-greeting",

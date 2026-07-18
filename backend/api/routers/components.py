@@ -55,6 +55,12 @@ def component_schema() -> dict[str, Any]:
             "datasheet_url": "manufacturer/reference URL",
             "buy_links": [{"vendor": "Vendor", "url": "https://...", "sku": "optional"}],
             "aliases": ["searchable alternate part names"],
+            "source_url": "web page used to discover/enrich this row",
+            "source_name": "human-readable discovery source",
+            "image_source_url": "page attributed as the remote image source",
+            "discovery_query": "search query used by Research",
+            "discovered_at": "timestamp for dynamically added catalogue rows",
+            "verified_at": "timestamp for a later human/curation verification",
             "pins": "see pin table",
         },
         "pin": {

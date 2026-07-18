@@ -54,6 +54,19 @@ def _toolbox(CodingToolbox):
     )
 
 
+def _esp32_toolbox(CodingToolbox):
+    return CodingToolbox(
+        project_name="esp-test",
+        problem="Build the researched ESP32 firmware",
+        catalogue={},
+        workbench={"placed_components": [], "wires": []},
+        files={},
+        user_id=None,
+        project_id=None,
+        target_board_id="esp32dev",
+    )
+
+
 # A canned STM32F405 USART2 firmware body the fake model "writes". Mirrors the
 # real production case from the bug report.
 _FIRMWARE = '''```c
@@ -65,6 +78,52 @@ int main(void) {
     while (1) {}
 }
 ```'''
+
+
+_ARDUINO_FIRMWARE = '''```cpp
+#include <Arduino.h>
+void setup() {
+    pinMode(2, OUTPUT);
+}
+void loop() {
+    digitalWrite(2, HIGH);
+}
+```'''
+
+
+def test_esp32_target_rejects_stm32_codegen_and_source():
+    """Act mode cannot execute a model's board-family drift."""
+    _, CodingToolbox = _import_agent()
+    tb = _esp32_toolbox(CodingToolbox)
+
+    result = tb.generate_hal("bluepill_f103c8", "rcc, gpio")
+    assert "refused code generation" in result
+    assert "esp32dev" in result
+
+    tb.call_body = _FIRMWARE
+    result = tb.write_file("src/main.c")
+    assert "refused STM32 HAL code" in result
+    assert "src/main.c" not in tb.files
+
+    tb.call_body = _ARDUINO_FIRMWARE
+    result = tb.write_file("src/main.cpp")
+    assert result.startswith("Successfully wrote")
+    assert tb.files["src/main.cpp"]["language"] == "cpp"
+    assert "setup()" in tb.files["src/main.cpp"]["content"]
+
+
+def test_esp32_prompt_contract_uses_arduino_entrypoint():
+    if str(BACKEND_DIR) not in sys.path:
+        sys.path.insert(0, str(BACKEND_DIR))
+    from agent.solver import _entrypoint_for, _framework_guard
+    from boards.registry import registry
+
+    device = registry.get("esp32dev")
+    assert _entrypoint_for(device) == ("src/main.cpp", "cpp")
+    guard = _framework_guard(device)
+    assert "AUTHORITATIVE FRAMEWORK CONTRACT — ARDUINO" in guard
+    assert "never generate for an STM32 board" in guard
+    assert "src/main.cpp" in guard
 
 
 def _fake_llm_factory(responses):
@@ -151,6 +210,77 @@ def test_streaming_emits_ordered_events():
     assert "USART2" in prop_ev["code"]
     assert not prop_ev["code"].startswith("```")
     assert "old" in prop_ev  # baseline for the diff (empty string for a new file)
+
+
+def test_agent_is_not_stopped_by_an_arbitrary_step_count():
+    """A long valid tool run continues past the old sixteen-step cutoff."""
+    run_phase, CodingToolbox = _import_agent()
+    tb = _toolbox(CodingToolbox)
+    responses = [
+        f"THINK: inspection {index}\nCALL read_project_config()"
+        for index in range(18)
+    ] + ["Finished after all required inspections."]
+
+    trace = asyncio.run(run_phase(
+        phase="coding",
+        system_prompt="sys",
+        user_prompt="usr",
+        toolbox=tb,
+        complete_fn=_fake_llm_factory(responses),
+    ))
+
+    assert trace.status == "completed"
+    assert trace.final == "Finished after all required inspections."
+    assert len(trace.steps) == 18
+    assert "step limit" not in trace.final.lower()
+
+
+def test_agent_stops_at_low_context_and_streams_usage():
+    """Provider token usage, rather than a step count, controls handoff."""
+    run_phase, CodingToolbox = _import_agent()
+
+    tb = _toolbox(CodingToolbox)
+    calls = 0
+
+    class CompletionWithUsage(str):
+        def __new__(cls, value: str):
+            obj = super().__new__(cls, value)
+            obj.usage = {"prompt_tokens": 85, "completion_tokens": 3, "total_tokens": 88}
+            obj.model = "test-model"
+            obj.context_window = 100
+            return obj
+
+    async def complete_fn(messages):
+        nonlocal calls
+        calls += 1
+        return CompletionWithUsage("THINK: inspect config\nCALL read_project_config()")
+
+    events: list[dict] = []
+
+    async def on_event(event):
+        events.append(event)
+
+    trace = asyncio.run(run_phase(
+        phase="coding",
+        system_prompt="sys",
+        user_prompt="usr",
+        toolbox=tb,
+        complete_fn=complete_fn,
+        on_event=on_event,
+        provider="test-provider",
+        model="test-model",
+        context_window=100,
+    ))
+
+    assert calls == 1
+    assert trace.status == "context_low"
+    assert "context left" in trace.final.lower()
+    assert "another session" in trace.final.lower()
+    context_events = [event for event in events if event["type"] == "context"]
+    assert context_events
+    assert context_events[-1]["low"] is True
+    assert context_events[-1]["total_input_tokens"] == 85
+    assert context_events[-1]["total_output_tokens"] == 3
 
 
 def test_ask_user_streams_question_event():
@@ -351,4 +481,3 @@ def test_git_tools_with_gitmanager(tmp_path, monkeypatch):
     show_output = tb.git_show("HEAD")
     assert "Update main return value" in show_output
     assert "+int main() { return 1; }" in show_output
-

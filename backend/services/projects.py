@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import re
+import sys
 from pathlib import Path
 from uuid import UUID
 
@@ -24,6 +26,29 @@ _BINARY_EXTS = {
     ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico", ".pdf", ".zip", ".gz",
     ".tar", ".7z", ".exe", ".dll", ".dylib", ".pyc", ".woff", ".woff2", ".ttf",
 }
+
+
+def default_projects_root() -> Path:
+    """Return the app-owned project root for the current desktop platform."""
+    if sys.platform.startswith("win"):
+        local_app_data = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
+        return Path(local_app_data) / "HardcoreAI" / "projects" if local_app_data else Path.home() / "AppData" / "Local" / "HardcoreAI" / "projects"
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "HardcoreAI" / "projects"
+    return Path.home() / "local" / ".hardcoreai" / "projects"
+
+
+def default_project_path(project_name: str) -> Path:
+    """Choose a readable, collision-free directory for a new local project."""
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", project_name.strip()).strip(".-")
+    slug = slug or "project"
+    root = default_projects_root()
+    candidate = root / slug
+    suffix = 2
+    while candidate.exists():
+        candidate = root / f"{slug}-{suffix}"
+        suffix += 1
+    return candidate
 
 
 def _is_binary_path(name: str) -> bool:

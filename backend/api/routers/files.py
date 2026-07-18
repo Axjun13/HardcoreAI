@@ -118,19 +118,38 @@ def _resolve_work_dir(project_id: str) -> Path | None:
 def upsert_file(project_id: str, file_path: str, payload: CodeFileUpsert, user_id: str = Depends(get_current_user_id)) -> CodeFileRead:
     with db_session(user_id) as session:
         project = get_project_or_404(session, project_id, user_id)
-        code_file = session.exec(
-            select(CodeFileRow).where(
-                CodeFileRow.project_id == project.id, CodeFileRow.path == file_path
+        if file_path == "platformio.ini":
+            # PlatformIO builds the root file, so saving only the DB row leaves
+            # the project on its old MCU. Keep both representations and the
+            # project's selected board aligned in one operation.
+            from services.hardware import persist_platformio_content
+
+            persist_platformio_content(
+                project_id,
+                payload.content,
+                session=session,
+                project=project,
             )
-        ).first()
-        if not code_file:
-            code_file = CodeFileRow(project_id=project.id, path=file_path)
-        code_file.language = payload.language
-        code_file.content = payload.content
-        code_file.updated_at = now_utc()
-        project.updated_at = now_utc()
-        session.add(code_file)
-        session.add(project)
+            code_file = session.exec(
+                select(CodeFileRow).where(
+                    CodeFileRow.project_id == project.id,
+                    CodeFileRow.path == file_path,
+                )
+            ).first()
+        else:
+            code_file = session.exec(
+                select(CodeFileRow).where(
+                    CodeFileRow.project_id == project.id, CodeFileRow.path == file_path
+                )
+            ).first()
+            if not code_file:
+                code_file = CodeFileRow(project_id=project.id, path=file_path)
+            code_file.language = payload.language
+            code_file.content = payload.content
+            code_file.updated_at = now_utc()
+            project.updated_at = now_utc()
+            session.add(code_file)
+            session.add(project)
         session.commit()
         session.refresh(code_file)
 

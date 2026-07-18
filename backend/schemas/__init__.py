@@ -25,6 +25,8 @@ class Pin(BaseModel):
     x: float
     y: float
     role: str = "gpio"
+    voltage: float | None = None
+    capabilities: str | None = None
 
 
 class ComponentDefinition(BaseModel):
@@ -41,6 +43,14 @@ class ComponentDefinition(BaseModel):
     buy_links: list[dict[str, Any]] = Field(default_factory=list)
     datasheet_url: str | None = None
     aliases: list[str] = Field(default_factory=list)
+    source_url: str | None = None
+    source_name: str | None = None
+    image_source_url: str | None = None
+    discovery_query: str | None = None
+    discovered_at: datetime | None = None
+    verified_at: datetime | None = None
+    protocols: list[str] = Field(default_factory=list)
+    verification_sources: list[str] = Field(default_factory=list)
     pins: list[Pin]
 
 
@@ -126,6 +136,7 @@ class PhaseTrace(BaseModel):
     question: str = ""
     options: list[str] = Field(default_factory=list)
     messages: list[dict[str, Any]] = Field(default_factory=list)
+    context_usage: dict[str, Any] = Field(default_factory=dict)
 
 
 class AgentRunResult(BaseModel):
@@ -263,4 +274,3 @@ class DebugSnapshot(BaseModel):
     locals: list[DebugLocal] = Field(default_factory=list)
     breakpoints: list[DebugBreakpoint] = Field(default_factory=list)
     error: str | None = None   # set when session could not start
-

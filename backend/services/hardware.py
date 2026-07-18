@@ -239,6 +239,11 @@ def _project_board_id(project_id: str) -> str | None:
         return None
 
 
+def project_board_id(project_id: str) -> str | None:
+    """Return the project's persisted board target, when one is available."""
+    return _project_board_id(project_id)
+
+
 def platformio_ini_for_board(board: str = DEFAULT_BOARD) -> str:
     """Render the correct PlatformIO environment for the selected board."""
     device = registry.get(board)
@@ -268,6 +273,173 @@ def platformio_ini_for_board(board: str = DEFAULT_BOARD) -> str:
             upload_speed=device.upload_speed or 115200,
         )
     return _PLATFORMIO_INI_TEMPLATE.format(env=board, board=board)
+
+
+def platformio_board_id(content: str) -> str | None:
+    """Extract the active board id from PlatformIO configuration text."""
+    match = re.search(r"(?mi)^\s*board\s*=\s*([^\s;#]+)", content or "")
+    return match.group(1).strip() if match else None
+
+
+def retarget_platformio_content(existing: str, board: str) -> str:
+    """Render a board environment while preserving installed dependencies."""
+    from services.library_service import _get_lib_deps, _set_lib_deps
+
+    generated = platformio_ini_for_board(board)
+    dependencies = _get_lib_deps(existing or "")
+    return _set_lib_deps(generated, dependencies) if dependencies else generated
+
+
+def persist_platformio_content(
+    project_id: str,
+    content: str,
+    *,
+    session=None,
+    project=None,
+) -> Path:
+    """Atomically mirror platformio.ini to both DB and the build root.
+
+    Callers inside a transaction may pass their session/project; otherwise this
+    helper owns a short DB transaction. A known `board =` value also updates the
+    project target so a later build cannot silently retarget the file to STM32.
+    """
+    from core.config import now_utc
+    from db.models import CodeFileRow, ProjectRow
+    from db.session import engine
+    from sqlmodel import Session, select
+
+    owns_session = session is None
+    if owns_session:
+        session = Session(engine)
+    try:
+        if project is None and str(project_id).isdigit():
+            project = session.get(ProjectRow, int(project_id))
+        if project is None:
+            raise ValueError(f"Unknown project_id: {project_id}")
+
+        row = session.exec(
+            select(CodeFileRow).where(
+                CodeFileRow.project_id == project.id,
+                CodeFileRow.path == "platformio.ini",
+            )
+        ).first()
+        if not row:
+            row = CodeFileRow(project_id=project.id, path="platformio.ini", language="ini")
+        row.content = content
+        row.language = "ini"
+        row.updated_at = now_utc()
+        session.add(row)
+
+        selected_board = platformio_board_id(content)
+        if selected_board and registry.get(selected_board):
+            project.board_id = selected_board
+            project.updated_at = now_utc()
+            session.add(project)
+
+        usable = _usable_project_path(project.path)
+        workspace = usable or (WORKSPACES_DIR / str(project.id))
+        workspace.mkdir(parents=True, exist_ok=True)
+        target = workspace / "platformio.ini"
+        temporary = workspace / ".platformio.ini.tmp"
+        temporary.write_text(content, encoding="utf-8")
+        temporary.replace(target)
+
+        if owns_session:
+            session.commit()
+        return target
+    finally:
+        if owns_session:
+            session.close()
+
+
+def configure_project_environment(
+    project_id: str,
+    board: str,
+    *,
+    session=None,
+    project=None,
+) -> tuple[object, str, Path]:
+    """Select a board and configure its build environment and entry point."""
+    device = registry.get(board)
+    if not device:
+        raise ValueError(f"Unknown board_id: {board}")
+
+    if project is None and session is not None and str(project_id).isdigit():
+        from db.models import ProjectRow
+
+        project = session.get(ProjectRow, int(project_id))
+
+    workspace = None
+    if project is not None:
+        workspace = _usable_project_path(project.path) or (WORKSPACES_DIR / str(project.id))
+    else:
+        workspace = workspace_dir(project_id)
+    ini_path = workspace / "platformio.ini"
+    existing = ini_path.read_text(encoding="utf-8") if ini_path.exists() else ""
+    content = retarget_platformio_content(existing, device.id)
+
+    # Frameworks do not share an entry-point contract. Safely replace only the
+    # untouched generated placeholder (STM32 main.c, Arduino main.cpp, or
+    # ESP-IDF main.c); user-authored source is never removed or overwritten.
+    if project is not None and session is not None and project.board_id != device.id:
+        from core.config import now_utc
+        from db.models import CodeFileRow
+        from services.projects import default_files
+        from sqlmodel import select
+
+        old_entries = {
+            file_path: (language, body)
+            for file_path, language, body in default_files(project.name, project.board_id)
+            if file_path in {"src/main.c", "src/main.cpp"}
+        }
+        new_entries = [
+            item for item in default_files(project.name, device.id)
+            if item[0] in {"src/main.c", "src/main.cpp"}
+        ]
+        for old_path, (_language, old_body) in old_entries.items():
+            row = session.exec(
+                select(CodeFileRow).where(
+                    CodeFileRow.project_id == project.id,
+                    CodeFileRow.path == old_path,
+                )
+            ).first()
+            if row and row.content == old_body:
+                session.delete(row)
+            disk_path = workspace / old_path
+            if disk_path.exists():
+                try:
+                    if disk_path.read_text(encoding="utf-8") == old_body:
+                        disk_path.unlink()
+                except (OSError, UnicodeError):
+                    pass
+
+        for new_path, language, new_body in new_entries:
+            row = session.exec(
+                select(CodeFileRow).where(
+                    CodeFileRow.project_id == project.id,
+                    CodeFileRow.path == new_path,
+                )
+            ).first()
+            disk_path = workspace / new_path
+            if row is None and not disk_path.exists():
+                row = CodeFileRow(
+                    project_id=project.id,
+                    path=new_path,
+                    language=language,
+                    content=new_body,
+                    updated_at=now_utc(),
+                )
+                session.add(row)
+                disk_path.parent.mkdir(parents=True, exist_ok=True)
+                disk_path.write_text(new_body, encoding="utf-8")
+
+    path = persist_platformio_content(
+        project_id,
+        content,
+        session=session,
+        project=project,
+    )
+    return device, content, path
 
 
 def ensure_platformio_ini(workspace: Path, board: str = DEFAULT_BOARD) -> None:
