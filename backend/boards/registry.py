@@ -13,7 +13,7 @@ from pathlib import Path
 
 from boards.device import Device
 from boards.family_map import derive_family_info
-from boards.pio_importer import import_boards
+from boards.pio_importer import import_arduino_framework_boards, import_boards
 from boards.stm32_part import derive_package_pin_count
 
 CACHE_PATH = Path(__file__).resolve().parent.parent / "data" / "boards_cache.json"
@@ -23,6 +23,132 @@ CUSTOM_PATH = Path(__file__).resolve().parent.parent / "data" / "boards_custom.j
 # data — if PlatformIO's metadata for a board is ever wrong, override it here
 # rather than patching the importer.
 _SEED: dict[str, Device] = {
+    # --- Arduino / AVR ---
+    "uno": Device(
+        id="uno", label="Arduino Uno (ATmega328P)", vendor="arduino",
+        mcu="ATMEGA328P", family="AVR-Mega", core="avr", arch="avr",
+        flash_bytes=32256, ram_bytes=2048, f_cpu_hz=16_000_000,
+        avrdude_mcu="atmega328p", avrdude_programmer="arduino", upload_speed=115200,
+        upload_protocol="arduino", debug_tool="avrdude", supports_live_debug=False,
+        frameworks=["arduino"],
+    ),
+    "nanoatmega328": Device(
+        id="nanoatmega328", label="Arduino Nano (ATmega328P, old bootloader)", vendor="arduino",
+        mcu="ATMEGA328P", family="AVR-Mega", core="avr", arch="avr",
+        flash_bytes=30720, ram_bytes=2048, f_cpu_hz=16_000_000,
+        avrdude_mcu="atmega328p", avrdude_programmer="arduino", upload_speed=57600,
+        upload_protocol="arduino", debug_tool="avrdude", supports_live_debug=False,
+        frameworks=["arduino"],
+    ),
+    "megaatmega2560": Device(
+        id="megaatmega2560", label="Arduino Mega 2560", vendor="arduino",
+        mcu="ATMEGA2560", family="AVR-Mega", core="avr", arch="avr",
+        flash_bytes=253952, ram_bytes=8192, f_cpu_hz=16_000_000,
+        avrdude_mcu="atmega2560", avrdude_programmer="wiring", upload_speed=115200,
+        upload_protocol="wiring", debug_tool="avrdude", supports_live_debug=False,
+        frameworks=["arduino"],
+    ),
+    "leonardo": Device(
+        id="leonardo", label="Arduino Leonardo (ATmega32U4)", vendor="arduino",
+        mcu="ATMEGA32U4", family="AVR-Mega", core="avr", arch="avr",
+        flash_bytes=28672, ram_bytes=2560, f_cpu_hz=16_000_000,
+        avrdude_mcu="atmega32u4", avrdude_programmer="avr109", upload_speed=57600,
+        upload_protocol="avr109", debug_tool="avrdude", supports_live_debug=False,
+        frameworks=["arduino"],
+    ),
+    "micro": Device(
+        id="micro", label="Arduino Micro (ATmega32U4)", vendor="arduino",
+        mcu="ATMEGA32U4", family="AVR-Mega", core="avr", arch="avr",
+        flash_bytes=28672, ram_bytes=2560, f_cpu_hz=16_000_000,
+        avrdude_mcu="atmega32u4", avrdude_programmer="avr109", upload_speed=57600,
+        upload_protocol="avr109", debug_tool="avrdude", supports_live_debug=False,
+        frameworks=["arduino"],
+    ),
+
+    # --- ESP32 / ESP8266 ---
+    "esp32dev": Device(
+        id="esp32dev", label="ESP32 Dev Module", vendor="espressif",
+        mcu="esp32", family="ESP32", core="xtensa-lx6", arch="xtensa",
+        flash_bytes=4 * 1024 * 1024, ram_bytes=320 * 1024, f_cpu_hz=240_000_000,
+        upload_speed=921600, flash_mode="dio", flash_freq="40m",
+        upload_protocol="esptool", debug_tool="esptool", supports_live_debug=False,
+        frameworks=["arduino"],
+    ),
+    "esp32-s3-devkitc-1": Device(
+        id="esp32-s3-devkitc-1", label="ESP32-S3-DevKitC-1", vendor="espressif",
+        mcu="esp32s3", family="ESP32", core="xtensa-lx7", arch="xtensa",
+        flash_bytes=8 * 1024 * 1024, ram_bytes=320 * 1024, f_cpu_hz=240_000_000,
+        upload_speed=921600, flash_mode="dio", flash_freq="80m",
+        upload_protocol="esptool", debug_tool="esptool", supports_live_debug=False,
+        frameworks=["arduino"],
+    ),
+    "esp32-c3-devkitm-1": Device(
+        id="esp32-c3-devkitm-1", label="ESP32-C3-DevKitM-1", vendor="espressif",
+        mcu="esp32c3", family="ESP32", core="riscv32", arch="xtensa",
+        flash_bytes=4 * 1024 * 1024, ram_bytes=400 * 1024, f_cpu_hz=160_000_000,
+        upload_speed=921600, flash_mode="dio", flash_freq="80m",
+        upload_protocol="esptool", debug_tool="esptool", supports_live_debug=False,
+        frameworks=["arduino"],
+    ),
+    "nodemcuv2": Device(
+        id="nodemcuv2", label="NodeMCU 1.0 (ESP8266, 4M)", vendor="espressif",
+        mcu="esp8266", family="ESP8266", core="xtensa-lx106", arch="xtensa",
+        flash_bytes=4 * 1024 * 1024, ram_bytes=80 * 1024, f_cpu_hz=80_000_000,
+        upload_speed=115200, flash_mode="dio", flash_freq="40m",
+        upload_protocol="esptool", debug_tool="esptool", supports_live_debug=False,
+        frameworks=["arduino"],
+    ),
+    "d1_mini": Device(
+        id="d1_mini", label="WEMOS D1 Mini (ESP8266)", vendor="espressif",
+        mcu="esp8266", family="ESP8266", core="xtensa-lx106", arch="xtensa",
+        flash_bytes=4 * 1024 * 1024, ram_bytes=80 * 1024, f_cpu_hz=80_000_000,
+        upload_speed=921600, flash_mode="dio", flash_freq="40m",
+        upload_protocol="esptool", debug_tool="esptool", supports_live_debug=False,
+        frameworks=["arduino"],
+    ),
+
+    # --- SAMD (Arduino MKR / Zero) ---
+    # MKR boards have no onboard debugger — SWD is only available on
+    # unpopulated castellated pads, so live debug needs an external
+    # CMSIS-DAP/J-Link probe wired up by hand. Leaving these False until
+    # there's a way to represent "debug available, but only with external
+    # hardware" distinctly from "board has no debug port at all" (Zero,
+    # below, is the one with a genuine onboard debugger).
+    "mkrwifi1010": Device(
+        id="mkrwifi1010", label="Arduino MKR WiFi 1010", vendor="arduino",
+        mcu="samd21g18a", family="SAMD21", core="cortex-m0+", arch="arm-samd",
+        flash_bytes=262144, ram_bytes=32768, f_cpu_hz=48_000_000,
+        upload_speed=921600, bossac_offset="0x2000",
+        upload_protocol="sam-ba", debug_tool="bossac", supports_live_debug=False,
+        frameworks=["arduino"],
+    ),
+    "mkrzero": Device(
+        id="mkrzero", label="Arduino MKR Zero", vendor="arduino",
+        mcu="samd21g18a", family="SAMD21", core="cortex-m0+", arch="arm-samd",
+        flash_bytes=262144, ram_bytes=32768, f_cpu_hz=48_000_000,
+        upload_speed=921600, bossac_offset="0x2000",
+        upload_protocol="sam-ba", debug_tool="bossac", supports_live_debug=False,
+        frameworks=["arduino"],
+    ),
+    "zeroUSB": Device(
+        id="zeroUSB", label="Arduino Zero (Native USB port)", vendor="arduino",
+        mcu="samd21g18a", family="SAMD21", core="cortex-m0+", arch="arm-samd",
+        flash_bytes=262144, ram_bytes=32768, f_cpu_hz=48_000_000,
+        upload_speed=921600, bossac_offset="0x2000",
+        upload_protocol="sam-ba", debug_tool="openocd",
+        # Arduino Zero has a genuine onboard EDBG chip wired via SWD to the
+        # SAMD21 — separate from either USB port used for flashing/serial,
+        # so it works the same whether you build for zeroUSB (native port)
+        # or the Programming-port variant. EDBG speaks CMSIS-DAP, so this
+        # goes through the same OpenOCD+arm-none-eabi-gdb pipeline as
+        # STM32 debug sessions (see services/debug.py) rather than needing
+        # anything SAMD-specific.
+        openocd_target="target/at91samdXX.cfg",
+        openocd_interface="interface/cmsis-dap.cfg",
+        supports_live_debug=True,
+        frameworks=["arduino"],
+    ),
+
     "nucleo_g431rb": Device(
         id="nucleo_g431rb", label="STM32G431RB (Nucleo-64)", vendor="st",
         mcu="STM32G431RBTx", family="STM32G4", core="cortex-m4",
@@ -243,14 +369,36 @@ class BoardRegistry:
         return _SEED["bluepill_f103c8"]
 
     def refresh(self, query: str = "STM32") -> int:
-        """Re-import from PlatformIO, overwrite the cache. Never raises —
-        returns 0 and leaves the existing cache untouched on failure."""
+        """Re-import a single query's worth of boards from PlatformIO and
+        merge into the imported cache (does not clear other platforms'
+        entries — call refresh_all() to rebuild the whole cache from
+        scratch). Never raises — returns 0 and leaves the existing cache
+        untouched on failure."""
         imported = import_boards(query)
         if not imported:
             return 0
-        self._imported = {d.id: d for d in imported}
+        self._imported.update({d.id: d for d in imported})
         self._write_cache()
-        return len(self._imported)
+        return len(imported)
+
+    def refresh_all(self) -> dict[str, int]:
+        """Rebuild the imported cache from every known platform query.
+        Returns a per-query breakdown (e.g. {"STM32": 299, "Arduino": 27,
+        "ESP32": 14, ...}) rather than a bare total, since a single number
+        hides which platform(s) actually came back with 0 (e.g. `pio` not
+        finding a match, or a query string PlatformIO doesn't recognize)."""
+        self._imported = {}
+        breakdown: dict[str, int] = {}
+        arduino_imported = import_arduino_framework_boards()
+        self._imported.update({d.id: d for d in arduino_imported})
+        breakdown["Arduino-framework"] = len(arduino_imported)
+
+        for query in ("STM32", "ESP32", "ESP8266"):
+            imported = import_boards(query)
+            self._imported.update({d.id: d for d in imported})
+            breakdown[query] = len(imported)
+        self._write_cache()
+        return breakdown
     
     def get(self, board_id: str) -> Device | None:
         device = self._custom.get(board_id) or _SEED.get(board_id) or self._imported.get(board_id)
@@ -279,6 +427,11 @@ class BoardRegistry:
                     "pinout_status": "st_open_pin_data",
                     "pin_metadata": meta["pins"],
                 })
+        if device and device.arch in {"avr", "xtensa", "arm-samd", "arduino-generic"} and device.arduino_pinout is None:
+            from boards.pinout import get_arduino_pinout
+            header = get_arduino_pinout(board_id, mcu=device.mcu, arch=device.arch)
+            if header:
+                device = device.model_copy(update={"arduino_pinout": header})
         return device
 
     def add_custom(self, device: Device) -> Device:

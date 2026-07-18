@@ -291,9 +291,106 @@ def get_device_for_project(project_id: str, session) -> Device:
     return device_manager.for_project(project_id, session)
 
 
+_ARDUINO_BOARD_NOTES: dict[str, dict[str, str]] = {
+    "uno": {"led_pin": "D13 (onboard LED, active HIGH)",
+            "board_tip": "Uses the STK500 bootloader over USB-serial (CH340/FTDI) — no on-chip debug."},
+    "nanoatmega328": {"led_pin": "D13 (onboard LED, active HIGH)",
+                       "board_tip": "Older bootloader — upload speed is 57600, not 115200."},
+    "megaatmega2560": {"led_pin": "D13 (onboard LED, active HIGH)",
+                        "board_tip": "Uses the 'wiring' bootloader protocol, not 'arduino'."},
+    "leonardo": {"led_pin": "D13 (onboard LED, active HIGH)",
+                 "board_tip": "Native USB (32U4) — enumerates via the avr109/Caterina bootloader; port may change after reset."},
+    "micro": {"led_pin": "D13 (onboard LED, active HIGH)",
+              "board_tip": "Native USB (32U4), same caveats as Leonardo."},
+    "esp32dev": {"led_pin": "no standard onboard LED across ESP32 dev boards — check silkscreen, often GPIO2",
+                 "board_tip": "Dual-core Xtensa LX6, WiFi+BT built in. analogWrite on some cores needs the ESP32 LEDC API instead — check the installed Arduino-ESP32 core version."},
+    "esp32-s3-devkitc-1": {"led_pin": "onboard addressable RGB LED (often GPIO48) — not a plain digitalWrite pin",
+                            "board_tip": "S3 has native USB — some boards need 'Upload Mode' boot-button held during flash."},
+    "esp32-c3-devkitm-1": {"led_pin": "check silkscreen — varies by C3 board revision",
+                            "board_tip": "RISC-V core (not Xtensa) — same Arduino API surface, different core internals."},
+    "nodemcuv2": {"led_pin": "D4/GPIO2 (onboard LED, active LOW)",
+                  "board_tip": "ESP8266 has one analog input (A0, 0-1V range) — not multiple ADC channels like ESP32."},
+    "d1_mini": {"led_pin": "D4/GPIO2 (onboard LED, active LOW)",
+                "board_tip": "Same ESP8266 single-ADC caveat as NodeMCU."},
+    "mkrwifi1010": {"led_pin": "check silkscreen (LED_BUILTIN maps correctly via the Arduino core)",
+                     "board_tip": "3.3V logic only — do NOT drive 5V into any pin. NINA WiFi module uses SPI internally, don't reuse those pins."},
+    "mkrzero": {"led_pin": "check silkscreen (LED_BUILTIN maps correctly via the Arduino core)",
+                "board_tip": "3.3V logic only. Has an onboard SD card slot on SPI."},
+    "zeroUSB": {"led_pin": "L LED near the USB connector (LED_BUILTIN)",
+                "board_tip": "3.3V logic only. Onboard EDBG chip supports real SWD debugging in Arduino IDE — not wired into this app's debug session yet, so treat as flash+Serial Monitor only here."},
+}
+
+
+def _build_arduino_board_context(device: Device) -> str:
+    notes = _ARDUINO_BOARD_NOTES.get(device.id, {"led_pin": "check board silkscreen", "board_tip": ""})
+    board_tip_line = f"  Notes: {notes['board_tip']}\n" if notes.get("board_tip") else ""
+    if device.arch == "avr":
+        upload_line = f"avrdude via {device.avrdude_programmer or 'the board default programmer'}, {device.upload_speed or 115200} baud"
+    elif device.arch == "arm-samd":
+        upload_line = f"bossac (1200bps touch-reset into the UF2/SAM-BA bootloader), {device.upload_speed or 921600} baud"
+    else:
+        upload_line = f"esptool, {device.upload_speed or 460800} baud"
+    return f"""\
+══════════════════════════════════════════════════════════════
+RULE 1 — BOARD: {device.label} ({device.mcu}, Arduino/{device.family} family)
+══════════════════════════════════════════════════════════════
+The target for THIS project is: {device.label}
+  Board id (use exactly this string when calling generate_hal): {device.id}
+  MCU: {device.mcu}
+  Framework: Arduino (setup()/loop() — NOT STM32 HAL, NO #include of HAL headers)
+  Core clock: {device.f_cpu_hz} Hz
+
+  ✗ Never ask the user which board — it is fixed for this project.
+  ✗ Never emit STM32 HAL/register code, HAL_Init(), or #include "stm32*_hal.h" for this board.
+  ✗ Never assume live GDB breakpoint debugging is available — this board has no
+    on-chip debug interface over its bootloader (flash + Serial Monitor only).
+
+All generated code must use the Arduino API (pinMode/digitalWrite/analogRead/
+Serial/Wire/SPI) — this board has no register-level HAL of its own to target.
+
+BOARD-SPECIFIC FACTS:
+  Onboard LED: {notes['led_pin']}
+  Upload: {upload_line}
+{board_tip_line}CODE GENERATION: generate_hal(board, peripherals) — pass board="{device.id}" exactly; \
+it emits an Arduino src/main.cpp sketch, not HAL files, for this board.
+"""
+
+
+def _build_espidf_board_context(device: Device) -> str:
+    return f"""\
+══════════════════════════════════════════════════════════════
+RULE 1 — BOARD: {device.label} ({device.mcu}, {device.family} / ESP-IDF)
+══════════════════════════════════════════════════════════════
+The target for THIS project is: {device.label}
+  Board id (use exactly this string when calling generate_hal): {device.id}
+  MCU: {device.mcu}
+  Framework: ESP-IDF (app_main(), FreeRTOS tasks, esp_* APIs — NOT Arduino setup()/loop())
+  Core clock: {device.f_cpu_hz} Hz
+
+  ✗ Never ask the user which board — it is fixed for this project.
+  ✗ Never emit STM32 HAL code or Arduino setup()/loop() for this board.
+  ✓ Use ESP-IDF headers such as freertos/FreeRTOS.h, freertos/task.h,
+    esp_log.h, driver/gpio.h, esp_wifi.h, and related ESP-IDF driver APIs.
+
+BOARD-SPECIFIC FACTS:
+  Upload: esptool via PlatformIO, {device.upload_speed or 460800} baud
+  GPIO namespace: use GPIO_NUM_x constants and verify strapping/flash pins
+  Code entrypoint: void app_main(void)
+
+CODE GENERATION: generate_hal(board, peripherals) — pass board="{device.id}" exactly; \
+it emits ESP-IDF src/main.c scaffolding for this board.
+"""
+
+
 def build_board_context(device: Device) -> str:
     """Renders the board-specific block that replaces solver.py's old
     hardcoded RULE 1 / RULE 3.4 Blue-Pill text."""
+    from boards.device import uses_arduino_framework, uses_espidf_framework
+    if uses_arduino_framework(device):
+        return _build_arduino_board_context(device)
+    if uses_espidf_framework(device):
+        return _build_espidf_board_context(device)
+
     notes = _FAMILY_NOTES.get(device.family, _DEFAULT_NOTES)
     notes = {**notes, **_BOARD_NOTES.get(device.id, {})}
     pinout_available = "full board pinout available" if device.full_pinout else "no full board pinout available"

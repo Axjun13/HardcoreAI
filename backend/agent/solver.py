@@ -438,6 +438,9 @@ CURRENT PROJECT CODE (src/main.c):
 INSTALLED LIBRARIES:
 {installed_libraries}
 
+SELECTED COMPONENT / PIN / LIBRARY CONTEXT:
+{component_context}
+
 REFERENCE MANUALS AVAILABLE: {has_docs}
 
 BUILD OUTPUT CONSOLE:
@@ -530,17 +533,24 @@ async def run_agent_phase(
     system = _AGENT_SYSTEM.replace("{tools}", _tool_block(toolbox))
     system = system.replace("{board_context}", build_board_context(device))
 
+    from services.component_resolution import context_to_markdown, resolve_component_context
+
     installed_libs = list_installed(project_id)
     if installed_libs:
         lib_list_str = "\n".join(f"- {lib['name']} ({lib.get('description', 'No description')})" for lib in installed_libs)
     else:
         lib_list_str = "(None installed)"
 
+    component_context = context_to_markdown(
+        resolve_component_context(catalogue=catalogue, workbench=workbench)
+    )
+
     if messages:
         # Subsequent turn: the prior history has all the context.
         # Explicitly tell the model to check if it has everything and generate code.
         user_prompt = (
             f'The user answered: "{problem}"\n\n'
+            f"Current selected component/pin/library context:\n{component_context}\n\n"
             f"Build Output console: {build_output_status}\n\n"
             "Review the conversation history above. "
             "If this turn is about a build/compile/link failure, call read_build_output() first. "
@@ -554,6 +564,7 @@ async def run_agent_phase(
         user_prompt = _AGENT_USER.format(
             current_code=current_code,
             installed_libraries=lib_list_str,
+            component_context=component_context,
             has_docs=has_docs,
             build_output_status=build_output_status,
             problem=problem or "(no request provided)",

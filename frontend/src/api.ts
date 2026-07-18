@@ -36,7 +36,20 @@ export const api = {
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
-  async addCustomBoard(payload: { id: string; mcu: string; label?: string }) {
+  async refreshAllBoards() {
+    // Pulls STM32 + Arduino + ESP32 + ESP8266 + MKR + Zero from PlatformIO
+    // in one call (backend: registry.refresh_all()). Previously the only
+    // reachable refresh route defaulted to STM32 alone, so the Arduino/
+    // ESP/SAMD side of the catalog could never grow past the hand-seeded
+    // boards from the UI.
+    const res = await fetch(`${BACKEND_URL}/api/boards/refresh-all`, {
+      method: "POST",
+      headers: { "Authorization": "Bearer TEST_TOKEN" }
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+  async addCustomBoard(payload: { id: string; mcu: string; label?: string; arch?: string }) {
     const res = await fetch(`${BACKEND_URL}/api/boards/custom`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": "Bearer TEST_TOKEN" },
@@ -289,6 +302,14 @@ async createProject(name: string, description: string = "", path: string | null 
         build_output: buildOutput,
         auto_approve: autoApprove
       })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async getAgentProviders() {
+    const res = await fetch(`${BACKEND_URL}/api/agent/providers`, {
+      headers: { "Authorization": "Bearer TEST_TOKEN" }
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
@@ -557,6 +578,89 @@ async createProject(name: string, description: string = "", path: string | null 
   async uninstallLibrary(projectId: string, libraryId: string) {
     const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/libraries/${encodeURIComponent(libraryId)}`, {
       method: "DELETE",
+      headers: { "Authorization": "Bearer TEST_TOKEN" }
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  // --- Component research / resolution ---
+
+  async getComponentSchema() {
+    const res = await fetch(`${BACKEND_URL}/api/components/schema`, {
+      headers: { "Authorization": "Bearer TEST_TOKEN" }
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async getComponentContext(projectId: string) {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/components/context`, {
+      headers: { "Authorization": "Bearer TEST_TOKEN" }
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async resolveComponentContext(projectId: string, installLibraries = false) {
+    const params = new URLSearchParams();
+    if (installLibraries) params.set("install_libraries", "true");
+    const query = params.toString();
+    const res = await fetch(
+      `${BACKEND_URL}/api/projects/${projectId}/components/resolve${query ? `?${query}` : ""}`,
+      {
+        method: "POST",
+        headers: { "Authorization": "Bearer TEST_TOKEN" }
+      }
+    );
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  // --- Research / ideation flow ---
+
+  async getResearchState(projectId: string) {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/research`, {
+      headers: { "Authorization": "Bearer TEST_TOKEN" }
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async ideateResearch(projectId: string, idea: string, provider: string = "deepseek") {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/research/ideate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer TEST_TOKEN" },
+      body: JSON.stringify({ idea, provider })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async selectResearchComponents(projectId: string, selectedComponentIds: string[], notes = "", installLibraries = false) {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/research/select`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer TEST_TOKEN" },
+      body: JSON.stringify({ selected_component_ids: selectedComponentIds, notes, install_libraries: installLibraries })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async prepareResearchPhase3(projectId: string, installLibraries = true) {
+    const params = new URLSearchParams();
+    params.set("install_libraries", installLibraries ? "true" : "false");
+    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/research/phase3?${params}`, {
+      method: "POST",
+      headers: { "Authorization": "Bearer TEST_TOKEN" }
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async generateResearchReadme(projectId: string) {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/research/readme`, {
+      method: "POST",
       headers: { "Authorization": "Bearer TEST_TOKEN" }
     });
     if (!res.ok) throw new Error(await res.text());

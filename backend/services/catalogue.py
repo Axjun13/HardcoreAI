@@ -8,6 +8,12 @@ from db.models import Component, PinRow
 from schemas import ComponentDefinition, Pin
 
 
+def _json_list(value) -> list:
+    if isinstance(value, list):
+        return value
+    return []
+
+
 def load_catalogue(session: Session) -> list[ComponentDefinition]:
     components = session.exec(select(Component).order_by(Component.id)).all()
     pins = session.exec(select(PinRow).order_by(PinRow.id)).all()
@@ -27,6 +33,11 @@ def load_catalogue(session: Session) -> list[ComponentDefinition]:
                 thumbnail=component.thumbnail,
                 width=component.width,
                 height=component.height,
+                library_name=component.library_name,
+                library_ids=_json_list(component.library_ids),
+                buy_links=_json_list(component.buy_links),
+                datasheet_url=component.datasheet_url,
+                aliases=_json_list(component.aliases),
                 pins=[
                     Pin(name=p.name, label=p.label, side=p.side, x=p.x, y=p.y, role=p.role)
                     for p in pins_by_component.get(component.id, [])

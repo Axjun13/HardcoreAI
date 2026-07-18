@@ -36,6 +36,11 @@ class ComponentDefinition(BaseModel):
     thumbnail: str
     width: int
     height: int
+    library_name: str | None = None
+    library_ids: list[str] = Field(default_factory=list)
+    buy_links: list[dict[str, Any]] = Field(default_factory=list)
+    datasheet_url: str | None = None
+    aliases: list[str] = Field(default_factory=list)
     pins: list[Pin]
 
 

@@ -6,6 +6,7 @@
   import EmbeddedConfigurator from "./components/EmbeddedConfigurator.svelte";
   import RagUploadPanel from "./components/RagUploadPanel.svelte";
   import LibraryManager from "./components/LibraryManager.svelte";
+  import ResearchPanel from "./components/ResearchPanel.svelte";
 
   import {
     Play,
@@ -48,6 +49,7 @@
     CornerRightDown,
     CornerRightUp,
     Circle,
+    Brain,
   } from "lucide-svelte";
 
   let aiInput = "";
@@ -95,17 +97,28 @@
     refreshingBoards = true;
     try {
       const result = await actions.refreshBoardCatalog();
+      const breakdown = result.imported_by_platform as
+        | Record<string, number>
+        | undefined;
+      const breakdownText = breakdown
+        ? Object.entries(breakdown)
+            .map(([platform, count]) => `${platform}: ${count}`)
+            .join(", ")
+        : null;
       detectResult = {
         family: null,
         suggestions: [],
-        detail: `Imported ${result.imported ?? 0} STM32 board definitions from PlatformIO.`,
+        detail: breakdownText
+          ? `Imported ${result.imported ?? 0} board definitions from PlatformIO (${breakdownText}).`
+          : `Imported ${result.imported ?? 0} board definitions from PlatformIO.`,
         candidates: [],
       };
     } catch (e) {
       detectResult = {
         family: null,
         suggestions: [],
-        detail: e instanceof Error ? e.message : "Board catalog refresh failed.",
+        detail:
+          e instanceof Error ? e.message : "Board catalog refresh failed.",
         candidates: [],
       };
     } finally {
@@ -119,14 +132,19 @@
       detectResult = {
         family: null,
         suggestions: [],
-        detail: "Enter both board id and STM32 MCU part number.",
+        detail:
+          "Enter both a board id and an MCU part number (STM32, ATmega, ESP32/ESP8266, or SAMD).",
         candidates: [],
       };
       return;
     }
     addingCustomBoard = true;
     try {
-      const board = await actions.addCustomBoard({ id, mcu, label: `${mcu} (${id})` });
+      const board = await actions.addCustomBoard({
+        id,
+        mcu,
+        label: `${mcu} (${id})`,
+      });
       customBoardId = "";
       customBoardMcu = "";
       detectResult = {
@@ -160,7 +178,8 @@
       detectResult = {
         family: null,
         suggestions: [],
-        detail: e instanceof Error ? e.message : "STM32 metadata import failed.",
+        detail:
+          e instanceof Error ? e.message : "STM32 metadata import failed.",
         candidates: [],
       };
     } finally {
@@ -194,6 +213,26 @@
 
   let showConfigurator = true;
   let showCopilot = true;
+  type AgentProvider = {
+    id: string;
+    label: string;
+    model: string;
+    available: boolean;
+    local: boolean;
+  };
+  let agentProviders: AgentProvider[] = [
+    { id: "openrouter", label: "OpenRouter", model: "gpt-oss-120b", available: true, local: false },
+    { id: "gemini", label: "Google Gemini", model: "gemini", available: false, local: false },
+    { id: "deepseek", label: "DeepSeek", model: "deepseek-chat", available: false, local: false },
+    { id: "sarvam", label: "Sarvam", model: "sarvam", available: false, local: false },
+  ];
+  $: selectedProviderMeta =
+    agentProviders.find((provider) => provider.id === $workspaceStore.selectedProvider) ??
+    agentProviders[0];
+
+  function setSelectedProvider(providerId: string) {
+    workspaceStore.update((s) => ({ ...s, selectedProvider: providerId }));
+  }
 
   let rightPaneSplit = 55;
 
@@ -433,6 +472,18 @@
   onMount(async () => {
     await actions.loadBoardCatalog();
     await actions.loadProjects();
+    try {
+      const providerResponse = await api.getAgentProviders();
+      agentProviders = providerResponse.providers ?? agentProviders;
+      if (!agentProviders.some((provider) => provider.id === $workspaceStore.selectedProvider)) {
+        const preferred = agentProviders.find((provider) => provider.id === "deepseek")
+          ?? agentProviders.find((provider) => provider.available)
+          ?? agentProviders[0];
+        if (preferred) setSelectedProvider(preferred.id);
+      }
+    } catch (e) {
+      console.warn("Failed to load agent providers", e);
+    }
     if (typeof window !== "undefined") {
       const script = document.createElement("script");
       script.src =
@@ -1248,7 +1299,6 @@
 
     actions.setActiveFile(path);
   }
-
 </script>
 
 <svelte:window
@@ -1380,6 +1430,30 @@
               onclick={() => (showViewDropdown = false)}
             >
               <div class="dropdown-header">Toggle Panels</div>
+
+              <div
+                class="dropdown-item"
+                onclick={(e) => e.stopPropagation()}
+                style="align-items: flex-start; gap: 8px; flex-direction: column;"
+              >
+                <span>Model Selection</span>
+                <select
+                  value={$workspaceStore.selectedProvider}
+                  onchange={(e) =>
+                    setSelectedProvider((e.currentTarget as HTMLSelectElement).value)}
+                  style="width: 100%; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px; padding: 6px;"
+                  title="AI model provider"
+                >
+                  {#each agentProviders as provider}
+                    <option value={provider.id}>
+                      {provider.label} - {provider.model}{provider.available ? "" : " (key missing)"}
+                    </option>
+                  {/each}
+                </select>
+                <span style="font-size: 0.68rem; color: var(--text-muted);">
+                  Active: {selectedProviderMeta?.label ?? "Provider"} / {selectedProviderMeta?.model ?? "model"}
+                </span>
+              </div>
 
               <button
                 type="button"
@@ -1762,6 +1836,18 @@
           title="RAG Knowledge Docs"
         >
           <Database size={18} />
+        </button>
+        <!-- svelte-ignore a11y-click-events-have-key-events -->
+        <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+        <button
+          class="activity-item {$workspaceStore.activeSidebarTab === 'research' &&
+          showSidebar
+            ? 'active'
+            : ''}"
+          onclick={() => handleActivityTabClick("research")}
+          title="Research & Ideation"
+        >
+          <Brain size={18} />
         </button>
         <!-- svelte-ignore a11y-click-events-have-key-events -->
         <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
@@ -2749,6 +2835,10 @@
             <RagUploadPanel />
           {/if}
 
+          {#if $workspaceStore.activeSidebarTab === "research"}
+            <ResearchPanel />
+          {/if}
+
           {#if $workspaceStore.activeSidebarTab === "boards"}
             <div class="panel-header">
               <div class="panel-title">Target Config</div>
@@ -2810,7 +2900,7 @@
                   >
                     {refreshingBoards
                       ? "Refreshing catalog..."
-                      : "Refresh STM32 board catalog"}
+                      : "Refresh board catalog (all platforms)"}
                   </button>
                   <button
                     type="button"
@@ -2832,7 +2922,7 @@
                     <input
                       type="text"
                       class="config-input"
-                      placeholder="STM32F401RETx"
+                      placeholder="STM32F401RETx / ATMEGA328P / esp32 / samd21g18a"
                       bind:value={customBoardMcu}
                     />
                     <button
@@ -2857,10 +2947,13 @@
                               type="button"
                               class="board-detect-suggestion"
                               title={candidate.reason}
-                              onclick={() => applyDetectedBoard(candidate.board.id)}
+                              onclick={() =>
+                                applyDetectedBoard(candidate.board.id)}
                             >
                               {candidate.board.label}
-                              <span>{Math.round(candidate.confidence * 100)}%</span>
+                              <span
+                                >{Math.round(candidate.confidence * 100)}%</span
+                              >
                             </button>
                           {/each}
                         </div>

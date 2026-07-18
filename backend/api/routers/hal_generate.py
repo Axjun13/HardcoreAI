@@ -10,7 +10,10 @@ from db.models import CodeFileRow, ProjectRow
 from db.session import db_session
 from services.projects import get_project_or_404
 from .hal_codegen import generate_hal_files,UnsupportedFamilyError
+from .arduino_codegen import generate_arduino_files
+from .espidf_codegen import generate_espidf_files
 from boards.registry import registry
+from boards.device import uses_arduino_framework, uses_espidf_framework
 from boards.stm32_metadata import validate_peripherals
 
 logger = logging.getLogger(__name__)
@@ -57,20 +60,25 @@ def generate_hal(
         ]
         try:
             device = registry.get(req.board)
-            if device:
-                validation = validate_peripherals(
-                    device.mcu,
-                    [p["id"] for p in peripheral_dicts],
-                )
-                if validation.get("metadata_available") and validation.get("missing"):
-                    raise HTTPException(
-                        status_code=400,
-                        detail=(
-                            f"{device.mcu} does not expose: "
-                            f"{', '.join(validation['missing'])}"
-                        ),
+            if uses_arduino_framework(device):
+                generated = generate_arduino_files(board=req.board, peripherals=peripheral_dicts)
+            elif uses_espidf_framework(device):
+                generated = generate_espidf_files(board=req.board, peripherals=peripheral_dicts)
+            else:
+                if device:
+                    validation = validate_peripherals(
+                        device.mcu,
+                        [p["id"] for p in peripheral_dicts],
                     )
-            generated = generate_hal_files(board=req.board, peripherals=peripheral_dicts)
+                    if validation.get("metadata_available") and validation.get("missing"):
+                        raise HTTPException(
+                            status_code=400,
+                            detail=(
+                                f"{device.mcu} does not expose: "
+                                f"{', '.join(validation['missing'])}"
+                            ),
+                        )
+                generated = generate_hal_files(board=req.board, peripherals=peripheral_dicts)
         except UnsupportedFamilyError as e:
             raise HTTPException(status_code=400, detail=str(e))
 
