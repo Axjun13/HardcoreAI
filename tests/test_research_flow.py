@@ -17,6 +17,7 @@ def _component(
     library_ids=None,
     buy_links=None,
     datasheet_url=None,
+    thumbnail="generic",
 ):
     return ComponentDefinition(
         id=cid,
@@ -24,7 +25,7 @@ def _component(
         category=category,
         description=description,
         visual_type="module",
-        thumbnail="generic",
+        thumbnail=thumbnail,
         width=120,
         height=80,
         library_ids=library_ids or [],
@@ -44,6 +45,7 @@ def test_recommend_components_includes_links_libraries_and_difference():
             library_ids=["u8g2"],
             buy_links=[{"vendor": "Mouser", "url": "https://example.com/buy"}],
             datasheet_url="https://example.com/ds.pdf",
+            thumbnail="https://example.com/ssd1306.jpg",
         ),
         "relay": _component("relay", "Relay", "Actuator", "Switch a load"),
     }
@@ -53,6 +55,7 @@ def test_recommend_components_includes_links_libraries_and_difference():
     assert result[0]["id"] == "ssd1306"
     assert result[0]["library_ids"] == ["u8g2"]
     assert result[0]["buy_links"][0]["url"] == "https://example.com/buy"
+    assert result[0]["thumbnail"] == "https://example.com/ssd1306.jpg"
     assert "Display/output" in result[0]["difference"]
 
 

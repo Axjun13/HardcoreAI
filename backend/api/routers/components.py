@@ -49,6 +49,7 @@ def component_schema() -> dict[str, Any]:
             "name": "display name",
             "category": "sensor/display/actuator/controller/etc.",
             "description": "short usage notes",
+            "thumbnail": "remote product image URL or a local fallback identifier",
             "library_name": "legacy single library id/name",
             "library_ids": ["curated library ids to install"],
             "datasheet_url": "manufacturer/reference URL",

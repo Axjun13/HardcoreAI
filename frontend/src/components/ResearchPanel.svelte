@@ -125,6 +125,11 @@
     selected = next;
   }
 
+  function hideBrokenImage(event: Event) {
+    const image = event.currentTarget;
+    if (image instanceof HTMLImageElement) image.style.display = "none";
+  }
+
   async function saveSelection(installLibraries = false) {
     if (!projectId) return;
     loading = true;
@@ -277,10 +282,14 @@
               <div class="component-row">
                 <div class="component-title">
                   <span class="component-visual">
+                    <Package size={16} />
                     {#if typeof item.thumbnail === "string" && item.thumbnail.startsWith("http")}
-                      <img src={item.thumbnail} alt="" />
-                    {:else}
-                      <Package size={16} />
+                      <img
+                        src={item.thumbnail}
+                        alt={item.name}
+                        loading="lazy"
+                        on:error={hideBrokenImage}
+                      />
                     {/if}
                   </span>
                   <span>{item.name}</span>
@@ -597,6 +606,7 @@
     min-width: 0;
   }
   .component-visual {
+    position: relative;
     width: 30px;
     height: 30px;
     flex: 0 0 auto;
@@ -609,9 +619,12 @@
     color: var(--accent-violet);
   }
   .component-visual img {
+    position: absolute;
+    inset: 0;
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    object-fit: contain;
+    background: var(--bg-secondary);
   }
   .select-indicator {
     width: 18px;

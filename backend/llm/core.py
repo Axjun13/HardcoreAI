@@ -7,7 +7,7 @@ loop parses the whole reply at once).
   - llamacpp   — local OpenAI-compatible server (Prism Bonsai 8B, 1-bit quant)
   - openrouter — OpenRouter cloud (gpt-oss-120b)
   - gemini     — Google Gemini API (gemini-2.5-flash)
-  - deepseek   — DeepSeek chat API
+  - deepseek   — DeepSeek through OpenRouter, or the direct DeepSeek API
   - sarvam     — Sarvam chat-compatible API (configurable URL/model)
 
 Keys/URLs come from backend/.env. A provider raises RuntimeError if its key is
@@ -46,6 +46,10 @@ GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "").strip()
 DEEPSEEK_URL = os.environ.get("DEEPSEEK_URL", "https://api.deepseek.com/v1/chat/completions").strip()
 DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
+DEEPSEEK_OPENROUTER_MODEL = os.environ.get(
+    "DEEPSEEK_OPENROUTER_MODEL",
+    OPENROUTER_MODEL,
+).strip()
 
 SARVAM_API_KEY = os.environ.get("SARVAM_API_KEY", "").strip()
 SARVAM_URL = os.environ.get("SARVAM_URL", "https://api.sarvam.ai/v1/chat/completions").strip()
@@ -74,7 +78,11 @@ PROVIDERS = {
     },
     "deepseek": {
         "label": "DeepSeek",
-        "model": DEEPSEEK_MODEL,
+        "model": (
+            DEEPSEEK_MODEL
+            if DEEPSEEK_API_KEY
+            else DEEPSEEK_OPENROUTER_MODEL or DEEPSEEK_MODEL
+        ),
         "local": False,
     },
     "sarvam": {
@@ -109,7 +117,13 @@ def available_providers() -> list[dict]:
         elif key == "gemini":
             available = bool(GEMINI_API_KEY)
         elif key == "deepseek":
-            available = bool(DEEPSEEK_API_KEY)
+            available = bool(
+                DEEPSEEK_API_KEY
+                or (
+                    OPENROUTER_API_KEY
+                    and DEEPSEEK_OPENROUTER_MODEL.casefold().startswith("deepseek/")
+                )
+            )
         elif key == "sarvam":
             available = bool(SARVAM_API_KEY)
         else:  # llamacpp and ollama need no key — availability is "is the server up?",
@@ -221,13 +235,34 @@ async def _gemini_complete(messages: list[dict]) -> str:
 
 
 async def _deepseek_complete(messages: list[dict]) -> str:
-    if not DEEPSEEK_API_KEY:
-        raise LLMError("DEEPSEEK_API_KEY is not set in backend/.env.")
-    return await _openai_style_complete(
-        DEEPSEEK_URL,
-        DEEPSEEK_MODEL,
-        messages,
-        headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}"},
+    if DEEPSEEK_API_KEY:
+        return await _openai_style_complete(
+            DEEPSEEK_URL,
+            DEEPSEEK_MODEL,
+            messages,
+            headers={"Authorization": f"Bearer {DEEPSEEK_API_KEY}"},
+        )
+
+    if OPENROUTER_API_KEY and DEEPSEEK_OPENROUTER_MODEL.casefold().startswith("deepseek/"):
+        return await _openai_style_complete(
+            "https://openrouter.ai/api/v1/chat/completions",
+            DEEPSEEK_OPENROUTER_MODEL,
+            messages,
+            headers={
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "HTTP-Referer": OPENROUTER_HTTP_REFERER,
+                "X-Title": "HardcoreAI",
+            },
+        )
+
+    if OPENROUTER_API_KEY:
+        raise LLMError(
+            "DeepSeek through OpenRouter requires OPENROUTER_MODEL (or "
+            "DEEPSEEK_OPENROUTER_MODEL) to use a deepseek/* model id."
+        )
+    raise LLMError(
+        "Configure OPENROUTER_API_KEY with a deepseek/* model, or set "
+        "DEEPSEEK_API_KEY in backend/.env."
     )
 
 

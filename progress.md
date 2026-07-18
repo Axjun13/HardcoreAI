@@ -8,6 +8,7 @@ Last updated: 2026-07-18
 - Moved Embedded Configurator access into the View menu and made it hidden by default.
 - Limited model selection to Google Gemini, DeepSeek, and Sarvam.
 - Persisted the selected model and disabled providers whose API keys are missing.
+- Made the DeepSeek provider use the configured OpenRouter key and `deepseek/*` model route, while preserving optional direct DeepSeek API support.
 - Added isolated research/ideation context windows with conversational follow-ups.
 - Added per-context component selection and decision notes.
 - Added final DeepSeek condensation with an explicit deterministic fallback when DeepSeek is unavailable.
@@ -15,6 +16,16 @@ Last updated: 2026-07-18
 - Added component deduplication, pin context, library documentation, datasheet, and purchase-search links.
 - Added real Phase 3 PlatformIO dependency materialization into `.pio/libdeps`.
 - Added an enriched Supabase component catalogue migration for ESP32 DevKit, SSD1306, DHT22, BME280, MPU6050, and hobby servos.
+- Applied all pending idempotent migrations to the configured Supabase database and reconciled its migration history through `20260718090000`.
+- Verified the deployed research catalogue contains all 6 enriched components and their 25 pin definitions.
+- Added sourced product imagery, authoritative datasheets, and concrete purchase links for the initial 6 research components, with a resilient UI fallback for unavailable remote images.
+- Applied and verified `20260718113000_add_component_product_metadata.sql` on the configured Supabase database.
+- Completed a disposable live Research → selection → Phase 3 → Condense → README → Act-mode run using DeepSeek through OpenRouter:
+  - All selected components and four inferred PlatformIO libraries reached the isolated Phase 3 context.
+  - PlatformIO downloaded the dependencies into the project `.pio/libdeps` directory.
+  - DeepSeek produced both the research condensation and the Act-mode response.
+  - The generated README contained the board, selected components, libraries, and research handoff.
+  - The disposable Supabase project and generated workspace were removed successfully.
 - Added regression tests for isolated research contexts and Research-to-Phase-3 component resolution.
 - Added root `pytest.ini` so the documented test command can resolve both `backend.*` and backend-local imports.
 - Registered released boards for STM32C0, STM32C5, STM32N6, STM32U0, STM32U3, STM32WB0, and STM32WBA using official ST product metadata.
@@ -23,7 +34,7 @@ Last updated: 2026-07-18
 - Added embedding-model dependency injection to `RAGService`.
 - Made RAG contract tests use LlamaIndex's deterministic local mock embedding, removing their first-run internet dependency without changing production FastEmbed behavior.
 - Verified the complete repository:
-  - Full backend suite: 291 tests passed, 0 failed, 0 errors.
+  - Full backend suite: 294 tests passed, 0 failed, 0 errors.
   - Svelte check passed with 0 errors and 0 warnings.
   - Production frontend build passed.
   - Backend Python compilation passed.
@@ -37,8 +48,6 @@ Last updated: 2026-07-18
 
 ## Remaining Product/Deployment Work
 
-- Apply `supabase/migrations/20260718090000_enrich_research_component_catalogue.sql` to the target Supabase database.
-- Configure DeepSeek and Sarvam keys if those providers should be enabled; currently only Gemini is configured.
-- Perform an end-to-end manual run of Research → component selection → Condense → Phase 3 → README → Act mode against a real project.
+- Sarvam configuration is intentionally deferred to the interns and is not required for the DeepSeek/OpenRouter workflow.
 - Add STM32V8 back to operational support after ST publishes a real board identifier, MCU order code, and full documentation.
-- Review and commit the working-tree changes once the full verification pass is complete.
+- Review and commit the completed implementation and verification changes.
