@@ -240,6 +240,59 @@ _SEED: dict[str, Device] = {
         hal_header="stm32u5xx_hal.h",
         openocd_target="target/stm32u5x.cfg", openocd_interface="interface/stlink.cfg",
     ),
+    # Released newer-family boards. Device identities and memory/clock values
+    # are sourced from ST's product pages/data briefs; keeping these curated
+    # prevents support from depending on a user's optional PlatformIO cache.
+    "nucleo_c031c6": Device(
+        id="nucleo_c031c6", label="STM32C031C6 (Nucleo-64)", vendor="st",
+        mcu="STM32C031C6Tx", family="STM32C0", core="cortex-m0plus",
+        flash_bytes=32 * 1024, ram_bytes=12 * 1024, f_cpu_hz=48_000_000,
+        hal_header="stm32c0xx_hal.h",
+        openocd_target="target/stm32c0x.cfg", openocd_interface="interface/stlink.cfg",
+    ),
+    "nucleo_c562re": Device(
+        id="nucleo_c562re", label="STM32C562RE (Nucleo-64)", vendor="st",
+        mcu="STM32C562RETx", family="STM32C5", core="cortex-m33",
+        flash_bytes=512 * 1024, ram_bytes=128 * 1024, f_cpu_hz=144_000_000,
+        hal_header="stm32c5xx_hal.h",
+        openocd_target="target/stm32c5x.cfg", openocd_interface="interface/stlink.cfg",
+    ),
+    "nucleo_u083rc": Device(
+        id="nucleo_u083rc", label="STM32U083RC (Nucleo-64)", vendor="st",
+        mcu="STM32U083RCTx", family="STM32U0", core="cortex-m0plus",
+        flash_bytes=256 * 1024, ram_bytes=40 * 1024, f_cpu_hz=56_000_000,
+        hal_header="stm32u0xx_hal.h",
+        openocd_target="target/stm32u0x.cfg", openocd_interface="interface/stlink.cfg",
+    ),
+    "nucleo_wb09ke": Device(
+        id="nucleo_wb09ke", label="STM32WB09KE (Nucleo-64)", vendor="st",
+        mcu="STM32WB09KEVx", family="STM32WB0", core="cortex-m0plus",
+        flash_bytes=512 * 1024, ram_bytes=64 * 1024, f_cpu_hz=64_000_000,
+        hal_header="stm32wb0x_hal.h",
+        openocd_target="target/stm32wb0x.cfg", openocd_interface="interface/stlink.cfg",
+    ),
+    "nucleo_wba55cg": Device(
+        id="nucleo_wba55cg", label="STM32WBA55CG (Nucleo-64)", vendor="st",
+        mcu="STM32WBA55CGUx", family="STM32WBA", core="cortex-m33",
+        flash_bytes=1024 * 1024, ram_bytes=128 * 1024, f_cpu_hz=100_000_000,
+        hal_header="stm32wbaxx_hal.h",
+        openocd_target="target/stm32wbax.cfg", openocd_interface="interface/stlink.cfg",
+    ),
+    "nucleo_u3c5zi_q": Device(
+        id="nucleo_u3c5zi_q", label="STM32U3C5ZI-Q (Nucleo-144)", vendor="st",
+        mcu="STM32U3C5ZIT6Q", family="STM32U3", core="cortex-m33",
+        flash_bytes=2 * 1024 * 1024, ram_bytes=640 * 1024, f_cpu_hz=96_000_000,
+        hal_header="stm32u3xx_hal.h",
+        openocd_target="target/stm32u3x.cfg", openocd_interface="interface/stlink.cfg",
+    ),
+    "stm32n6570_dk": Device(
+        id="stm32n6570_dk", label="STM32N6570-DK Discovery", vendor="st",
+        mcu="STM32N657X0H3Q", family="STM32N6", core="cortex-m55",
+        # N657X0 is a flashless MCU; the kit supplies external xSPI storage.
+        flash_bytes=0, ram_bytes=4 * 1024 * 1024, f_cpu_hz=800_000_000,
+        hal_header="stm32n6xx_hal.h",
+        openocd_target="target/stm32n6x.cfg", openocd_interface="interface/stlink.cfg",
+    ),
     "bluepill_f103c8": Device(
         id="bluepill_f103c8", label="STM32F103 (Blue Pill)", vendor="generic",
         mcu="STM32F103C8Tx", family="STM32F1", core="cortex-m3",

@@ -78,3 +78,55 @@ def test_component_context_markdown_is_compact_and_actionable():
     assert "SELECTED COMPONENTS" in markdown
     assert "Buy links: Mouser: https://example.com/buy" in markdown
     assert "U8g2: U8g2" in markdown
+
+
+def test_research_selection_is_merged_without_a_workbench_instance():
+    catalogue = {
+        "sensor": ComponentDefinition(
+            id="sensor",
+            name="Research Sensor",
+            category="Sensor",
+            description="Selected during ideation",
+            visual_type="module",
+            thumbnail="generic",
+            width=100,
+            height=80,
+            library_ids=["dht-sensor"],
+            pins=[Pin(name="DATA", label="DATA", side="left", x=0, y=20, role="gpio")],
+        )
+    }
+
+    context = resolve_component_context(
+        catalogue=catalogue,
+        workbench={"placed_components": [], "wires": []},
+        selected_component_ids=["sensor"],
+    )
+
+    assert context["components"][0]["instance_id"] == "research:sensor"
+    assert context["components"][0]["source"] == "research"
+    assert context["libraries"][0]["id"] == "dht-sensor"
+
+
+def test_research_selection_does_not_duplicate_a_placed_component():
+    component = ComponentDefinition(
+        id="sensor",
+        name="Sensor",
+        category="Sensor",
+        description="Already placed",
+        visual_type="module",
+        thumbnail="generic",
+        width=100,
+        height=80,
+        pins=[],
+    )
+    context = resolve_component_context(
+        catalogue={"sensor": component},
+        workbench={
+            "placed_components": [{"id": "42", "definition_id": "sensor"}],
+            "wires": [],
+        },
+        selected_component_ids=["sensor"],
+    )
+
+    assert len(context["components"]) == 1
+    assert context["components"][0]["source"] == "workbench"

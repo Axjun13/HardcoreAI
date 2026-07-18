@@ -15,8 +15,7 @@ from boards.registry import registry
 SUPPORTED_FAMILIES = {"STM32F1", "STM32F4", "STM32F7", "STM32L4", "STM32G4", "STM32G0",
                        "STM32H7", "STM32L0", "STM32L1", "STM32L5", "STM32WB", "STM32U5",
                        "STM32WL", "STM32F0", "STM32F3", "STM32F2", "STM32H5", "STM32C0",
-                       "STM32U0", "STM32C5", "STM32WB0", "STM32WBA", "STM32U3", "STM32N6",
-                       "STM32V8"}
+                       "STM32U0", "STM32C5", "STM32WB0", "STM32WBA", "STM32U3", "STM32N6"}
 
 def is_supported_family(family: str) -> bool:
     return family in SUPPORTED_FAMILIES

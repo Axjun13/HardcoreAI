@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api } from "../api";
   import { workspaceStore, actions } from "../store";
-  import { Brain, Check, FileText, Package, Sparkles } from "lucide-svelte";
+  import { Brain, Check, FileText, Package, Plus, Sparkles } from "lucide-svelte";
 
   let idea = "";
   let notes = "";
@@ -9,10 +9,14 @@
   let message = "";
   let state: any = null;
   let selected = new Set<string>();
+  let activeContextId = "";
 
   $: projectId = $workspaceStore.activeProjectId;
   $: provider = ($workspaceStore as any).selectedProvider || "deepseek";
-  $: summaryBlocks = formatSummary(state?.summary || "");
+  $: contexts = state?.contexts || [];
+  $: activeContext = contexts.find((item: any) => item.id === activeContextId) || contexts[0] || null;
+  $: recommendations = activeContext?.recommendations || state?.recommendations || [];
+  $: summaryBlocks = formatSummary(activeContext?.summary || state?.summary || "");
 
   function stripMarkdown(value: string) {
     return value
@@ -56,10 +60,44 @@
     if (!projectId) return;
     try {
       state = await api.getResearchState(projectId);
-      selected = new Set((state.selected_components || []).map((item: any) => item.id));
+      activeContextId = state.active_context_id || state.contexts?.[0]?.id || "";
+      syncContextSelection();
     } catch (e) {
       message = e instanceof Error ? e.message : "Failed to load research state.";
     }
+  }
+
+  function syncContextSelection() {
+    const context = state?.contexts?.find((item: any) => item.id === activeContextId);
+    const ids = context?.selected_component_ids
+      || (context?.selected_components || []).map((item: any) => item.id)
+      || [];
+    selected = new Set(ids);
+    notes = context?.decision_notes || "";
+  }
+
+  async function createContext() {
+    if (!projectId) return;
+    loading = true;
+    message = "";
+    try {
+      const result = await api.createResearchContext(projectId);
+      state = result.state;
+      activeContextId = result.context.id;
+      idea = "";
+      syncContextSelection();
+    } catch (e) {
+      message = e instanceof Error ? e.message : "Could not create an idea window.";
+    } finally {
+      loading = false;
+    }
+  }
+
+  async function selectContext(contextId: string) {
+    activeContextId = contextId;
+    idea = "";
+    syncContextSelection();
+    if (projectId) api.activateResearchContext(projectId, contextId).catch(() => {});
   }
 
   async function ideate() {
@@ -67,10 +105,12 @@
     loading = true;
     message = "";
     try {
-      const result = await api.ideateResearch(projectId, idea, provider);
+      const result = await api.ideateResearch(projectId, idea, provider, activeContextId || undefined);
       state = result.state;
-      selected = new Set();
-      message = "Research summary updated.";
+      activeContextId = result.context?.id || state.active_context_id || activeContextId;
+      syncContextSelection();
+      idea = "";
+      message = "Idea window updated.";
     } catch (e) {
       message = e instanceof Error ? e.message : "Research failed.";
     } finally {
@@ -89,7 +129,7 @@
     if (!projectId) return;
     loading = true;
     try {
-      const result = await api.selectResearchComponents(projectId, [...selected], notes, installLibraries);
+      const result = await api.selectResearchComponents(projectId, [...selected], notes, installLibraries, activeContextId || undefined);
       state = result.state;
       message = installLibraries ? "Selection saved and libraries prepared." : "Selection saved.";
     } catch (e) {
@@ -103,10 +143,31 @@
     if (!projectId) return;
     loading = true;
     try {
-      await api.prepareResearchPhase3(projectId, true);
-      message = "Phase 3 context stored and libraries added to platformio.ini.";
+      await api.selectResearchComponents(projectId, [...selected], notes, false, activeContextId || undefined);
+      const result = await api.prepareResearchPhase3(projectId, true);
+      const download = result.download_result;
+      message = download?.success
+        ? `Phase 3 ready. Libraries stored in ${download.directory}.`
+        : `Phase 3 snapshot stored. ${download?.message || "No library download was needed."}`;
     } catch (e) {
       message = e instanceof Error ? e.message : "Phase 3 prepare failed.";
+    } finally {
+      loading = false;
+    }
+  }
+
+  async function condenseDecisions() {
+    if (!projectId) return;
+    loading = true;
+    try {
+      await api.selectResearchComponents(projectId, [...selected], notes, false, activeContextId || undefined);
+      const result = await api.condenseResearch(projectId);
+      state = result.state;
+      message = result.provider_used === "deepseek"
+        ? "All idea windows condensed by DeepSeek for Act mode."
+        : "DeepSeek is not configured; a deterministic local handoff was created instead.";
+    } catch (e) {
+      message = e instanceof Error ? e.message : "Could not condense research.";
     } finally {
       loading = false;
     }
@@ -116,9 +177,12 @@
     if (!projectId) return;
     loading = true;
     try {
+      await api.selectResearchComponents(projectId, [...selected], notes, false, activeContextId || undefined);
+      const condensed = await api.condenseResearch(projectId);
+      state = condensed.state;
       await api.generateResearchReadme(projectId);
       await actions.refreshProjectFiles(projectId);
-      message = "README.md generated from research, board, pins, and libraries.";
+      message = "README.md generated from all research windows, board, pins, and libraries.";
     } catch (e) {
       message = e instanceof Error ? e.message : "README generation failed.";
     } finally {
@@ -139,19 +203,50 @@
       </div>
     </div>
 
+    <div class="context-row">
+      <div class="context-tabs">
+        {#each contexts as context, index}
+          <button
+            type="button"
+            class:active={context.id === activeContext?.id}
+            class="context-tab"
+            on:click={() => selectContext(context.id)}
+            title={context.title}
+          >{context.title || `Idea ${index + 1}`}</button>
+        {/each}
+      </div>
+      <button type="button" class="context-add" on:click={createContext} disabled={loading} title="New isolated idea window">
+        <Plus size={13} />
+      </button>
+    </div>
+
     <textarea
       bind:value={idea}
       class="research-input"
-      placeholder="What are you building?"
+      placeholder={activeContext ? "Add an idea, constraint, or follow-up…" : "What are you building?"}
       rows="3"
     ></textarea>
     <button class="research-primary" on:click={ideate} disabled={loading || !projectId || !idea.trim()}>
       <Sparkles size={14} />
-      <span>{loading ? "Researching..." : "Research Components"}</span>
+      <span>{loading ? "Researching..." : activeContext ? "Continue Ideation" : "Start Ideation"}</span>
     </button>
   </div>
 
   <div class="research-scroll">
+    {#if activeContext?.messages?.length}
+      <div class="research-section">
+        <div class="section-label">Idea Conversation</div>
+        <div class="idea-thread">
+          {#each activeContext.messages as item}
+            <div class="idea-message" class:user={item.role === "user"}>
+              <span>{item.role === "user" ? "You" : "AI"}</span>
+              <p>{item.content}</p>
+            </div>
+          {/each}
+        </div>
+      </div>
+    {/if}
+
     {#if summaryBlocks.length}
       <div class="research-section">
         <div class="section-label">Condensed State</div>
@@ -168,11 +263,11 @@
       </div>
     {/if}
 
-    {#if state?.recommendations?.length}
+    {#if recommendations.length}
       <div class="research-section">
         <div class="section-label">Component Options</div>
         <div class="component-list">
-          {#each state.recommendations as item}
+          {#each recommendations as item}
             <button
               type="button"
               class:selected={selected.has(item.id)}
@@ -180,7 +275,16 @@
               on:click={() => toggle(item.id)}
             >
               <div class="component-row">
-                <span>{item.name}</span>
+                <div class="component-title">
+                  <span class="component-visual">
+                    {#if typeof item.thumbnail === "string" && item.thumbnail.startsWith("http")}
+                      <img src={item.thumbnail} alt="" />
+                    {:else}
+                      <Package size={16} />
+                    {/if}
+                  </span>
+                  <span>{item.name}</span>
+                </div>
                 <span class="select-indicator">{#if selected.has(item.id)}<Check size={13} />{/if}</span>
               </div>
               <div class="component-meta">{item.category} - {item.id}</div>
@@ -190,6 +294,11 @@
                 <div class="component-chip">Libraries: {[...(item.library_ids || []), item.library_name].filter(Boolean).join(", ")}</div>
               {/if}
               <div class="component-links">
+                {#each item.library_links || [] as link}
+                  {#if link.url}
+                    <a href={link.url} target="_blank" rel="noreferrer" on:click|stopPropagation>{link.name} docs</a>
+                  {/if}
+                {/each}
                 {#if item.datasheet_url}
                   <a href={item.datasheet_url} target="_blank" rel="noreferrer" on:click|stopPropagation>Datasheet</a>
                 {/if}
@@ -211,6 +320,9 @@
           <button on:click={() => saveSelection(false)} disabled={loading}>
             <Package size={13} /> Save
           </button>
+          <button on:click={condenseDecisions} disabled={loading}>
+            <Sparkles size={13} /> Condense
+          </button>
           <button on:click={preparePhase3} disabled={loading}>
             <Package size={13} /> Phase 3
           </button>
@@ -222,6 +334,13 @@
     {:else if state}
       <div class="empty-state">
         No component options yet. Add a clearer idea and run research again.
+      </div>
+    {/if}
+
+    {#if state?.condensed_state}
+      <div class="research-section final-state">
+        <div class="section-label">Act Mode Handoff</div>
+        <p>{state.condensed_state}</p>
       </div>
     {/if}
 
@@ -263,6 +382,46 @@
     display: flex;
     gap: 10px;
     align-items: center;
+  }
+  .context-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .context-tabs {
+    display: flex;
+    gap: 5px;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+  .context-tab,
+  .context-add {
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--text-muted);
+    border-radius: 5px;
+    min-height: 28px;
+    cursor: pointer;
+  }
+  .context-tab {
+    flex: 0 0 auto;
+    max-width: 130px;
+    padding: 5px 8px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.7rem;
+  }
+  .context-tab.active {
+    color: var(--text-primary);
+    border-color: var(--accent-violet);
+    background: rgba(139, 92, 246, 0.1);
+  }
+  .context-add {
+    flex: 0 0 28px;
+    display: grid;
+    place-items: center;
   }
   .research-icon {
     width: 28px;
@@ -352,6 +511,42 @@
     flex-direction: column;
     gap: 8px;
   }
+  .idea-thread {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    max-height: 240px;
+    overflow-y: auto;
+  }
+  .idea-message {
+    border-left: 2px solid var(--accent-violet);
+    background: rgba(139, 92, 246, 0.05);
+    padding: 7px 9px;
+  }
+  .idea-message.user {
+    border-left-color: var(--accent-cyan);
+    background: rgba(34, 211, 238, 0.04);
+  }
+  .idea-message span {
+    color: var(--text-muted);
+    font-size: 0.64rem;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+  .idea-message p,
+  .final-state p {
+    margin: 4px 0 0;
+    color: var(--text-secondary);
+    font-size: 0.74rem;
+    line-height: 1.42;
+    white-space: pre-wrap;
+  }
+  .final-state {
+    border: 1px solid rgba(139, 92, 246, 0.35);
+    border-radius: 6px;
+    padding: 10px;
+    background: rgba(139, 92, 246, 0.05);
+  }
   .summary-block {
     border-left: 2px solid rgba(139, 92, 246, 0.75);
     padding: 7px 0 7px 10px;
@@ -394,6 +589,29 @@
     font-weight: 750;
     font-size: 0.82rem;
     line-height: 1.25;
+  }
+  .component-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+  .component-visual {
+    width: 30px;
+    height: 30px;
+    flex: 0 0 auto;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    border-radius: 5px;
+    background: rgba(139, 92, 246, 0.08);
+    color: var(--accent-violet);
+  }
+  .component-visual img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
   }
   .select-indicator {
     width: 18px;
@@ -442,7 +660,7 @@
   }
   .research-actions {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
   }
   .research-message,

@@ -83,6 +83,39 @@ LQFP144_STM32F2 = [
     "PB7", "BOOT0", "PB8", "PB9", "PE0", "PE1", "RFU", "VDD",
 ]
 
+# STM32F746NGHx TFBGA216 — generated from STMicroelectronics'
+# STM32_open_pin_data/mcu/STM32F746NGHx.xml. Entries follow the official XML's
+# package-position order (A1..P15, with non-populated balls omitted).
+TFBGA216_STM32F746NG = [
+    "PE4", "PE3", "PE2", "PG14", "PE1", "PE0", "PB8", "PB5",
+    "PB4", "PB3", "PD7", "PC12", "PA15", "PA14", "PA13", "PE5",
+    "PE6", "PG13", "PB9", "PB7", "PB6", "PG15", "PG11", "PJ13",
+    "PJ12", "PD6", "PD0", "PC11", "PC10", "PA12", "VBAT", "PI8",
+    "PI4", "PK7", "PK6", "PK5", "PG12", "PG10", "PJ14", "PD5",
+    "PD3", "PD1", "PI3", "PI2", "PA11", "PC13", "PF0", "PI5",
+    "PI7", "PI10", "PI6", "PK4", "PK3", "PG9", "PJ15", "PD4",
+    "PD2", "PH15", "PI1", "PA10", "PC14/OSC32_IN", "PF1", "PI12", "PI9",
+    "PDR_ON", "BOOT0", "VDD", "VDD", "VDD", "VDD", "VCAP_2", "PH13",
+    "PH14", "PI0", "PA9", "PC15/OSC32_OUT", "VSS", "PI11", "VDD", "VDD",
+    "VSS", "VSS", "VSS", "VSS", "VSS", "VDD", "PK1", "PK2",
+    "PC9", "PA8", "PH0/OSC_IN", "PF2", "PI13", "PI15", "VDD", "VSS",
+    "VSS", "VDDUSB", "PJ11", "PK0", "PC8", "PC7", "PH1/OSC_OUT", "PF3",
+    "PI14", "PH4", "VDD", "VSS", "VSS", "VDD", "PJ8", "PJ10",
+    "PG8", "PC6", "NRST", "PF4", "PH5", "PH3", "VDD", "VSS",
+    "VSS", "VDD", "PJ7", "PJ9", "PG7", "PG6", "PF7", "PF6",
+    "PF5", "PH2", "VDD", "VSS", "VSS", "VSS", "VSS", "VSS",
+    "VDD", "PJ6", "PD15", "PB13", "PD10", "PF10", "PF9", "PF8",
+    "PC3", "BYPASS_REG", "VSS", "VDD", "VDD", "VDD", "VDD", "VCAP_1",
+    "PD14", "PB12", "PD9", "PD8", "VSSA", "PC0", "PC1", "PC2",
+    "PB2", "PF12", "PG1", "PF15", "PJ4", "PD12", "PD13", "PG3",
+    "PG2", "PJ5", "PH12", "VREF", "PA1", "PA0/WKUP", "PA4", "PC4",
+    "PF13", "PG0", "PJ3", "PE8", "PD11", "PG5", "PG4", "PH7",
+    "PH9", "PH11", "VREF+", "PA2", "PA6", "PA5", "PC5", "PF14",
+    "PJ2", "PF11", "PE9", "PE11", "PE14", "PB10", "PH6", "PH8",
+    "PH10", "VDDA", "PA3", "PA7", "PB1", "PB0", "PJ0", "PJ1",
+    "PE7", "PE10", "PE12", "PE15", "PE13", "PB11", "PB14", "PB15",
+]
+
 # STM32H743/753 LQFP144 — transcribed from ST datasheet DS12110 Figure 7
 # "LQFP144 pinout" (source: user-provided screenshots, including close-up
 # crops of the top and bottom edges to resolve VSS/VDD filler pins that were
@@ -320,6 +353,7 @@ PACKAGE_PINOUTS: dict[str, list[str]] = {
     "LQFP64": LQFP64_NUCLEO64,
     "LQFP144_STM32H5": LQFP144_STM32H5,
     "LQFP144_STM32F2": LQFP144_STM32F2,
+    "TFBGA216_STM32F746NG": TFBGA216_STM32F746NG,
     "LQFP144_STM32H7": LQFP144_STM32H7,
     "LQFP144_STM32L5": LQFP144_STM32L5,
     "LQFP144_STM32U5": LQFP144_STM32U5,
@@ -327,15 +361,8 @@ PACKAGE_PINOUTS: dict[str, list[str]] = {
 # Board id -> package. Extend this as you add real per-board verification —
 # start with boards you actually have or care about most.
 #
-# Nucleo-144 / Discovery boards (U575ZI-Q, F746NG Discovery) are
-# intentionally NOT mapped here. Their real packages are much larger than
-# LQFP64 (typically LQFP144-class with Zio + Morpho headers) and a previous
-# version of this table incorrectly pointed them at LQFP64_NUCLEO64,
-# silently showing a 64-pin diagram for a ~144-pin board. Add them back once
-# a real per-part LQFP144 table has been hand-verified against the
-# datasheet — do not reuse LQFP64_NUCLEO64 for them. (H563ZI, F207ZG,
-# H743ZI, and L552ZE-Q below use the datasheet's own LQFP144 figure rather
-# than guessing from another package's layout.)
+# Large-package boards must use their exact family/package table; never point
+# them at the generic LQFP64 table. F746NG below uses ST's TFBGA216 open data.
 BOARD_PACKAGE: dict[str, str] = {
     "bluepill_f103c8": "LQFP48",
     "nucleo_f401re": "LQFP64",
@@ -355,6 +382,7 @@ BOARD_PACKAGE: dict[str, str] = {
     "nucleo_h743zi": "LQFP144_STM32H7",
     "nucleo_l552ze_q": "LQFP144_STM32L5",
     "nucleo_u575zi_q": "LQFP144_STM32U5",
+    "disco_f746ng": "TFBGA216_STM32F746NG",
 }
 
 import re
@@ -385,6 +413,7 @@ _KNOWN_VERIFIED_MCUS: dict[str, str] = {
     "nucleo_u575zi_q": "STM32U575ZITx",
     "nucleo_wb55rg": "STM32WB55RGVx",
     "nucleo_wl55jc": "STM32WL55JCIx",
+    "disco_f746ng": "STM32F746NGHx",
 }
 
 

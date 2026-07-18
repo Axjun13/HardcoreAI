@@ -417,6 +417,18 @@ const getInitialTerminalOpen = () => {
   }
 };
 
+const getInitialSelectedProvider = () => {
+  if (!isBrowser) return "deepseek";
+  try {
+    const provider = localStorage.getItem("selectedProvider");
+    return provider && ["gemini", "deepseek", "sarvam"].includes(provider)
+      ? provider
+      : "deepseek";
+  } catch {
+    return "deepseek";
+  }
+};
+
 const getInitialPins = (initialProjId: string | null) => {
   if (!isBrowser || !initialProjId) return initialPins;
   try {
@@ -503,7 +515,7 @@ export const workspaceStore = writable({
   aiMessages: [] as ChatMessage[],
   aiWaiting: false,
   queuedAiFollowup: null as string | null,
-  selectedProvider: "openrouter",
+  selectedProvider: getInitialSelectedProvider(),
   // When true, the agent runs build/flash without pausing for a Yes/No prompt
   // and auto-allows file diffs. Per-session toggle in the chat UI.
   autoApproveAgent: false,
@@ -1737,7 +1749,7 @@ export const actions = {
       let currentPhase: string | undefined = undefined;
       let buildOutput = "";
 
-      let selectedProvider = "openrouter";
+      let selectedProvider = "deepseek";
       let autoApprove = false;
       workspaceStore.update(s => {
         history = s.aiMessages.map(m => ({
@@ -1751,7 +1763,7 @@ export const actions = {
         }
 
         // Read the currently selected LLM provider
-        selectedProvider = (s as any).selectedProvider || "openrouter";
+        selectedProvider = (s as any).selectedProvider || "deepseek";
         autoApprove = (s as any).autoApproveAgent || false;
         buildOutput = s.buildLogs.join("\n").slice(-20000);
 

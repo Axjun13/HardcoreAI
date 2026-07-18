@@ -35,7 +35,7 @@ import threading
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 from urllib.parse import urlparse
 
 CONTEXT_MARKER = "=== LLM-READY PROMPT CONTEXT WINDOW ==="
@@ -174,8 +174,12 @@ class RAGService:
         config: RAGConfig | None = None,
         user_id: str | None = None,
         project_id: str | None = None,
+        embed_model: Any | None = None,
     ) -> None:
         self.config = config or RAGConfig.from_env()
+        # Tests and offline deployments can inject any LlamaIndex-compatible
+        # embedding model. Production keeps the lazy FastEmbed default.
+        self._injected_embed_model = embed_model
         if user_id:
             base = Path("data/users") / str(user_id)
             # Chroma persists into a directory; db_path points at the sqlite file
@@ -198,7 +202,7 @@ class RAGService:
             "rag_db_path": str(self.config.db_path),
             "rag_data_dir": str(self.config.data_dir),
             "upload_dir": str(self.config.upload_dir),
-            "embed_model": EMBED_MODEL,
+            "embed_model": getattr(self._injected_embed_model, "model_name", EMBED_MODEL),
         }
 
     def query(
@@ -434,7 +438,7 @@ class RAGService:
         VectorStoreIndex.from_documents(
             documents,
             storage_context=storage_context,
-            embed_model=_get_embed_model(),
+            embed_model=self._embedding_model(),
             transformations=[splitter],
             show_progress=False,
         )
@@ -447,10 +451,13 @@ class RAGService:
         _, collection = self._chroma_collection(create=False)
         vector_store = ChromaVectorStore(chroma_collection=collection)
         index = VectorStoreIndex.from_vector_store(
-            vector_store, embed_model=_get_embed_model()
+            vector_store, embed_model=self._embedding_model()
         )
         retriever = index.as_retriever(similarity_top_k=top_k)
         return retriever.retrieve(query)
+
+    def _embedding_model(self):
+        return self._injected_embed_model or _get_embed_model()
 
     # -- output formatting ------------------------------------------------
 

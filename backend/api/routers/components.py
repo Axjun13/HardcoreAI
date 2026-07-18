@@ -16,6 +16,7 @@ from services.component_resolution import (
     write_component_manifest,
 )
 from services.projects import get_project_or_404
+from services.research import load_research_state, selected_component_ids
 from services.workbench import read_workbench
 
 router = APIRouter()
@@ -77,6 +78,7 @@ def get_project_component_context(
         context = resolve_component_context(
             catalogue=catalogue_index(session),
             workbench=read_workbench(session, project).model_dump(),
+            selected_component_ids=selected_component_ids(load_research_state(project_id)),
         )
     return context
 
@@ -93,6 +95,7 @@ def resolve_project_components(
         context = resolve_component_context(
             catalogue=catalogue_index(session),
             workbench=read_workbench(session, project).model_dump(),
+            selected_component_ids=selected_component_ids(load_research_state(project_id)),
         )
 
     manifest = write_component_manifest(project_id, context)

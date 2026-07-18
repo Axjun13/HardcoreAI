@@ -68,7 +68,7 @@ PROVIDERS = {
         "local": False,
     },
     "gemini": {
-        "label": "Gemini 2.5 Flash",
+        "label": "Google Gemini",
         "model": GEMINI_MODEL,
         "local": False,
     },

@@ -288,9 +288,15 @@ class Toolbox:
         """Show selected components, resolved pin layout, inferred libraries, datasheets, and buy links."""
         from services.component_resolution import context_to_markdown, resolve_component_context
 
-        return context_to_markdown(
-            resolve_component_context(catalogue=self.catalogue, workbench=self.workbench)
-        )
+        selected_ids = []
+        if self.project_id:
+            from services.research import load_research_state, selected_component_ids
+            selected_ids = selected_component_ids(load_research_state(self.project_id))
+        return context_to_markdown(resolve_component_context(
+            catalogue=self.catalogue,
+            workbench=self.workbench,
+            selected_component_ids=selected_ids,
+        ))
 
     @tool
     def prepare_component_libraries(self) -> str:
@@ -303,7 +309,12 @@ class Toolbox:
             write_component_manifest,
         )
 
-        context = resolve_component_context(catalogue=self.catalogue, workbench=self.workbench)
+        from services.research import load_research_state, selected_component_ids
+        context = resolve_component_context(
+            catalogue=self.catalogue,
+            workbench=self.workbench,
+            selected_component_ids=selected_component_ids(load_research_state(self.project_id)),
+        )
         manifest = write_component_manifest(self.project_id, context)
         results = install_component_libraries(self.project_id, context)
         if not results:

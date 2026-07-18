@@ -627,21 +627,40 @@ async createProject(name: string, description: string = "", path: string | null 
     return res.json();
   },
 
-  async ideateResearch(projectId: string, idea: string, provider: string = "deepseek") {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/research/ideate`, {
+  async createResearchContext(projectId: string, title = "") {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/research/contexts`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": "Bearer TEST_TOKEN" },
-      body: JSON.stringify({ idea, provider })
+      body: JSON.stringify({ title })
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
-  async selectResearchComponents(projectId: string, selectedComponentIds: string[], notes = "", installLibraries = false) {
+  async activateResearchContext(projectId: string, contextId: string) {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/research/contexts/${contextId}/activate`, {
+      method: "POST",
+      headers: { "Authorization": "Bearer TEST_TOKEN" }
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async ideateResearch(projectId: string, idea: string, provider: string = "deepseek", contextId?: string) {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/research/ideate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer TEST_TOKEN" },
+      body: JSON.stringify({ idea, provider, context_id: contextId })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async selectResearchComponents(projectId: string, selectedComponentIds: string[], notes = "", installLibraries = false, contextId?: string) {
     const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/research/select`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": "Bearer TEST_TOKEN" },
-      body: JSON.stringify({ selected_component_ids: selectedComponentIds, notes, install_libraries: installLibraries })
+      body: JSON.stringify({ selected_component_ids: selectedComponentIds, notes, install_libraries: installLibraries, context_id: contextId })
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
@@ -651,6 +670,15 @@ async createProject(name: string, description: string = "", path: string | null 
     const params = new URLSearchParams();
     params.set("install_libraries", installLibraries ? "true" : "false");
     const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/research/phase3?${params}`, {
+      method: "POST",
+      headers: { "Authorization": "Bearer TEST_TOKEN" }
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async condenseResearch(projectId: string) {
+    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/research/condense`, {
       method: "POST",
       headers: { "Authorization": "Bearer TEST_TOKEN" }
     });
@@ -792,4 +820,3 @@ async createProject(name: string, description: string = "", path: string | null 
     return res.json();
   },
 };
-

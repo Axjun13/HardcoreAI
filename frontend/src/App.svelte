@@ -211,7 +211,9 @@
       ]) as [string, typeof filtered][];
   })();
 
-  let showConfigurator = true;
+  // The configurator is available from View, but no longer consumes half the
+  // workspace on every launch.
+  let showConfigurator = false;
   let showCopilot = true;
   type AgentProvider = {
     id: string;
@@ -220,9 +222,9 @@
     available: boolean;
     local: boolean;
   };
+  const selectableProviderIds = new Set(["gemini", "deepseek", "sarvam"]);
   let agentProviders: AgentProvider[] = [
-    { id: "openrouter", label: "OpenRouter", model: "gpt-oss-120b", available: true, local: false },
-    { id: "gemini", label: "Google Gemini", model: "gemini", available: false, local: false },
+    { id: "gemini", label: "Google Gemini", model: "gemini-2.5-flash", available: false, local: false },
     { id: "deepseek", label: "DeepSeek", model: "deepseek-chat", available: false, local: false },
     { id: "sarvam", label: "Sarvam", model: "sarvam", available: false, local: false },
   ];
@@ -231,6 +233,9 @@
     agentProviders[0];
 
   function setSelectedProvider(providerId: string) {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem("selectedProvider", providerId);
+    }
     workspaceStore.update((s) => ({ ...s, selectedProvider: providerId }));
   }
 
@@ -474,10 +479,17 @@
     await actions.loadProjects();
     try {
       const providerResponse = await api.getAgentProviders();
-      agentProviders = providerResponse.providers ?? agentProviders;
-      if (!agentProviders.some((provider) => provider.id === $workspaceStore.selectedProvider)) {
-        const preferred = agentProviders.find((provider) => provider.id === "deepseek")
+      const configuredProviders = (providerResponse.providers ?? []).filter(
+        (provider: AgentProvider) => selectableProviderIds.has(provider.id),
+      );
+      if (configuredProviders.length) agentProviders = configuredProviders;
+      const current = agentProviders.find(
+        (provider) => provider.id === $workspaceStore.selectedProvider,
+      );
+      if (!current || !current.available) {
+        const preferred = agentProviders.find((provider) => provider.id === "deepseek" && provider.available)
           ?? agentProviders.find((provider) => provider.available)
+          ?? agentProviders.find((provider) => provider.id === "deepseek")
           ?? agentProviders[0];
         if (preferred) setSelectedProvider(preferred.id);
       }
@@ -1445,7 +1457,7 @@
                   title="AI model provider"
                 >
                   {#each agentProviders as provider}
-                    <option value={provider.id}>
+                    <option value={provider.id} disabled={!provider.available}>
                       {provider.label} - {provider.model}{provider.available ? "" : " (key missing)"}
                     </option>
                   {/each}

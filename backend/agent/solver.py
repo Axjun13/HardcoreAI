@@ -441,6 +441,9 @@ INSTALLED LIBRARIES:
 SELECTED COMPONENT / PIN / LIBRARY CONTEXT:
 {component_context}
 
+RESEARCH DECISION HANDOFF:
+{research_handoff}
+
 REFERENCE MANUALS AVAILABLE: {has_docs}
 
 BUILD OUTPUT CONSOLE:
@@ -534,6 +537,7 @@ async def run_agent_phase(
     system = system.replace("{board_context}", build_board_context(device))
 
     from services.component_resolution import context_to_markdown, resolve_component_context
+    from services.research import load_research_state, selected_component_ids
 
     installed_libs = list_installed(project_id)
     if installed_libs:
@@ -541,15 +545,24 @@ async def run_agent_phase(
     else:
         lib_list_str = "(None installed)"
 
-    component_context = context_to_markdown(
-        resolve_component_context(catalogue=catalogue, workbench=workbench)
+    research_state = load_research_state(project_id)
+    research_handoff = (
+        research_state.get("condensed_state")
+        or research_state.get("summary")
+        or "No research decision has been condensed yet."
     )
+    component_context = context_to_markdown(resolve_component_context(
+        catalogue=catalogue,
+        workbench=workbench,
+        selected_component_ids=selected_component_ids(research_state),
+    ))
 
     if messages:
         # Subsequent turn: the prior history has all the context.
         # Explicitly tell the model to check if it has everything and generate code.
         user_prompt = (
             f'The user answered: "{problem}"\n\n'
+            f"Research decision handoff:\n{research_handoff}\n\n"
             f"Current selected component/pin/library context:\n{component_context}\n\n"
             f"Build Output console: {build_output_status}\n\n"
             "Review the conversation history above. "
@@ -565,6 +578,7 @@ async def run_agent_phase(
             current_code=current_code,
             installed_libraries=lib_list_str,
             component_context=component_context,
+            research_handoff=research_handoff,
             has_docs=has_docs,
             build_output_status=build_output_status,
             problem=problem or "(no request provided)",

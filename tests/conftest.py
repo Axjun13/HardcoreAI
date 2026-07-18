@@ -54,11 +54,15 @@ def rag_service_cls():
 def _make_service(work: Path):
     """Construct a RAGService pointed at an isolated temp store + corpus dir."""
     RAGService, RAGConfig = _import_rag_service()
+    from llama_index.core.embeddings import MockEmbedding
+
     cfg = RAGConfig.from_env()
     cfg.data_dir = work / "documents"
     cfg.upload_dir = work / "uploads"
     cfg.db_path = work / "chroma" / "chroma.sqlite3"
-    svc = RAGService(config=cfg)
+    # These tests verify persistence/retrieval/output shape, not one hosted
+    # embedding model's ranking quality. Keep the contract suite offline.
+    svc = RAGService(config=cfg, embed_model=MockEmbedding(embed_dim=384))
     svc._chroma_dir = work / "chroma"
     return svc
 

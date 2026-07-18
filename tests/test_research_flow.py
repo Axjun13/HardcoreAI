@@ -1,5 +1,11 @@
 from schemas import ComponentDefinition, Pin
-from services.research import recommend_components, render_project_readme
+from services.research import (
+    new_research_context,
+    normalize_research_state,
+    recommend_components,
+    render_project_readme,
+    selected_component_ids,
+)
 
 
 def _component(
@@ -77,3 +83,15 @@ def test_render_project_readme_contains_handoff_context():
     assert "SSD1306 OLED" in readme
     assert ".hardcoreai/research_state.json" in readme
     assert "U8g2: U8g2" in readme
+
+
+def test_multiple_research_contexts_produce_one_deduplicated_decision():
+    first = new_research_context(title="Display")
+    first["selected_component_ids"] = ["ssd1306", "esp32"]
+    second = new_research_context(title="Connectivity")
+    second["selected_component_ids"] = ["esp32", "relay"]
+
+    state = normalize_research_state({"contexts": [first, second]})
+
+    assert state["active_context_id"] == first["id"]
+    assert selected_component_ids(state) == ["ssd1306", "esp32", "relay"]
