@@ -22,6 +22,8 @@ class BoardCandidate:
     confidence: float
     source: str
     reason: str
+    port: str | None = None  # physical port this came from, e.g. "COM12" — None
+    # for non-live sources (platformio.ini, .ioc files) that aren't tied to a port.
 
     def as_dict(self) -> dict:
         return {
@@ -29,6 +31,7 @@ class BoardCandidate:
             "confidence": self.confidence,
             "source": self.source,
             "reason": self.reason,
+            "port": self.port,
         }
 
 

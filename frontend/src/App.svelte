@@ -82,6 +82,16 @@
       reason: string;
     }[];
   } | null = null;
+  // Shared USB bridge chips and SWD family reads cannot identify an exact
+  // board. Only expose a choice when the connected hardware does.
+  $: detectedBoard = detectResult?.candidates.find(
+    (candidate) =>
+      (candidate.source === "avrdude" ||
+        candidate.source === "esptool" ||
+        candidate.source === "openocd" ||
+        candidate.source === "usb_vid_pid") &&
+      candidate.confidence >= 0.85,
+  );
   async function runBoardDetection() {
     detectingBoard = true;
     detectResult = null;
@@ -2978,29 +2988,27 @@
                   </div>
                   {#if detectResult}
                     <div class="board-detect-result">
-                      {#if detectResult.candidates.length > 0}
+                      {#if detectedBoard}
                         <span>
-                          Detected <strong>{detectResult.family}</strong> — pick
-                          a match:
+                          Detected <strong>{detectedBoard.board.label}</strong>:
                         </span>
                         <div class="board-detect-suggestions">
-                          {#each detectResult.candidates.slice(0, 8) as candidate}
-                            <button
-                              type="button"
-                              class="board-detect-suggestion"
-                              title={candidate.reason}
-                              onclick={() =>
-                                applyDetectedBoard(candidate.board.id)}
-                            >
-                              {candidate.board.label}
-                              <span
-                                >{Math.round(candidate.confidence * 100)}%</span
-                              >
-                            </button>
-                          {/each}
+                          <button
+                            type="button"
+                            class="board-detect-suggestion"
+                            title={detectedBoard.reason}
+                            onclick={() => applyDetectedBoard(detectedBoard.board.id)}
+                          >
+                            {detectedBoard.board.label}
+                            <span>{Math.round(detectedBoard.confidence * 100)}%</span>
+                          </button>
                         </div>
                       {:else}
-                        <span>{detectResult.detail}</span>
+                        <span>
+                          {detectResult.candidates.length > 0
+                            ? "The connected hardware could not identify one exact board. No board was selected; choose it manually from the board list."
+                            : detectResult.detail}
+                        </span>
                       {/if}
                     </div>
                   {/if}

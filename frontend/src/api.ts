@@ -731,7 +731,12 @@ async createProject(
 
   async advanceResearch(projectId: string, action = "confirm", selectedComponentIds: string[] = [], notes = "", message = "", provider = "deepseek", expectedStage = "") {
     const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 45_000);
+    // 45s was tuned for the quick stage transitions (ideation/component_selection/
+    // revise). final_review's confirm additionally runs install_component_libraries()
+    // synchronously server-side — a real PlatformIO package/toolchain install that
+    // can take several minutes on first run — so it needs real headroom too.
+    const timeoutMs = expectedStage === "final_review" ? 300_000 : 45_000;
+    const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
     try {
       const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/research/advance`, {
         method: "POST",
@@ -743,7 +748,11 @@ async createProject(
       return res.json();
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
-        throw new Error("Component confirmation timed out. The latest workflow state has been reloaded.");
+        throw new Error(
+          `Confirmation timed out after ${Math.round(timeoutMs / 1000)}s — this step installs PlatformIO ` +
+          "libraries and can be slow on first run. The latest workflow state has been reloaded; check " +
+          "whether it already advanced before retrying."
+        );
       }
       throw error;
     } finally {
