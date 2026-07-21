@@ -1902,13 +1902,12 @@
             actions.setSelectedBoard(handoff.target_board_id);
           }
           if (startAgent) {
-            actions.setAutoApproveAgent(true);
             const pending = (handoff?.todos || [])
               .filter((todo: any) => todo.status !== "completed")
               .map((todo: any) => `- ${todo.label}`)
               .join("\n");
             actions.sendAiMessage(
-              `The final research plan is approved. Enter Act mode now. Read final-review.md, plan.md, components.md, verification.md, pin-diagram.md, connection-diagram.md, configuration.md, pin-config.json, and .hardcoreai/component_context.json. Execute the mandatory TODO in order and keep the user informed:\n${pending}\nImplement the firmware and run a build. Fix build errors until it succeeds. If a compatible device is connected, flash it; otherwise report that the successful build is waiting for a device and a flash command. This message explicitly approves the required file changes, dependency installation, configuration, and build.`,
+              `The final research plan is approved. Enter Act mode now. Read final-review.md, plan.md, components.md, verification.md, pin-diagram.md, connection-diagram.md, configuration.md, pin-config.json, and .hardcoreai/component_context.json. Execute the mandatory TODO in order and keep the user informed:\n${pending}\nImplement the firmware and run a build. Fix build errors until it succeeds. Do not flash or upload to hardware; flashing requires a separate explicit user action after the build. Honor the current auto-approve setting for proposed file changes.`,
             );
           }
         }}
@@ -4584,11 +4583,11 @@
                 class="auto-approve-toggle"
                 class:on={$workspaceStore.autoApproveAgent}
                 onclick={() => actions.toggleAutoApproveAgent()}
-                title="When on, the agent runs build/flash and applies file changes without asking each time."
+                title="When on, the agent auto-accepts plans, code changes, and builds. Flashing hardware always asks separately."
               >
                 <Zap size={11} />
                 <span
-                  >Auto-approve {$workspaceStore.autoApproveAgent
+                  >Auto-approve code {$workspaceStore.autoApproveAgent
                     ? "on"
                     : "off"}</span
                 >

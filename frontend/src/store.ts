@@ -536,8 +536,8 @@ export const workspaceStore = writable({
   queuedAiFollowup: null as string | null,
   selectedProvider: getInitialSelectedProvider(),
   agentContextStatus: null as AgentContextStatus | null,
-  // When true, the agent runs build/flash without pausing for a Yes/No prompt
-  // and auto-allows file diffs. Per-session toggle in the chat UI.
+  // When true, the agent auto-accepts plans, code/file diffs, and builds.
+  // Flashing hardware always requires a separate explicit approval.
   autoApproveAgent: false,
 
   // UI Tabs
@@ -1120,8 +1120,8 @@ export const actions = {
     workspaceStore.update(s => ({ ...s, buildLogs: [] }));
   },
 
-  // Per-session "auto-approve everything" toggle for the agent. When on, the
-  // agent runs build/flash without a Yes/No prompt and auto-allows file diffs.
+  // Per-session auto-approve toggle for plans, code/file diffs, and builds.
+  // Physical-device flashing remains separately gated.
   setAutoApproveAgent: (on: boolean) => {
     workspaceStore.update(s => ({ ...s, autoApproveAgent: on }));
   },
@@ -1863,6 +1863,7 @@ export const actions = {
 
       let sawAnyEvent = false;
       agentAbortController = new AbortController();
+      let autoApplyPromise: Promise<void> | null = null;
       await api.streamAgent(cleanText, (ev: any) => {
         sawAnyEvent = true;
         switch (ev.type) {
@@ -1885,14 +1886,15 @@ export const actions = {
               m.thinkingCollapsed = true;  // auto-collapse the think block
               (m.steps as AgentStep[]).push({ kind: "call", name: ev.name, args: ev.args });
             });
-            // When the agent runs a build/flash, surface it in the BUILD OUTPUT
-            // panel just like the manual button does.
+            // Surface build/flash requests in BUILD OUTPUT. A tool call event is
+            // emitted before its permission gate, so do not claim flashing has
+            // started until the gated tool returns an actual result.
             if (ev.name === "build" || ev.name === "flash") {
               workspaceStore.update(s => ({ ...s, terminalOpen: true, activeBottomTab: "memory" }));
               actions.clearBuildLogs();
               actions.addBuildLog(ev.name === "build"
                 ? "Agent is building firmware (PlatformIO)..."
-                : "Agent is flashing firmware to target...");
+                : "Agent requested permission to flash firmware to the target.");
             }
             break;
           case "code":
@@ -2005,7 +2007,7 @@ export const actions = {
               // user can review original-vs-proposed and Allow/Reject there.
               if (ev.proposals.length > 0) {
                 if (autoApprove) {
-                  actions.approveAllProposals(aiMsgId);
+                  autoApplyPromise = actions.approveAllProposals(aiMsgId);
                 } else {
                   actions.openAllDiffProposals(aiMsgId);
                 }
@@ -2015,8 +2017,13 @@ export const actions = {
         }
       }, history, currentPhase, selectedProvider, buildOutput, agentAbortController.signal, autoApprove);
 
-      // Stream closed. Nothing is auto-applied: the agent's file changes are
-      // staged as proposals and only persisted when the user clicks Allow.
+      // Do not finalize/persist the response while its auto-approved file writes
+      // are still in flight. This makes the toggle reliably cover every proposal
+      // in the completed response instead of racing the SSE stream teardown.
+      if (autoApplyPromise) await autoApplyPromise;
+
+      // Stream closed. With auto-approve off, file changes remain staged until
+      // the user clicks Allow; with it on, all proposals have finished applying.
 
       // Finalize: ensure streaming flag is cleared and persist history.
       let queuedFollowup: string | null = null;

@@ -493,7 +493,10 @@ async def run_phase(
     messages = [{"role": "system", "content": system_prompt}] + messages + [
         {"role": "user", "content": user_prompt},
     ]
-    # Add a temporary property on the toolbox to check if the last user reply confirmed the action
+    # A plain "yes" only authorizes a side effect when the immediately preceding
+    # assistant message was the corresponding build/flash approval prompt. This
+    # prevents a model from treating an unrelated affirmative answer as hardware
+    # permission (or from granting itself permission via confirmed=true).
     import re
     answered_yes = False
     match = re.search(r'The user answered:\s*"([^"]*)"', user_prompt, flags=re.IGNORECASE)
@@ -502,6 +505,21 @@ async def run_phase(
     else:
         answered_yes = user_prompt.strip().lower() in ("yes", "y", "approve", "confirm")
     toolbox.user_confirmed = answered_yes
+    confirmed_action = ""
+    if answered_yes:
+        prior_assistant = next(
+            (
+                str(message.get("content") or "").lower()
+                for message in reversed(messages[:-1])
+                if message.get("role") == "assistant"
+            ),
+            "",
+        )
+        if "allow the flash to run" in prior_assistant:
+            confirmed_action = "flash"
+        elif "allow the build to run" in prior_assistant:
+            confirmed_action = "build"
+    toolbox.user_confirmed_action = confirmed_action
         
     trace = AgentTrace(phase=phase)
     total_input_tokens = 0
@@ -669,9 +687,9 @@ async def run_phase(
             trace.messages = messages
             return trace
         except ConfirmActionException as exc:
-            # A side-effecting action (build/flash) needs explicit approval. End the
-            # run with a yes/no question; on "yes" the next request replays history
-            # with user_confirmed/auto_approve so the action proceeds.
+            # A side-effecting action needs approval. End the run with a yes/no
+            # question; a matching "yes" in the next request authorizes it. Session
+            # auto-approve can skip the build gate, but never the flash gate.
             trace.status = "waiting_for_user"
             trace.question = exc.question
             trace.options = ["Yes", "No"]

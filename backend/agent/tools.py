@@ -121,8 +121,8 @@ class ConfirmActionException(Exception):
     """Raised when a side-effecting action (build/flash) needs user approval.
 
     Carries the tool name so the UI can show a specific 'Agent wants to build /
-    flash — Allow / Reject' prompt. On Allow, the frontend re-runs the agent with
-    auto_approve (or a 'yes' answer) so the same action proceeds."""
+    flash — Allow / Reject' prompt. A matching explicit 'yes' allows the action;
+    session auto-approve additionally covers builds, but never flashing."""
     def __init__(self, action: str, question: str):
         super().__init__(question)
         self.action = action
@@ -171,9 +171,8 @@ class Toolbox:
         # validation is the backstop when a model ignores the prompt and tries
         # to generate firmware for another MCU family.
         self.target_board_id = target_board_id
-        # Session-level "auto-approve everything" toggle. When true, gated tools
-        # (build/flash/delete) run without raising for confirmation. Treated the
-        # same as a per-call user_confirmed=True.
+        # Session-level auto-approve toggle. It covers plans, file changes, and
+        # builds. Physical-device flashing always remains separately gated.
         self.auto_approve = auto_approve
         # Immutable snapshot of the files as they were when the run started. Used
         # to (a) render an accurate before/after diff for each proposal and (b)
@@ -258,6 +257,8 @@ class Toolbox:
     @tool
     def propose_plan(self, plan: str) -> str:
         """Pause execution and present an implementation plan to the user for approval. Use this after reading the manual but before wiring or coding."""
+        if self.auto_approve:
+            return "Plan auto-approved. Continue with the implementation."
         raise ProposePlanException(plan)
 
     @tool
@@ -446,15 +447,19 @@ class Toolbox:
         output so a later read_build_output() returns it. Returns a short summary
         (status + the tail of the log) for the model.
 
-        Requires user approval: calling with confirmed=False pauses and asks the
-        user first. Pass confirmed=True only after the user has approved."""
+        Requires user approval unless session auto-approve is enabled. The
+        `confirmed` argument is retained for compatibility but is deliberately
+        ignored: model-supplied arguments are not proof of user permission."""
         if not self.project_id:
             return "ERROR: No project is associated with this run; cannot build."
-        if not (confirmed or getattr(self, "user_confirmed", False) or self.auto_approve):
+        explicitly_approved = getattr(self, "user_confirmed_action", "") == "build"
+        if not (explicitly_approved or self.auto_approve):
             raise ConfirmActionException(
                 action="build",
                 question="The agent wants to build (compile) the firmware. Allow the build to run?",
             )
+        if explicitly_approved:
+            self.user_confirmed_action = ""
         from services import hardware
 
         result = hardware.build_project(self.project_id)
@@ -474,15 +479,20 @@ class Toolbox:
         Builds first if needed. If no board is connected this returns a clear
         'no device' message rather than failing.
 
-        Requires user approval: calling with confirmed=False pauses and asks the
-        user first. Pass confirmed=True only after the user has approved."""
+        Always requires an explicit user approval for this specific flash. The
+        session auto-approve toggle intentionally does not cover programming
+        physical hardware. The `confirmed` argument is retained for compatibility
+        but ignored because the model cannot grant itself permission."""
         if not self.project_id:
             return "ERROR: No project is associated with this run; cannot flash."
-        if not (confirmed or getattr(self, "user_confirmed", False) or self.auto_approve):
+        if getattr(self, "user_confirmed_action", "") != "flash":
             raise ConfirmActionException(
                 action="flash",
                 question="The agent wants to flash firmware to the connected board. Allow the flash to run?",
             )
+        # Approval is single-use. A second flash in the same agent run must ask
+        # again instead of inheriting permission from the first hardware write.
+        self.user_confirmed_action = ""
         from services import hardware
 
         result = hardware.flash_project(self.project_id)
@@ -1015,14 +1025,18 @@ class CodingToolbox(Toolbox):
 
     @tool
     def delete_file(self, path: str, confirmed: bool = False) -> str:
-        """Delete a file from the workspace. You MUST get user confirmation first. Calling this tool with confirmed=False will automatically prompt the user for approval; call it with confirmed=True only after the user explicitly approves it."""
+        """Stage a file deletion. Auto-approve may accept it; otherwise ask first.
+
+        The `confirmed` argument is ignored. Model-supplied arguments cannot
+        grant permission; explicit user confirmation or session auto-approve can.
+        """
         if "/" not in path and "\\" not in path and (path.endswith(".c") or path.endswith(".h")):
             path = "src/" + path
             
         if path not in self.files:
             return f"ERROR: File '{path}' not found."
             
-        is_confirmed = confirmed or getattr(self, "user_confirmed", False)
+        is_confirmed = self.auto_approve or getattr(self, "user_confirmed", False)
         if not is_confirmed:
             raise AskUserException(
                 question=f"Are you sure you want to delete the file '{path}'? This action cannot be undone.",

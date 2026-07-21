@@ -723,9 +723,13 @@ def _list_serial_ports() -> list[dict]:
     PlatformIO's own (pyserial-based) port + hwid detection rather than
     adding a direct pyserial dependency, mirroring how the rest of this
     module shells out to `pio` instead of vendoring its internals."""
-    try:
-        pio = ensure_platformio()
-    except RuntimeError:
+    # Device status is polled every few seconds.  Keep that read-only and
+    # non-blocking when PlatformIO has not been installed yet; provisioning a
+    # venv from every overlapping poll can race and leave it half-installed.
+    # Explicit setup/build/catalogue operations remain responsible for calling
+    # ensure_platformio().
+    pio = pio_bin()
+    if not pio:
         return []
     try:
         res = subprocess.run(
@@ -743,13 +747,15 @@ def _list_serial_ports() -> list[dict]:
         return []
 
 
-_ESPTOOL_CHIP_TO_BOARD: dict[str, str] = {
+_ESPTOOL_CHIP_TO_BOARD: dict[str, str | None] = {
     # esptool's "Chip is X" wording -> our registry board id. Matched by
     # substring (case-insensitive) since esptool's exact phrasing varies by
     # version ("ESP32-C3" vs "ESP32-C3 (QFN32)" etc.).
     "esp32-s3": "esp32-s3-devkitc-1",
     "esp32-c3": "esp32-c3-devkitm-1",
-    "esp32-s2": "esp32-s3-devkitc-1",  # no S2-specific entry yet; closest native-USB match
+    # Do not fall through to the generic "esp32" entry.  An S3 profile is not
+    # upload-compatible with an S2, and there is no curated S2 board yet.
+    "esp32-s2": None,
     "esp32": "esp32dev",  # checked last — must not shadow the s3/c3/s2 substrings above
 }
 
@@ -794,6 +800,8 @@ def _esptool_chip_probe(port: str) -> tuple[str, str] | None:
     chip = m.group(1).lower()
     for needle, board_id in _ESPTOOL_CHIP_TO_BOARD.items():
         if needle in chip:
+            if board_id is None:
+                return None
             return board_id, m.group(0)
     return None
 

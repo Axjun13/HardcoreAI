@@ -427,9 +427,120 @@ def test_new_filesystem_and_search_tools():
     assert "Are you sure you want to delete" in str(excinfo.value)
     assert "src/utils.h" in tb.files # still exists
     
-    # Test delete_file (confirmed)
-    delete_res = tb.delete_file("src/utils.h", confirmed=True)
+    # Model-supplied confirmed=True is not permission.
+    with pytest.raises(AskUserException):
+        tb.delete_file("src/utils.h", confirmed=True)
+    assert "src/utils.h" in tb.files
+
+    # Session auto-approve covers staged file edits/deletions.
+    tb.auto_approve = True
+    delete_res = tb.delete_file("src/utils.h")
     assert "src/utils.h" not in tb.files # deleted!
+
+
+def test_auto_approve_covers_plans_and_builds_but_never_flash(monkeypatch):
+    """Auto-approve applies code workflow changes, not physical hardware writes."""
+    from types import SimpleNamespace
+
+    _, CodingToolbox = _import_agent()
+    from agent.tools import ConfirmActionException, ProposePlanException
+    from services import hardware
+
+    tb = CodingToolbox(
+        project_name="test",
+        problem="Test permissions",
+        catalogue={},
+        workbench={"placed_components": [], "wires": []},
+        files={},
+        project_id="test_proj",
+        auto_approve=False,
+    )
+
+    # A model cannot grant itself either permission through its tool arguments.
+    with pytest.raises(ConfirmActionException):
+        tb.build(confirmed=True)
+    with pytest.raises(ConfirmActionException):
+        tb.flash(confirmed=True)
+
+    with pytest.raises(ProposePlanException):
+        tb.propose_plan("1. Edit firmware")
+
+    build_calls = []
+    monkeypatch.setattr(
+        hardware,
+        "build_project",
+        lambda project_id: (
+            build_calls.append(project_id)
+            or SimpleNamespace(
+                output="ok",
+                success=True,
+                returncode=0,
+                duration_s=0.1,
+                firmware_path="firmware.bin",
+            )
+        ),
+    )
+
+    tb.auto_approve = True
+    assert "auto-approved" in tb.propose_plan("1. Edit firmware")
+    assert "Build SUCCESS" in tb.build()
+    assert build_calls == ["test_proj"]
+
+    # Even auto-approve plus confirmed=True cannot flash a board.
+    with pytest.raises(ConfirmActionException) as excinfo:
+        tb.flash(confirmed=True)
+    assert excinfo.value.action == "flash"
+
+
+def test_flash_runs_only_after_matching_user_prompt(monkeypatch):
+    """A yes to the flash gate authorizes one agent flash path."""
+    from types import SimpleNamespace
+
+    run_phase, CodingToolbox = _import_agent()
+    from services import hardware
+
+    tb = CodingToolbox(
+        project_name="test",
+        problem="Yes",
+        catalogue={},
+        workbench={"placed_components": [], "wires": []},
+        files={},
+        project_id="test_proj",
+        auto_approve=True,
+    )
+    flash_calls = []
+    monkeypatch.setattr(
+        hardware,
+        "flash_project",
+        lambda project_id: (
+            flash_calls.append(project_id)
+            or SimpleNamespace(flashed=True, output="ok", reason="", returncode=0)
+        ),
+    )
+
+    trace = asyncio.run(run_phase(
+        phase="coding",
+        system_prompt="sys",
+        user_prompt='The user answered: "Yes"',
+        messages=[{
+            "role": "assistant",
+            "content": "The agent wants to flash firmware to the connected board. Allow the flash to run?",
+        }],
+        toolbox=tb,
+        complete_fn=_fake_llm_factory([
+            "THINK: permission received\nCALL flash()",
+            "Flash complete.",
+        ]),
+    ))
+
+    assert trace.status == "completed"
+    assert flash_calls == ["test_proj"]
+
+    # The approval was consumed by that hardware write.
+    from agent.tools import ConfirmActionException
+    with pytest.raises(ConfirmActionException):
+        tb.flash()
+    assert flash_calls == ["test_proj"]
 
 
 def test_git_tools_with_gitmanager(tmp_path, monkeypatch):

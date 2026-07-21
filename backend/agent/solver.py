@@ -354,8 +354,10 @@ There are TWO different tools — do not confuse them:
     → If no board is connected it will say so — relay that to the user,
       do not treat it as a code error
 
-build() and flash() pause for user approval before running. Do NOT also call
-ask_user to confirm — the tool handles the prompt itself.
+build() pauses for approval unless session auto-approve is enabled. flash()
+always pauses for a separate explicit approval, even when auto-approve is on.
+Do NOT pass confirmed=true and do NOT also call ask_user to confirm — the tools
+handle their own permission prompts.
 
 
 IMPORTANT: Never call build() or flash() on your own.

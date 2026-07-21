@@ -188,24 +188,21 @@ def import_boards(query: str = "STM32") -> list[Device]:
     devices = [_normalize(b) for b in raw_boards]
     return [d for d in devices if d is not None]
 
+
 def import_arduino_framework_boards() -> list[Device]:
-    """Fetch Arduino boards platform-by-platform instead of querying every PlatformIO board."""
+    """Fetch every PlatformIO board that advertises Arduino support.
 
-    platforms = [
-        "atmelavr",
-        "atmelsam",
-        "ststm32",
-        "espressif32",
-        "espressif8266",
-    ]
-
-    raw_boards = []
-
-    for platform in platforms:
-        try:
-            raw_boards.extend(_run_pio_boards(platform))
-        except Exception as exc:
-            print(f"[pio_importer] {platform} import failed: {exc}")
+    Arduino is a framework rather than a fixed set of PlatformIO platforms.
+    Querying only the common AVR/SAMD/STM32/Espressif platforms silently drops
+    valid targets such as Teensy and any future Arduino-capable platform.  The
+    unfiltered board catalogue is the only complete source; filter it locally
+    by the framework metadata returned by PlatformIO.
+    """
+    try:
+        raw_boards = _run_pio_boards("")
+    except Exception as exc:
+        print(f"[pio_importer] all-board Arduino import failed: {exc}")
+        return []
 
     devices = [
         _normalize(board)

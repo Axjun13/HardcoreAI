@@ -40,28 +40,34 @@ def test_platformio_ini_for_seeded_arduino_boards_is_not_stm32cube():
 def test_platformio_arduino_framework_importer_keeps_non_avr_samd_generic(monkeypatch):
     import backend.boards.pio_importer as importer
 
-    monkeypatch.setattr(importer, "_run_pio_boards", lambda query="": [
-        {
-            "id": "teensy41",
-            "name": "Teensy 4.1",
-            "vendor": "PJRC",
-            "platform": "teensy",
-            "frameworks": ["arduino"],
-            "mcu": "imxrt1062",
-            "fcpu": 600000000,
-            "rom": 8126464,
-            "ram": 1048576,
-            "upload": {"speed": 115200, "protocol": "teensy-cli"},
-        },
-        {
-            "id": "native",
-            "name": "Native",
-            "vendor": "PlatformIO",
-            "platform": "native",
-            "frameworks": ["cmsis"],
-            "mcu": "native",
-        },
-    ])
+    queries = []
+
+    def fake_boards(query=""):
+        queries.append(query)
+        return [
+            {
+                "id": "teensy41",
+                "name": "Teensy 4.1",
+                "vendor": "PJRC",
+                "platform": "teensy",
+                "frameworks": ["arduino"],
+                "mcu": "imxrt1062",
+                "fcpu": 600000000,
+                "rom": 8126464,
+                "ram": 1048576,
+                "upload": {"speed": 115200, "protocol": "teensy-cli"},
+            },
+            {
+                "id": "native",
+                "name": "Native",
+                "vendor": "PlatformIO",
+                "platform": "native",
+                "frameworks": ["cmsis"],
+                "mcu": "native",
+            },
+        ]
+
+    monkeypatch.setattr(importer, "_run_pio_boards", fake_boards)
 
     boards = import_arduino_framework_boards()
 
@@ -70,6 +76,7 @@ def test_platformio_arduino_framework_importer_keeps_non_avr_samd_generic(monkey
     assert boards[0].arch == "arduino-generic"
     assert boards[0].pio_platform == "teensy"
     assert boards[0].frameworks == ["arduino"]
+    assert queries == [""]
 
 
 def test_registry_returns_curated_and_generic_arduino_pinout():

@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 from backend.boards.detector import detect_from_workspace
 from backend.boards.device import Device
@@ -9,6 +10,37 @@ from backend.boards import stm32_metadata
 from backend.api.routers import hal_codegen
 from backend.services.hardware import _PLATFORMIO_INI_TEMPLATE
 from backend.services import hardware
+
+
+def test_serial_port_poll_does_not_install_platformio(monkeypatch):
+    monkeypatch.setattr(hardware, "pio_bin", lambda: None)
+
+    def unexpected_install():
+        raise AssertionError("status polling must not provision PlatformIO")
+
+    monkeypatch.setattr(hardware, "ensure_platformio", unexpected_install)
+
+    assert hardware._list_serial_ports() == []
+
+
+def test_esptool_does_not_report_esp32_s2_as_s3(tmp_path, monkeypatch):
+    pio = tmp_path / "bin" / "pio"
+    python = pio.parent / "python"
+    python.parent.mkdir(parents=True)
+    python.touch()
+
+    monkeypatch.setattr(hardware, "pio_bin", lambda: str(pio))
+    monkeypatch.setattr(
+        hardware.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            stdout="Chip is ESP32-S2 (revision v1.0)",
+            stderr="",
+            returncode=0,
+        ),
+    )
+
+    assert hardware._esptool_chip_probe("COM12") is None
 
 
 def test_ftdi_arduino_uses_bootloader_probe_for_one_exact_candidate(monkeypatch):
