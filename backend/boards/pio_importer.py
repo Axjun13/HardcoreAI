@@ -34,7 +34,7 @@ _PLATFORM_TO_ARCH: dict[str, str] = {
     "ststm32": "arm-stm32",
 }
 
-IMPORT_TIMEOUT_S = 60
+IMPORT_TIMEOUT_S = 600
 
 
 def _run_pio_boards(query: str = "") -> list[dict]:
@@ -188,18 +188,29 @@ def import_boards(query: str = "STM32") -> list[Device]:
     devices = [_normalize(b) for b in raw_boards]
     return [d for d in devices if d is not None]
 
-
 def import_arduino_framework_boards() -> list[Device]:
-    """Fetch every PlatformIO board that advertises Arduino framework support."""
-    try:
-        raw_boards = _run_pio_boards("")
-    except Exception as exc:
-        print(f"[pio_importer] all-board Arduino import failed: {exc}")
-        return []
+    """Fetch Arduino boards platform-by-platform instead of querying every PlatformIO board."""
+
+    platforms = [
+        "atmelavr",
+        "atmelsam",
+        "ststm32",
+        "espressif32",
+        "espressif8266",
+    ]
+
+    raw_boards = []
+
+    for platform in platforms:
+        try:
+            raw_boards.extend(_run_pio_boards(platform))
+        except Exception as exc:
+            print(f"[pio_importer] {platform} import failed: {exc}")
 
     devices = [
         _normalize(board)
         for board in raw_boards
         if "arduino" in (board.get("frameworks") or [])
     ]
+
     return [d for d in devices if d is not None]

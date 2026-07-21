@@ -25,7 +25,7 @@ from pathlib import Path
 import re
 
 from schemas import BuildResult, DeviceStatus, FlashResult
-from boards.detector import candidates_for_family, detect_from_workspace
+from boards.detector import BoardCandidate, candidates_for_family, detect_from_workspace
 from boards.registry import registry
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
@@ -129,7 +129,7 @@ def pio_bin() -> str | None:
 
 
 def openocd_bin() -> str:
-    """Resolve OpenOCD: env override -> vendored -> PATH (`openocd`)."""
+    """Resolve OpenOCD: env override -> vendored -> PlatformIO -> PATH."""
     override = os.environ.get("OPENOCD_BIN")
     if override:
         return override
@@ -137,6 +137,13 @@ def openocd_bin() -> str:
     vendored = VENDOR_DIR / "openocd" / _platform_slug() / "bin" / exe
     if vendored.exists():
         return str(vendored)
+    # PlatformIO installs its own working OpenOCD package beside its other
+    # toolchains.  The desktop app already relies on PlatformIO for builds,
+    # so this is the normal location on machines without a global OpenOCD
+    # installation (including a default Windows PlatformIO setup).
+    platformio_openocd = Path.home() / ".platformio" / "packages" / "tool-openocd" / "bin" / exe
+    if platformio_openocd.exists():
+        return str(platformio_openocd)
     return "openocd"
 
 
@@ -494,6 +501,15 @@ DBGMCU_IDCODE_MAP: dict[int, str] = {
 
 # DBGMCU_IDCODE lives at a different address depending on the core generation.
 _IDCODE_ADDR_CANDIDATES = ["0xE0042000", "0x40015800"]
+_STM32F1_FLASH_SIZE_ADDR = "0x1FFFF7E0"
+
+# An STM32F1 device ID identifies the MCU family but not the PCB. For the
+# widespread Blue Pill form factor, its 48-pin F103C8 part and flash-size
+# register give us a useful, upload-compatible board profile.
+_STM32F1_BLUEPILL_BY_FLASH_KIB = {
+    64: "bluepill_f103c8",
+    128: "bluepill_f103c8_128k",
+}
 
 
 # Try a small set of real, correctly-defined target configs — one per
@@ -530,6 +546,7 @@ def probe_connected_chip() -> DeviceStatus:
                 "-f", target_cfg,
                 "-c", "init",
                 "-c", f"mdw {addr}",
+                "-c", f"mdw {_STM32F1_FLASH_SIZE_ADDR}",
                 "-c", "shutdown",
             ]
             try:
@@ -540,7 +557,13 @@ def probe_connected_chip() -> DeviceStatus:
                 continue
 
             blob = f"{res.stdout}\n{res.stderr}"
-            m = re.search(rf"{addr}:\s*([0-9a-fA-F]{{8}})", blob)
+            # OpenOCD prints addresses in lowercase on Windows (for example
+            # ``0xe0042000``), while our probe constants are uppercase.
+            m = re.search(
+                rf"{re.escape(addr)}:\s*([0-9a-fA-F]{{8}})",
+                blob,
+                re.IGNORECASE,
+            )
             if not m:
                 if "init mode failed" in blob.lower():
                     last_detail = blob.strip()[-300:]
@@ -549,12 +572,27 @@ def probe_connected_chip() -> DeviceStatus:
             dev_id = int(m.group(1), 16) & 0xFFF
             family = DBGMCU_IDCODE_MAP.get(dev_id)
             if family:
+                reason = f"DBGMCU DEV_ID 0x{dev_id:03x} maps to {family}"
                 board_candidates = candidates_for_family(
-                    family,
-                    source="openocd",
-                    reason=f"DBGMCU DEV_ID 0x{dev_id:03x} maps to {family}",
-                    confidence=0.72,
+                    family, source="openocd", reason=reason, confidence=0.72,
                 )
+                if family == "STM32F1":
+                    flash_match = re.search(
+                        rf"{re.escape(_STM32F1_FLASH_SIZE_ADDR)}:\s*([0-9a-fA-F]{{8}})",
+                        blob,
+                        re.IGNORECASE,
+                    )
+                    flash_kib = int(flash_match.group(1), 16) & 0xFFFF if flash_match else None
+                    bluepill_id = _STM32F1_BLUEPILL_BY_FLASH_KIB.get(flash_kib)
+                    bluepill = registry.get(bluepill_id) if bluepill_id else None
+                    if bluepill:
+                        reason = f"{reason}; flash-size register reports {flash_kib} KB"
+                        board_candidates = [BoardCandidate(
+                            board=bluepill,
+                            confidence=0.96,
+                            source="openocd",
+                            reason=reason,
+                        )]
                 suggested = [c.board.id for c in board_candidates]
                 return DeviceStatus(
                     connected=True, probe="ST-Link V2",
@@ -579,22 +617,85 @@ def auto_detect_board(project_id: str | None = None, session=None) -> DeviceStat
     workspace = workspace_dir(project_id) if project_id else None
     candidates = detect_from_workspace(workspace)
     live = probe_connected_chip()
+    usb_candidates = _usb_vid_pid_candidates()
+    # Preserve a live probe's exact match (for example, the F1 flash-size
+    # read that distinguishes the Blue Pill profile).  Re-expanding only its
+    # family here would throw that information away and recreate dozens of
+    # generic candidates.
+    live_candidates = []
+    for raw in live.candidates:
+        raw_board = raw.get("board") or {}
+        board = registry.get(raw_board.get("id", ""))
+        if board:
+            live_candidates.append(BoardCandidate(
+                board=board,
+                confidence=float(raw.get("confidence", 0)),
+                source=raw.get("source", "openocd"),
+                reason=raw.get("reason", live.detail),
+                port=raw.get("port"),
+            ))
     candidates = _merge_candidates(
         candidates
-        + candidates_for_family(
+        + (live_candidates or candidates_for_family(
             live.detected_family,
             source="openocd",
             reason=live.detail,
             confidence=0.72,
-        )
+        ))
+        + usb_candidates
     )
     best = candidates[0] if candidates else None
+    # An ST-Link probe answering SWD is one kind of "connected"; a matched
+    # USB-serial board (Arduino/ESP/SAMD) is another — either counts.
+    connected = live.connected or bool(usb_candidates)
+    probe = live.probe or ("USB Serial" if usb_candidates else None)
+
+    # More than one physical port with a match means more than one board is
+    # plugged in — flatten-and-rank alone hides that and mislabels the whole
+    # list under one family (e.g. "Detected AVR-Mega" while an unrelated
+    # ESP32 guess from a second port sits right below it). Call it out.
+    ports_seen = {c.port for c in usb_candidates if c.port}
+    if len(ports_seen) > 1:
+        per_port = []
+        for port in sorted(ports_seen):
+            top_for_port = max(
+                (c for c in usb_candidates if c.port == port),
+                key=lambda c: c.confidence,
+            )
+            per_port.append(f"{port}: {top_for_port.board.label} ({top_for_port.confidence:.0%})")
+        multi_device_note = "Multiple boards connected — " + "; ".join(per_port) + \
+            ". Double-check which port you mean before flashing."
+    else:
+        multi_device_note = None
+
+    detail = _detection_detail(candidates, live.detail)
+    if multi_device_note:
+        detail = f"{multi_device_note} {detail}"
+
+    # detect_from_workspace()'s platformio.ini match (0.98) is a *stated
+    # fact* about what the project is configured to build for — it isn't a
+    # live read, and it will always outrank a USB-serial guess (max ~0.9,
+    # usually far lower on ambiguous bridge chips). That's correct when
+    # nothing else is plugged in, but when a live USB match points at a
+    # genuinely different board than the one declared in platformio.ini,
+    # burying that under the config's confidence hides a real hardware
+    # swap. Surface it explicitly instead.
+    declared = next((c for c in candidates if c.source == "platformio.ini"), None)
+    live_top = max(usb_candidates, key=lambda c: c.confidence, default=None)
+    if declared and live_top and declared.board.family != live_top.board.family:
+        detail = (
+            f"Project is configured for {declared.board.label} (platformio.ini), but "
+            f"{live_top.board.label} ({live_top.confidence:.0%}) is what's actually plugged "
+            f"in on {live_top.port or 'the connected port'} right now. Pick the connected "
+            "board below to retarget the project, or unplug/replug the intended device. "
+            + detail
+        )
 
     return DeviceStatus(
-        connected=live.connected,
-        probe=live.probe,
+        connected=connected,
+        probe=probe,
         target=best.board.label if best else live.target,
-        detail=_detection_detail(candidates, live.detail),
+        detail=detail,
         detected_family=best.board.family if best else live.detected_family,
         suggested_boards=[c.board.id for c in candidates],
         candidates=[c.as_dict() for c in candidates],
@@ -622,8 +723,9 @@ def _list_serial_ports() -> list[dict]:
     PlatformIO's own (pyserial-based) port + hwid detection rather than
     adding a direct pyserial dependency, mirroring how the rest of this
     module shells out to `pio` instead of vendoring its internals."""
-    pio = pio_bin()
-    if not pio:
+    try:
+        pio = ensure_platformio()
+    except RuntimeError:
         return []
     try:
         res = subprocess.run(
@@ -641,6 +743,162 @@ def _list_serial_ports() -> list[dict]:
         return []
 
 
+_ESPTOOL_CHIP_TO_BOARD: dict[str, str] = {
+    # esptool's "Chip is X" wording -> our registry board id. Matched by
+    # substring (case-insensitive) since esptool's exact phrasing varies by
+    # version ("ESP32-C3" vs "ESP32-C3 (QFN32)" etc.).
+    "esp32-s3": "esp32-s3-devkitc-1",
+    "esp32-c3": "esp32-c3-devkitm-1",
+    "esp32-s2": "esp32-s3-devkitc-1",  # no S2-specific entry yet; closest native-USB match
+    "esp32": "esp32dev",  # checked last — must not shadow the s3/c3/s2 substrings above
+}
+
+
+def _esptool_chip_probe(port: str) -> tuple[str, str] | None:
+    """Ask the chip itself what it is, over the ROM bootloader's serial
+    handshake — authoritative, unlike VID:PID which is often identical
+    (e.g. Espressif's generic 303a:1001 descriptor) across S3/C3/S2 dev
+    boards. Returns (board_id, raw_esptool_line) or None if esptool isn't
+    available or the chip didn't answer (wrong port, needs a manual
+    bootloader-mode reset, etc.).
+    """
+    pio = pio_bin()
+    if not pio:
+        return None
+    py = Path(pio).parent / ("python.exe" if sys.platform.startswith("win") else "python")
+    if not py.exists():
+        return None
+
+    # Try esptool as a pip-importable module first (works if it happens to be
+    # installed in the same venv as `pio`); PlatformIO more commonly vendors
+    # its own copy under ~/.platformio/packages/tool-esptoolpy instead, so
+    # fall back to invoking that script directly if the module isn't found.
+    attempts = [[str(py), "-m", "esptool", "--port", port, "chip_id"]]
+    vendored = Path.home() / ".platformio" / "packages" / "tool-esptoolpy" / "esptool.py"
+    if vendored.exists():
+        attempts.append([str(py), str(vendored), "--port", port, "chip_id"])
+
+    blob = ""
+    for cmd in attempts:
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=DETECT_TIMEOUT_S)
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            continue
+        blob = f"{res.stdout}\n{res.stderr}"
+        if "No module named" not in blob:
+            break
+
+    m = re.search(r"Chip is (ESP32[\w-]*)", blob, re.IGNORECASE)
+    if not m:
+        return None
+    chip = m.group(1).lower()
+    for needle, board_id in _ESPTOOL_CHIP_TO_BOARD.items():
+        if needle in chip:
+            return board_id, m.group(0)
+    return None
+
+
+def _avrdude_board_probe(port: str) -> tuple[str, str] | None:
+    """Identify an ATmega328P board through its serial bootloader.
+
+    FTDI's 0403:6001 USB id is shared by many adapters, so it cannot tell an
+    Uno-compatible board from a Nano.  avrdude's ``-n`` mode resets the board
+    and reads its signature without changing flash or EEPROM.  The bootloader
+    baud rate is also useful: 115200 is the Optiboot profile used by the Uno;
+    the legacy Nano bootloader uses 57600.
+    """
+    avrdude_dir = Path.home() / ".platformio" / "packages" / "tool-avrdude"
+    exe = avrdude_dir / ("avrdude.exe" if sys.platform.startswith("win") else "avrdude")
+    config = avrdude_dir / "avrdude.conf"
+    if not exe.exists() or not config.exists():
+        return None
+
+    for board_id, baud in (("uno", 115200), ("nanoatmega328", 57600)):
+        try:
+            result = subprocess.run(
+                [str(exe), "-C", str(config), "-p", "atmega328p", "-c", "arduino",
+                 "-P", port, "-b", str(baud), "-n"],
+                capture_output=True,
+                text=True,
+                timeout=DETECT_TIMEOUT_S,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return None
+        output = f"{result.stdout}\n{result.stderr}"
+        if result.returncode == 0 and "Device signature = 0x1e950f" in output:
+            profile = "Optiboot (115200 baud)" if baud == 115200 else "legacy Nano (57600 baud)"
+            return board_id, f"avrdude read ATmega328P signature over {port} using {profile}"
+    return None
+
+
+def _usb_vid_pid_candidates():
+    """Scan live serial ports for USB VID:PID matches, independent of any
+    specific target device — used by auto_detect_board() so plugged-in
+    AVR/ESP/SAMD boards show up even when the project is currently targeting
+    an STM32 (SWD-only) board."""
+    from boards.usb_ids import parse_hwid, GENUINE_VID_PID, BRIDGE_CHIP_VID_PID
+    from boards.detector import BoardCandidate
+
+    candidates: list[BoardCandidate] = []
+    for p in _list_serial_ports():
+        ids = parse_hwid(p.get("hwid", ""))
+        if not ids:
+            continue
+        vid, pid = ids
+        if (vid, pid) in GENUINE_VID_PID:
+            board_id, confidence, reason = GENUINE_VID_PID[(vid, pid)]
+            match = registry.get(board_id)
+            if match:
+                candidates.append(BoardCandidate(board=match, confidence=confidence,
+                                                   source="usb_vid_pid", reason=reason,
+                                                   port=p.get("port")))
+        elif (vid, pid) in BRIDGE_CHIP_VID_PID:
+            port_candidates = []
+            probed = None
+            for board_id, confidence in BRIDGE_CHIP_VID_PID[(vid, pid)]:
+                match = registry.get(board_id)
+                if match:
+                    port_candidates.append(BoardCandidate(
+                        board=match, confidence=confidence, source="usb_vid_pid",
+                        reason=f"VID:PID {vid}:{pid} is a common bridge chip — "
+                               "several boards use it, this is a low-confidence guess.",
+                        port=p.get("port"),
+                    ))
+            # If any guess for this port is an ESP32 variant, VID:PID alone
+            # can't tell S3 from C3 from plain ESP32 (they often share the
+            # same generic descriptor) — ask the chip directly and, if it
+            # answers, replace the low-confidence guesses with a definitive
+            # match instead of leaving an arbitrary S3-vs-C3 ranking.
+            if any(c.board.family == "ESP32" for c in port_candidates) and p.get("port"):
+                probed = _esptool_chip_probe(p.get("port"))
+                if probed:
+                    board_id, raw_line = probed
+                    match = registry.get(board_id)
+                    if match:
+                        port_candidates = [BoardCandidate(
+                            board=match, confidence=0.97, source="esptool",
+                            reason=f"esptool chip_id over the ROM bootloader: {raw_line}",
+                            port=p.get("port"),
+                        )]
+            # An FTDI bridge does not identify an Arduino by itself.  Ask the
+            # serial bootloader for the AVR signature before falling back to
+            # the low-confidence Uno/Nano guesses.
+            if not probed and p.get("port") and any(
+                c.board.id in {"uno", "nanoatmega328"} for c in port_candidates
+            ):
+                avr_probed = _avrdude_board_probe(p.get("port"))
+                if avr_probed:
+                    board_id, reason = avr_probed
+                    match = registry.get(board_id)
+                    if match:
+                        port_candidates = [BoardCandidate(
+                            board=match, confidence=0.96, source="avrdude",
+                            reason=reason, port=p.get("port"),
+                        )]
+            candidates.extend(port_candidates)
+    return candidates
+
+
 def detect_device_serial(device) -> DeviceStatus:
     """Shared serial-port detection for boards with no SWD/ST-Link probe
     wired up in this app — AVR (avrdude over a bootloader), ESP32/ESP8266
@@ -653,9 +911,6 @@ def detect_device_serial(device) -> DeviceStatus:
     boards/usb_ids.py. Same non-destructive philosophy as
     probe_connected_chip(): suggest, never silently auto-select.
     """
-    from boards.usb_ids import parse_hwid, GENUINE_VID_PID, BRIDGE_CHIP_VID_PID
-    from boards.detector import BoardCandidate
-
     ports = _list_serial_ports()
     if not ports:
         return DeviceStatus(
@@ -664,28 +919,7 @@ def detect_device_serial(device) -> DeviceStatus:
                    "may be needed for CH340/CP210x/FTDI-based boards).",
         )
 
-    candidates: list[BoardCandidate] = []
-    for p in ports:
-        ids = parse_hwid(p.get("hwid", ""))
-        if not ids:
-            continue
-        vid, pid = ids
-        if (vid, pid) in GENUINE_VID_PID:
-            board_id, confidence, reason = GENUINE_VID_PID[(vid, pid)]
-            match = registry.get(board_id)
-            if match:
-                candidates.append(BoardCandidate(board=match, confidence=confidence,
-                                                   source="usb_vid_pid", reason=reason))
-        elif (vid, pid) in BRIDGE_CHIP_VID_PID:
-            for board_id, confidence in BRIDGE_CHIP_VID_PID[(vid, pid)]:
-                match = registry.get(board_id)
-                if match:
-                    candidates.append(BoardCandidate(
-                        board=match, confidence=confidence, source="usb_vid_pid",
-                        reason=f"VID:PID {vid}:{pid} is a common bridge chip — "
-                               "several boards use it, this is a low-confidence guess.",
-                    ))
-
+    candidates = _usb_vid_pid_candidates()
     names = ", ".join(p.get("port", "?") for p in ports)
     if candidates:
         candidates.sort(key=lambda c: -c.confidence)

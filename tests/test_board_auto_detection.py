@@ -8,6 +8,25 @@ from backend.boards.stm32_part import derive_package_pin_count
 from backend.boards import stm32_metadata
 from backend.api.routers import hal_codegen
 from backend.services.hardware import _PLATFORMIO_INI_TEMPLATE
+from backend.services import hardware
+
+
+def test_ftdi_arduino_uses_bootloader_probe_for_one_exact_candidate(monkeypatch):
+    monkeypatch.setattr(hardware, "_list_serial_ports", lambda: [{
+        "port": "COM12", "hwid": "USB VID:PID=0403:6001 SER=Arduino",
+    }])
+    monkeypatch.setattr(
+        hardware,
+        "_avrdude_board_probe",
+        lambda port: ("uno", f"ATmega328P bootloader on {port}"),
+    )
+
+    candidates = hardware._usb_vid_pid_candidates()
+
+    assert len(candidates) == 1
+    assert candidates[0].board.id == "uno"
+    assert candidates[0].source == "avrdude"
+    assert candidates[0].confidence == 0.96
 
 
 def test_detects_exact_platformio_board(tmp_path: Path):

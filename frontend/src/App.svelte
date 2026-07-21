@@ -6,6 +6,7 @@
   import EmbeddedConfigurator from "./components/EmbeddedConfigurator.svelte";
   import RagUploadPanel from "./components/RagUploadPanel.svelte";
   import ResearchPanel from "./components/ResearchPanel.svelte";
+  import hardcoreaiLogo from "./assets/Symbolwhite.png";
 
   import {
     Play,
@@ -15,7 +16,6 @@
     File,
     Send,
     AlertTriangle,
-    Sparkles,
     ArrowRight,
     Search,
     GitBranch,
@@ -82,6 +82,16 @@
       reason: string;
     }[];
   } | null = null;
+  // Shared USB bridge chips and SWD family reads cannot identify an exact
+  // board. Only expose a choice when the connected hardware does.
+  $: detectedBoard = detectResult?.candidates.find(
+    (candidate) =>
+      (candidate.source === "avrdude" ||
+        candidate.source === "esptool" ||
+        candidate.source === "openocd" ||
+        candidate.source === "usb_vid_pid") &&
+      candidate.confidence >= 0.85,
+  );
   async function runBoardDetection() {
     detectingBoard = true;
     detectResult = null;
@@ -244,13 +254,32 @@
   };
   const selectableProviderIds = new Set(["gemini", "deepseek", "sarvam"]);
   let agentProviders: AgentProvider[] = [
-    { id: "gemini", label: "Google Gemini", model: "gemini-2.5-flash", available: false, local: false },
-    { id: "deepseek", label: "DeepSeek", model: "deepseek-chat", available: false, local: false },
-    { id: "sarvam", label: "Sarvam", model: "sarvam", available: false, local: false },
+    {
+      id: "gemini",
+      label: "Google Gemini",
+      model: "gemini-2.5-flash",
+      available: false,
+      local: false,
+    },
+    {
+      id: "deepseek",
+      label: "DeepSeek",
+      model: "deepseek-chat",
+      available: false,
+      local: false,
+    },
+    {
+      id: "sarvam",
+      label: "Sarvam",
+      model: "sarvam",
+      available: false,
+      local: false,
+    },
   ];
   $: selectedProviderMeta =
-    agentProviders.find((provider) => provider.id === $workspaceStore.selectedProvider) ??
-    agentProviders[0];
+    agentProviders.find(
+      (provider) => provider.id === $workspaceStore.selectedProvider,
+    ) ?? agentProviders[0];
 
   function setSelectedProvider(providerId: string) {
     if (typeof localStorage !== "undefined") {
@@ -265,7 +294,10 @@
 
   let showAgentContextStatus = false;
   const formatTokenCount = (value: number | undefined) =>
-    new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(value || 0);
+    new Intl.NumberFormat("en", {
+      notation: "compact",
+      maximumFractionDigits: 1,
+    }).format(value || 0);
 
   let rightPaneSplit = 55;
 
@@ -370,6 +402,8 @@
   // Panel sizing
   let sidebarWidth = 260;
   let rightSidebarWidth = 420;
+  $: collapsedStripsWidth =
+    (!showConfigurator ? 40 : 0) + (!showCopilot ? 40 : 0);
   let bottomDrawerHeight = 220;
 
   let isDraggingLeft = false;
@@ -515,10 +549,13 @@
         (provider) => provider.id === $workspaceStore.selectedProvider,
       );
       if (!current || !current.available) {
-        const preferred = agentProviders.find((provider) => provider.id === "deepseek" && provider.available)
-          ?? agentProviders.find((provider) => provider.available)
-          ?? agentProviders.find((provider) => provider.id === "deepseek")
-          ?? agentProviders[0];
+        const preferred =
+          agentProviders.find(
+            (provider) => provider.id === "deepseek" && provider.available,
+          ) ??
+          agentProviders.find((provider) => provider.available) ??
+          agentProviders.find((provider) => provider.id === "deepseek") ??
+          agentProviders[0];
         if (preferred) setSelectedProvider(preferred.id);
       }
     } catch (e) {
@@ -565,15 +602,31 @@
 
   // Synchronize Monaco editor contents with active file changes
   $: activeFile = $workspaceStore.activeFile;
-  $: if (monacoEditor && activeFile && !activeFile.startsWith(DIFF_PREFIX)) {
+  let lastSyncedFile: string | null = null;
+
+  $: if (
+    monacoEditor &&
+    activeFile &&
+    !activeFile.startsWith(DIFF_PREFIX) &&
+    activeFile !== lastSyncedFile
+  ) {
     const content = $workspaceStore.fileContents[activeFile] || "";
-    if (monacoEditor.getValue() !== content) {
-      monacoEditor.setValue(content);
-      monaco.editor.setModelLanguage(
-        monacoEditor.getModel()!,
-        languageForFile(activeFile),
-      );
-    }
+    monacoEditor.setValue(content);
+    monaco.editor.setModelLanguage(
+      monacoEditor.getModel()!,
+      languageForFile(activeFile),
+    );
+    lastSyncedFile = activeFile;
+  }
+  $: if (
+    monacoEditor &&
+    (sidebarWidth,
+    rightSidebarWidth,
+    showConfigurator,
+    showCopilot,
+    showSidebar)
+  ) {
+    requestAnimationFrame(() => monacoEditor?.layout());
   }
 
   // Disk-only files (e.g. .pio build artifacts) are read-only — they aren't
@@ -632,6 +685,11 @@
       fontSize: 13,
       minimap: { enabled: false },
       glyphMargin: true,
+    });
+
+    document.fonts.ready.then(() => {
+      monaco.editor.remeasureFonts();
+      monacoEditor?.layout();
     });
 
     const disposable = monacoEditor.onDidChangeModelContent(() => {
@@ -1420,8 +1478,11 @@
       <div class="divider-line"></div>
 
       <button
-        class="capsule-btn research {workspaceView === 'research' ? 'active' : ''}"
-        onclick={() => (workspaceView = workspaceView === "research" ? "ide" : "research")}
+        class="capsule-btn research {workspaceView === 'research'
+          ? 'active'
+          : ''}"
+        onclick={() =>
+          (workspaceView = workspaceView === "research" ? "ide" : "research")}
         title={workspaceView === "research" ? "Return to IDE" : "Open Research"}
       >
         <Brain size={12} />
@@ -1491,18 +1552,23 @@
                 <select
                   value={$workspaceStore.selectedProvider}
                   onchange={(e) =>
-                    setSelectedProvider((e.currentTarget as HTMLSelectElement).value)}
+                    setSelectedProvider(
+                      (e.currentTarget as HTMLSelectElement).value,
+                    )}
                   style="width: 100%; background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px; padding: 6px;"
                   title="AI model provider"
                 >
                   {#each agentProviders as provider}
                     <option value={provider.id} disabled={!provider.available}>
-                      {provider.label} - {provider.model}{provider.available ? "" : " (key missing)"}
+                      {provider.label} - {provider.model}{provider.available
+                        ? ""
+                        : " (key missing)"}
                     </option>
                   {/each}
                 </select>
                 <span style="font-size: 0.68rem; color: var(--text-muted);">
-                  Active: {selectedProviderMeta?.label ?? "Provider"} / {selectedProviderMeta?.model ?? "model"}
+                  Active: {selectedProviderMeta?.label ?? "Provider"} / {selectedProviderMeta?.model ??
+                    "model"}
                 </span>
               </div>
 
@@ -1821,25 +1887,34 @@
         </div>
       </div>
     </div>
-  {:else}
-    {#if workspaceView === "research"}
-      <div class="research-workspace-view">
-        <ResearchPanel onActMode={(startAgent = false, handoff: any = null) => {
+  {:else if workspaceView === "research"}
+    <div class="research-workspace-view">
+      <ResearchPanel
+        onActMode={(startAgent = false, handoff: any = null) => {
           workspaceView = "ide";
           showCopilot = true;
           showConfigurator = false;
           actModeHandoff = handoff;
-          if (handoff?.target_board_id && handoff.target_board_id !== $workspaceStore.selectedBoard) {
+          if (
+            handoff?.target_board_id &&
+            handoff.target_board_id !== $workspaceStore.selectedBoard
+          ) {
             actions.setSelectedBoard(handoff.target_board_id);
           }
           if (startAgent) {
             actions.setAutoApproveAgent(true);
-            const pending = (handoff?.todos || []).filter((todo: any) => todo.status !== "completed").map((todo: any) => `- ${todo.label}`).join("\n");
-            actions.sendAiMessage(`The final research plan is approved. Enter Act mode now. Read final-review.md, plan.md, components.md, verification.md, pin-diagram.md, connection-diagram.md, configuration.md, pin-config.json, and .hardcoreai/component_context.json. Execute the mandatory TODO in order and keep the user informed:\n${pending}\nImplement the firmware and run a build. Fix build errors until it succeeds. If a compatible device is connected, flash it; otherwise report that the successful build is waiting for a device and a flash command. This message explicitly approves the required file changes, dependency installation, configuration, and build.`);
+            const pending = (handoff?.todos || [])
+              .filter((todo: any) => todo.status !== "completed")
+              .map((todo: any) => `- ${todo.label}`)
+              .join("\n");
+            actions.sendAiMessage(
+              `The final research plan is approved. Enter Act mode now. Read final-review.md, plan.md, components.md, verification.md, pin-diagram.md, connection-diagram.md, configuration.md, pin-config.json, and .hardcoreai/component_context.json. Execute the mandatory TODO in order and keep the user informed:\n${pending}\nImplement the firmware and run a build. Fix build errors until it succeeds. If a compatible device is connected, flash it; otherwise report that the successful build is waiting for a device and a flash command. This message explicitly approves the required file changes, dependency installation, configuration, and build.`,
+            );
           }
-        }} />
-      </div>
-    {:else}
+        }}
+      />
+    </div>
+  {:else}
     <!-- 2. Main Workspace Layout -->
     <div
       class="helix-main-workspace {showConfigurator || showCopilot
@@ -2978,29 +3053,32 @@
                   </div>
                   {#if detectResult}
                     <div class="board-detect-result">
-                      {#if detectResult.candidates.length > 0}
+                      {#if detectedBoard}
                         <span>
-                          Detected <strong>{detectResult.family}</strong> — pick
-                          a match:
+                          Detected <strong>{detectedBoard.board.label}</strong>:
                         </span>
                         <div class="board-detect-suggestions">
-                          {#each detectResult.candidates.slice(0, 8) as candidate}
-                            <button
-                              type="button"
-                              class="board-detect-suggestion"
-                              title={candidate.reason}
-                              onclick={() =>
-                                applyDetectedBoard(candidate.board.id)}
+                          <button
+                            type="button"
+                            class="board-detect-suggestion"
+                            title={detectedBoard.reason}
+                            onclick={() =>
+                              applyDetectedBoard(detectedBoard.board.id)}
+                          >
+                            {detectedBoard.board.label}
+                            <span
+                              >{Math.round(
+                                detectedBoard.confidence * 100,
+                              )}%</span
                             >
-                              {candidate.board.label}
-                              <span
-                                >{Math.round(candidate.confidence * 100)}%</span
-                              >
-                            </button>
-                          {/each}
+                          </button>
                         </div>
                       {:else}
-                        <span>{detectResult.detail}</span>
+                        <span>
+                          {detectResult.candidates.length > 0
+                            ? "The connected hardware could not identify one exact board. No board was selected; choose it manually from the board list."
+                            : detectResult.detail}
+                        </span>
                       {/if}
                     </div>
                   {/if}
@@ -3610,7 +3688,7 @@
             isDraggingRight = true;
             document.body.classList.add("dragging-col");
           }}
-          style="right: {rightSidebarWidth}px;"
+          style="right: {rightSidebarWidth + collapsedStripsWidth}px;"
         ></div>
       {/if}
 
@@ -3656,7 +3734,11 @@
             <div class="ai-chat-header">
               <div class="ai-chat-header-info">
                 <div class="ai-avatar-badge">
-                  <Sparkles size={12} />
+                  <img
+                    src={hardcoreaiLogo}
+                    alt="HardcoreAI"
+                    class="ai-avatar-logo"
+                  />
                 </div>
                 <div>
                   <div class="ai-chat-title">HARDCOREAI COPILOT</div>
@@ -3669,7 +3751,8 @@
                 <button
                   class="close-ai-btn"
                   class:active={showAgentContextStatus}
-                  onclick={() => (showAgentContextStatus = !showAgentContextStatus)}
+                  onclick={() =>
+                    (showAgentContextStatus = !showAgentContextStatus)}
                   title="Show model context and token status"
                   aria-label="Show model context and token status"
                 >
@@ -3696,35 +3779,89 @@
             </div>
 
             {#if showAgentContextStatus}
-              <section class="agent-context-status" aria-live="polite" aria-label="Model context status">
+              <section
+                class="agent-context-status"
+                aria-live="polite"
+                aria-label="Model context status"
+              >
                 {#if $workspaceStore.agentContextStatus}
                   {@const context = $workspaceStore.agentContextStatus}
                   <div class="agent-context-status-head">
                     <div>
                       <strong>{context.model}</strong>
-                      <small>{context.provider}{context.estimated ? " · estimated" : " · provider reported"}</small>
+                      <small
+                        >{context.provider}{context.estimated
+                          ? " · estimated"
+                          : " · provider reported"}</small
+                      >
                     </div>
-                    <span class:low={context.low}>{Math.round(context.context_remaining_percent)}% left</span>
+                    <span class:low={context.low}
+                      >{Math.round(context.context_remaining_percent)}% left</span
+                    >
                   </div>
-                  <div class="agent-context-meter" aria-label={`${context.context_used_percent}% context used`}>
-                    <span class:low={context.low} style={`width:${Math.min(100, context.context_used_percent)}%`}></span>
+                  <div
+                    class="agent-context-meter"
+                    aria-label={`${context.context_used_percent}% context used`}
+                  >
+                    <span
+                      class:low={context.low}
+                      style={`width:${Math.min(100, context.context_used_percent)}%`}
+                    ></span>
                   </div>
                   <div class="agent-context-grid">
-                    <div><small>Context used</small><strong>{formatTokenCount(context.context_used_tokens)} / {formatTokenCount(context.context_window)}</strong></div>
-                    <div><small>Context left</small><strong>{formatTokenCount(context.context_remaining_tokens)}</strong></div>
-                    <div><small>Run input</small><strong>{formatTokenCount(context.total_input_tokens)}</strong></div>
-                    <div><small>Run output</small><strong>{formatTokenCount(context.total_output_tokens)}</strong></div>
-                    <div><small>Total processed</small><strong>{formatTokenCount(context.total_tokens)}</strong></div>
-                    <div><small>Warning at</small><strong>{context.warning_percent}% left</strong></div>
+                    <div>
+                      <small>Context used</small><strong
+                        >{formatTokenCount(context.context_used_tokens)} / {formatTokenCount(
+                          context.context_window,
+                        )}</strong
+                      >
+                    </div>
+                    <div>
+                      <small>Context left</small><strong
+                        >{formatTokenCount(
+                          context.context_remaining_tokens,
+                        )}</strong
+                      >
+                    </div>
+                    <div>
+                      <small>Run input</small><strong
+                        >{formatTokenCount(context.total_input_tokens)}</strong
+                      >
+                    </div>
+                    <div>
+                      <small>Run output</small><strong
+                        >{formatTokenCount(context.total_output_tokens)}</strong
+                      >
+                    </div>
+                    <div>
+                      <small>Total processed</small><strong
+                        >{formatTokenCount(context.total_tokens)}</strong
+                      >
+                    </div>
+                    <div>
+                      <small>Warning at</small><strong
+                        >{context.warning_percent}% left</strong
+                      >
+                    </div>
                   </div>
                   {#if context.low}
-                    <div class="agent-context-inline-warning"><AlertTriangle size={13} /> Please use another session.</div>
+                    <div class="agent-context-inline-warning">
+                      <AlertTriangle size={13} /> Please use another session.
+                    </div>
                   {/if}
                 {:else}
                   <div class="agent-context-empty">
-                    <strong>{selectedProviderMeta?.model ?? "Selected model"}</strong>
-                    <span>Context window: {formatTokenCount(selectedProviderMeta?.context_window)} tokens</span>
-                    <small>Token usage appears here when the next run starts.</small>
+                    <strong
+                      >{selectedProviderMeta?.model ?? "Selected model"}</strong
+                    >
+                    <span
+                      >Context window: {formatTokenCount(
+                        selectedProviderMeta?.context_window,
+                      )} tokens</span
+                    >
+                    <small
+                      >Token usage appears here when the next run starts.</small
+                    >
                   </div>
                 {/if}
               </section>
@@ -3740,21 +3877,44 @@
                 <section class="agent-context-warning" role="alert">
                   <AlertTriangle size={15} />
                   <div>
-                    <strong>{Math.round($workspaceStore.agentContextStatus.context_remaining_percent)}% context left</strong>
+                    <strong
+                      >{Math.round(
+                        $workspaceStore.agentContextStatus
+                          .context_remaining_percent,
+                      )}% context left</strong
+                    >
                     <span>Please use another session.</span>
                   </div>
                 </section>
               {/if}
               {#if actModeHandoff?.todos?.length}
-                <section class="act-todo-card" aria-label="Approved mandatory TODO list">
+                <section
+                  class="act-todo-card"
+                  aria-label="Approved mandatory TODO list"
+                >
                   <div class="act-todo-head">
                     <span>ACT MODE · MANDATORY TODO</span>
-                    <small>{actModeHandoff.todos.filter((todo: any) => todo.status === "completed").length}/{actModeHandoff.todos.length}</small>
+                    <small
+                      >{actModeHandoff.todos.filter(
+                        (todo: any) => todo.status === "completed",
+                      ).length}/{actModeHandoff.todos.length}</small
+                    >
                   </div>
                   {#each actModeHandoff.todos as todo, index}
                     <div class="act-todo-row {todo.status || 'pending'}">
-                      <span class="act-todo-status">{todo.status === "completed" ? "✓" : todo.status === "in_progress" ? "●" : todo.status === "warning" ? "!" : index + 1}</span>
-                      <div><p>{todo.label}</p>{#if todo.detail}<small>{todo.detail}</small>{/if}</div>
+                      <span class="act-todo-status"
+                        >{todo.status === "completed"
+                          ? "✓"
+                          : todo.status === "in_progress"
+                            ? "●"
+                            : todo.status === "warning"
+                              ? "!"
+                              : index + 1}</span
+                      >
+                      <div>
+                        <p>{todo.label}</p>
+                        {#if todo.detail}<small>{todo.detail}</small>{/if}
+                      </div>
                     </div>
                   {/each}
                 </section>
@@ -3811,7 +3971,12 @@
                   <div class="chat-row {msg.sender}">
                     {#if msg.sender === "ai"}
                       <div class="chat-avatar ai-avatar">
-                        <Sparkles size={9} />
+                        <img
+                          src={hardcoreaiLogo}
+                          alt="HardcoreAI"
+                          class="copilot-logo-icon"
+                          style="width: 25px; height: 25px;"
+                        />
                       </div>
                     {:else}
                       <div class="chat-avatar user-avatar">DEV</div>
@@ -3838,7 +4003,12 @@
                               {:else if step.kind === "call"}
                                 <div class="agent-call-card">
                                   <span class="agent-call-icon"
-                                    ><Sparkles size={11} /></span
+                                    ><img
+                                      src={hardcoreaiLogo}
+                                      alt=""
+                                      class="copilot-logo-icon"
+                                      style="width: 15px; height: 15px;"
+                                    /></span
                                   >
                                   <span class="agent-call-name"
                                     >{step.name}</span
@@ -3993,7 +4163,12 @@
                         {#if msg.streaming}
                           <div class="agent-work-indicator" aria-live="polite">
                             <div class="agent-work-mark">
-                              <Sparkles size={12} />
+                              <img
+                                src={hardcoreaiLogo}
+                                alt=""
+                                class="copilot-logo-icon"
+                                style="width: 12px; height: 12px;"
+                              />
                               <span></span>
                             </div>
                             <div class="agent-work-body">
@@ -4236,7 +4411,12 @@
                           <div class="chat-approval-gate-card">
                             <div class="approval-gate-header">
                               <div class="approval-icon-pulse">
-                                <Sparkles size={14} />
+                                <img
+                                  src={hardcoreaiLogo}
+                                  alt=""
+                                  class="copilot-logo-icon"
+                                  style="width: 14px; height: 14px;"
+                                />
                               </div>
                               <div class="approval-header-texts">
                                 <div class="approval-gate-title">
@@ -4302,7 +4482,14 @@
 
               {#if $workspaceStore.aiWaiting}
                 <div class="chat-row ai">
-                  <div class="chat-avatar ai-avatar"><Sparkles size={9} /></div>
+                  <div class="chat-avatar ai-avatar">
+                    <img
+                      src={hardcoreaiLogo}
+                      alt="HardcoreAI"
+                      class="copilot-logo-icon"
+                      style="width: 9px; height: 9px;"
+                    />
+                  </div>
                   <div class="chat-msg-block ai">
                     <div class="chat-msg-meta">
                       <span class="chat-msg-sender">HARDCOREAI</span>
@@ -4465,7 +4652,14 @@
               onclick={() => (showCopilot = true)}
               title="Open AI Copilot"
             >
-              <div class="ai-collapsed-icon"><Sparkles size={14} /></div>
+              <div class="ai-collapsed-icon">
+                <img
+                  src={hardcoreaiLogo}
+                  alt="HardcoreAI"
+                  class="copilot-logo-icon"
+                  style="width: 14px; height: 14px;"
+                />
+              </div>
               <div class="ai-collapsed-label">AI COPILOT</div>
               <div class="ai-collapsed-dot"></div>
             </div>
@@ -4571,7 +4765,6 @@
         </button>
       </div>
     </footer>
-    {/if}
   {/if}
 </div>
 
@@ -5648,5 +5841,15 @@
     box-shadow:
       0 6px 16px rgba(0, 0, 0, 0.5),
       0 0 14px rgba(139, 92, 246, 0.2);
+  }
+  .ai-avatar-logo {
+    width: 25px;
+    height: 25px;
+    object-fit: contain;
+  }
+
+  .copilot-logo-icon {
+    display: block;
+    object-fit: contain;
   }
 </style>

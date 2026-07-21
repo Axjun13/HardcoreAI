@@ -42,8 +42,13 @@ BRIDGE_CHIP_VID_PID: dict[tuple[str, str], list[tuple[str, float]]] = {
     ("10c4", "ea60"): [  # CP2102/CP2104 — common on ESP32 dev boards
         ("esp32dev", 0.45), ("esp32-s3-devkitc-1", 0.3), ("nodemcuv2", 0.25),
     ],
-    ("0403", "6001"): [  # FTDI FT232R — older Nano/Uno clones, some Pro Mini adapters
-        ("nanoatmega328", 0.35), ("uno", 0.3),
+    ("0403", "6001"): [  # FTDI FT232R — used by both genuine FT232R-based Uno
+        # clones and Nanos. There's no reliable VID:PID-level signal that
+        # separates them (confirmed against real hardware both ways) — tied
+        # confidence is the honest answer, not a guess dressed up as one.
+        # Don't re-weight this pair again without a signal stronger than
+        # "which board a user happened to have" — that's not generalizable.
+        ("nanoatmega328", 0.3), ("uno", 0.3),
     ],
     ("303a", "1001"): [  # Espressif's own native-USB descriptor (ESP32-S3/C3 with native USB)
         ("esp32-s3-devkitc-1", 0.45), ("esp32-c3-devkitm-1", 0.4),
