@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 from sqlmodel import SQLModel
 
 from pydantic import BaseModel, Field
@@ -126,6 +127,8 @@ class AgentRequest(BaseModel):
     # When true, the agent auto-accepts plans, code/file changes, and builds.
     # Flashing physical hardware always requires a separate explicit approval.
     auto_approve: bool = False
+    # One stable id is reused for every paid LLM/search call made by this run.
+    agent_run_id: UUID | None = None
 
 
 class PhaseTrace(BaseModel):
@@ -137,6 +140,7 @@ class PhaseTrace(BaseModel):
     options: list[str] = Field(default_factory=list)
     messages: list[dict[str, Any]] = Field(default_factory=list)
     context_usage: dict[str, Any] = Field(default_factory=dict)
+    context_manifest: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class AgentRunResult(BaseModel):

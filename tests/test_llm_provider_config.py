@@ -1,6 +1,8 @@
 import asyncio
 from unittest.mock import AsyncMock
 
+import pytest
+
 from backend.llm import core
 
 
@@ -8,13 +10,13 @@ def _provider(provider_id: str) -> dict:
     return next(item for item in core.available_providers() if item["id"] == provider_id)
 
 
-def test_provider_metadata_exposes_context_window(monkeypatch):
-    monkeypatch.setattr(core, "GEMINI_MODEL", "gemini-2.5-flash")
+def test_cloud_provider_metadata_uses_server_owned_model():
+    provider = _provider("deepseek")
 
-    provider = _provider("gemini")
-
-    assert provider["model"] == "gemini-2.5-flash"
-    assert provider["context_window"] == 1_048_576
+    assert provider["available"] is True
+    assert provider["model"] == "server-selected"
+    assert provider["local"] is False
+    assert provider["context_window"] > 0
 
 
 def test_openai_usage_is_normalised_for_agent_tracking():
@@ -27,71 +29,53 @@ def test_openai_usage_is_normalised_for_agent_tracking():
     }
 
 
-def test_deepseek_is_available_through_configured_openrouter(monkeypatch):
-    monkeypatch.setattr(core, "DEEPSEEK_API_KEY", "")
-    monkeypatch.setattr(core, "OPENROUTER_API_KEY", "openrouter-key")
-    monkeypatch.setattr(core, "DEEPSEEK_OPENROUTER_MODEL", "deepseek/deepseek-chat-v3-0324")
+def test_gateway_payload_rejects_agent_call_without_stable_run_id():
+    with pytest.raises(core.LLMError, match="stable agent run ID"):
+        core._gateway_payload(
+            [{"role": "user", "content": "Hello"}],
+            mode="agent",
+            project_id="42",
+            agent_run_id=None,
+        )
 
-    assert _provider("deepseek")["available"] is True
 
-
-def test_deepseek_routes_through_openrouter(monkeypatch):
-    complete = AsyncMock(return_value="DeepSeek response")
-    monkeypatch.setattr(core, "_openai_style_complete", complete)
-    monkeypatch.setattr(core, "DEEPSEEK_API_KEY", "")
-    monkeypatch.setattr(core, "OPENROUTER_API_KEY", "openrouter-key")
-    monkeypatch.setattr(core, "OPENROUTER_HTTP_REFERER", "http://127.0.0.1:62017")
-    monkeypatch.setattr(core, "DEEPSEEK_OPENROUTER_MODEL", "deepseek/deepseek-chat-v3-0324")
-    messages = [{"role": "user", "content": "Hello"}]
-
-    result = asyncio.run(core._deepseek_complete(messages))
-
-    assert result == "DeepSeek response"
-    complete.assert_awaited_once_with(
-        "https://openrouter.ai/api/v1/chat/completions",
-        "deepseek/deepseek-chat-v3-0324",
-        messages,
-        headers={
-            "Authorization": "Bearer openrouter-key",
-            "HTTP-Referer": "http://127.0.0.1:62017",
-            "X-Title": "HardcoreAI",
-        },
+def test_gateway_payload_uses_strict_proxy_contract():
+    payload = core._gateway_payload(
+        [
+            {"role": "system", "content": "Use the project board."},
+            {"role": "user", "content": "Blink the LED."},
+        ],
+        mode="agent",
+        project_id="42",
+        agent_run_id="fd15bb17-19a3-4745-baca-4ab6982db74b",
     )
 
+    assert set(payload) == {"mode", "messages", "projectId", "agentRunId"}
+    assert all(message["role"] in {"user", "assistant"} for message in payload["messages"])
+    assert payload["projectId"] == "42"
+    assert payload["agentRunId"] == "fd15bb17-19a3-4745-baca-4ab6982db74b"
 
-def test_direct_deepseek_key_takes_precedence(monkeypatch):
-    complete = AsyncMock(return_value="Direct response")
-    monkeypatch.setattr(core, "_openai_style_complete", complete)
-    monkeypatch.setattr(core, "DEEPSEEK_API_KEY", "deepseek-key")
-    monkeypatch.setattr(core, "DEEPSEEK_URL", "https://api.deepseek.test/v1/chat/completions")
-    monkeypatch.setattr(core, "DEEPSEEK_MODEL", "deepseek-chat")
-    monkeypatch.setattr(core, "OPENROUTER_API_KEY", "openrouter-key")
+
+def test_legacy_cloud_selection_routes_through_gateway(monkeypatch):
+    gateway = AsyncMock(return_value=core.CompletionText("Cloud response"))
+    monkeypatch.setattr(core, "_gateway_complete", gateway)
     messages = [{"role": "user", "content": "Hello"}]
 
-    result = asyncio.run(core._deepseek_complete(messages))
-
-    assert result == "Direct response"
-    complete.assert_awaited_once_with(
-        "https://api.deepseek.test/v1/chat/completions",
-        "deepseek-chat",
-        messages,
-        headers={"Authorization": "Bearer deepseek-key"},
+    result = asyncio.run(
+        core.complete(
+            "deepseek",
+            messages,
+            mode="research",
+            project_id="42",
+            access_token="user-access-token",
+        )
     )
 
-
-def test_deepseek_uses_current_openrouter_fallback_when_configured_model_fails(monkeypatch):
-    complete = AsyncMock(side_effect=[core.LLMError("upstream busy"), "Fallback response"])
-    monkeypatch.setattr(core, "_openai_style_complete", complete)
-    monkeypatch.setattr(core, "DEEPSEEK_API_KEY", "")
-    monkeypatch.setattr(core, "OPENROUTER_API_KEY", "openrouter-key")
-    monkeypatch.setattr(core, "DEEPSEEK_OPENROUTER_MODEL", "deepseek/older-model")
-    monkeypatch.setattr(core, "DEEPSEEK_OPENROUTER_FALLBACK_MODEL", "deepseek/current-model")
-    messages = [{"role": "user", "content": "Hello"}]
-
-    result = asyncio.run(core._deepseek_complete(messages))
-
-    assert result == "Fallback response"
-    assert [call.args[1] for call in complete.await_args_list] == [
-        "deepseek/older-model",
-        "deepseek/current-model",
-    ]
+    assert result == "Cloud response"
+    gateway.assert_awaited_once_with(
+        messages,
+        mode="research",
+        project_id="42",
+        agent_run_id=None,
+        access_token="user-access-token",
+    )

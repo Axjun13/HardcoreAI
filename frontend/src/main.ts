@@ -1,6 +1,7 @@
 import { mount } from "svelte";
 import App from "./App.svelte";
 import "./App.css";
+import { initializeAuth } from "./auth";
 
 // Wire up Monaco's web workers for Vite. Without this, monaco-editor can't
 // spawn its workers and falls back to running worker code on the main thread
@@ -20,6 +21,8 @@ self.MonacoEnvironment = {
     return new editorWorker();
   },
 };
+
+await initializeAuth();
 
 mount(App, {
   target: document.getElementById("root")!   // <-- the exclamation ensures a non‑null target

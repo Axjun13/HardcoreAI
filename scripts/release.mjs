@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const releaseDir = resolve(repoRoot, "release");
+const releaseDir = resolve(process.env.RELEASE_OUTPUT_DIR || resolve(repoRoot, "release"));
 const appName = "hardcoreai-single-app";
 const stageDir = resolve(releaseDir, appName);
 const version = sanitizeVersion(
@@ -50,6 +50,15 @@ const excludedNames = new Set([
   "node_modules",
   ".pio",
 ]);
+const forbiddenReleaseIdentifiers = [
+  "OPENROUTER_API_KEY",
+  "GEMINI_API_KEY",
+  "DEEPSEEK_API_KEY",
+  "SARVAM_API_KEY",
+  "BRAVE_API_KEY",
+  "SUPABASE_SERVICE_KEY",
+  "SUPABASE_SERVICE_ROLE_KEY",
+];
 
 function sanitizeVersion(value) {
   return value.replace(/[^0-9A-Za-z._-]/g, "-");
@@ -119,6 +128,34 @@ Then open:
   http://127.0.0.1:62018
 `,
   );
+}
+
+function assertReleaseContainsNoSecrets(root) {
+  const violations = [];
+  for (const entry of tarEntries(root)) {
+    if (entry.type !== "0") continue;
+    const base = entry.tarName.split("/").pop() || "";
+    if (base === ".env" || base.startsWith(".env.")) {
+      violations.push(`${entry.tarName}: environment file`);
+      continue;
+    }
+    if (entry.stats.size > 5_000_000) continue;
+    const content = readFileSync(entry.path, "utf8");
+    for (const identifier of forbiddenReleaseIdentifiers) {
+      if (content.includes(identifier)) {
+        violations.push(`${entry.tarName}: ${identifier}`);
+      }
+    }
+    if (/eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{20,}/.test(content)) {
+      violations.push(`${entry.tarName}: JWT-like credential`);
+    }
+    if (/(?:sk-or-v1-|AIzaSy)[A-Za-z0-9_-]{20,}/.test(content)) {
+      violations.push(`${entry.tarName}: provider-key-like credential`);
+    }
+  }
+  if (violations.length) {
+    throw new Error(`Release secret scan failed:\n${violations.join("\n")}`);
+  }
 }
 
 function tarHeader(name, size, mode, mtime, type) {
@@ -220,7 +257,8 @@ Usage:
   node scripts/release.mjs --skip-build
 
 Environment:
-  RELEASE_VERSION  Archive version suffix, default local`);
+  RELEASE_VERSION     Archive version suffix, default local
+  RELEASE_OUTPUT_DIR  Alternate output directory (useful for CI verification)`);
   process.exit(0);
 }
 
@@ -235,6 +273,7 @@ if (!existsSync(resolve(repoRoot, "frontend", "dist", "index.html"))) {
 
 mkdirSync(releaseDir, { recursive: true });
 copyReleaseFiles();
+assertReleaseContainsNoSecrets(stageDir);
 createTarGz(stageDir, archivePath);
 
 console.log(`\nRelease package created: ${relative(repoRoot, archivePath)}`);

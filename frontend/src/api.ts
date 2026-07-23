@@ -1,3 +1,5 @@
+import { authenticatedFetch, supabase } from "./auth";
+
 const DEFAULT_BACKEND_URL = import.meta.env.DEV
   ? "http://127.0.0.1:62018"
   : window.location.origin;
@@ -26,22 +28,29 @@ export const api = {
   hasActiveProject(): boolean {
     return activeProjectId !== null;
   },
-  
+
   // --- Projects API ---
   async getProjects() {
-    const res = await fetch(`${BACKEND_URL}/api/projects`, { headers: { "Authorization": "Bearer TEST_TOKEN" } });
-    if (!res.ok) throw new Error(await res.text());
-    return res.json();
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const { data, error } = await supabase
+      .from("projects")
+      .select("id,name,description,path,board_id,created_at,updated_at")
+      .order("updated_at", { ascending: false });
+    if (error) throw error;
+    return (data ?? []).map((project) => ({
+      ...project,
+      id: String(project.id),
+    }));
   },
   async listBoards() {
-    const res = await fetch(`${BACKEND_URL}/api/boards`, { headers: { "Authorization": "Bearer TEST_TOKEN" } });
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/boards`, { headers: {} });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
   async refreshBoards(query: string = "STM32") {
-    const res = await fetch(`${BACKEND_URL}/api/boards/refresh?query=${encodeURIComponent(query)}`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/boards/refresh?query=${encodeURIComponent(query)}`, {
       method: "POST",
-      headers: { "Authorization": "Bearer TEST_TOKEN" }
+      headers: {}
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
@@ -52,55 +61,52 @@ export const api = {
     // reachable refresh route defaulted to STM32 alone, so the Arduino/
     // ESP/SAMD side of the catalog could never grow past the hand-seeded
     // boards from the UI.
-    const res = await fetch(`${BACKEND_URL}/api/boards/refresh-all`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/boards/refresh-all`, {
       method: "POST",
-      headers: { "Authorization": "Bearer TEST_TOKEN" }
+      headers: {}
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
   async addCustomBoard(payload: { id: string; mcu: string; label?: string; arch?: string }) {
-    const res = await fetch(`${BACKEND_URL}/api/boards/custom`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/boards/custom`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": "Bearer TEST_TOKEN" },
-      body: JSON.stringify(payload),
-    });
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload) });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
   async importStm32Metadata() {
-    const res = await fetch(`${BACKEND_URL}/api/boards/stm32-data/import`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/boards/stm32-data/import`, {
       method: "POST",
-      headers: { "Authorization": "Bearer TEST_TOKEN" },
-    });
+      headers: {} });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
   async getStm32MetadataStatus() {
-    const res = await fetch(`${BACKEND_URL}/api/boards/stm32-data/status`, {
-      headers: { "Authorization": "Bearer TEST_TOKEN" },
-    });
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/boards/stm32-data/status`, {
+      headers: {} });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
   async getBoard(boardId: string) {
-    const res = await fetch(`${BACKEND_URL}/api/boards/${boardId}`, { headers: { "Authorization": "Bearer TEST_TOKEN" } });
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/boards/${boardId}`, { headers: {} });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
   async setProjectBoard(projectId: string, boardId: string) {
-    const res = await fetch(`${BACKEND_URL}/api/boards/projects/${projectId}`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/boards/projects/${projectId}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json", "Authorization": "Bearer TEST_TOKEN" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ board_id: boardId })
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
   async pickFolder(): Promise<string | null> {
-  const res = await fetch(`${BACKEND_URL}/api/pick-folder`, {
+  const res = await authenticatedFetch(`${BACKEND_URL}/api/pick-folder`, {
     method: "POST",
-    headers: { "Authorization": "Bearer TEST_TOKEN" }
+    headers: {}
   });
   if (!res.ok) throw new Error(await res.text());
   const data = await res.json();
@@ -113,9 +119,9 @@ async createProject(
   path: string | null = null,
   boardId: string | null = null,
 ) {
-  const res = await fetch(`${BACKEND_URL}/api/projects`, {
+  const res = await authenticatedFetch(`${BACKEND_URL}/api/projects`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "Authorization": "Bearer TEST_TOKEN" },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name, description, path, board_id: boardId })
   });
   if (!res.ok) throw new Error(await res.text());
@@ -123,34 +129,37 @@ async createProject(
 },
 
   async deleteProject(id: string) {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${id}`, {
-      method: "DELETE",
-      headers: { "Authorization": "Bearer TEST_TOKEN" }
-    });
-    if (!res.ok) throw new Error(await res.text());
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const { error } = await supabase
+      .from("projects")
+      .delete()
+      .eq("id", Number(id));
+    if (error) throw error;
     return true;
   },
 
   async renameProject(id: string, name: string) {
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/projects/${id}/rename`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": "Bearer TEST_TOKEN" },
-        body: JSON.stringify({ name })
-      });
-      if (res.ok) return await res.json();
-    } catch (e) {
-      console.warn("Failed to rename project on backend, falling back to local rename", e);
-    }
-    return { id, name };
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const { data, error } = await supabase
+      .from("projects")
+      .update({ name: name.trim(), updated_at: new Date().toISOString() })
+      .eq("id", Number(id))
+      .select("id,name,description,path,board_id,created_at,updated_at")
+      .single();
+    if (error) throw error;
+    return { ...data, id: String(data.id) };
   },
 
   async getConversationHistory(projectId: string) {
     try {
-      const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/conversations`, {
-        headers: { "Authorization": "Bearer TEST_TOKEN" }
-      });
-      if (res.ok) return await res.json();
+      if (!supabase) throw new Error("Supabase is not configured.");
+      const { data, error } = await supabase
+        .from("conversations")
+        .select("history")
+        .eq("project_id", Number(projectId))
+        .maybeSingle();
+      if (error) throw error;
+      return Array.isArray(data?.history) ? data.history : [];
     } catch (e) {
       console.warn("Failed to fetch conversation history, falling back to localStorage", e);
     }
@@ -160,12 +169,16 @@ async createProject(
 
   async saveConversationHistory(projectId: string, history: any[]) {
     try {
-      const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/conversations`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": "Bearer TEST_TOKEN" },
-        body: JSON.stringify({ history })
+      if (!supabase) throw new Error("Supabase is not configured.");
+      const { error } = await supabase.from("conversations").upsert({
+        project_id: Number(projectId),
+        history,
+        updated_at: new Date().toISOString(),
+      }, {
+        onConflict: "project_id",
       });
-      if (res.ok) return await res.json();
+      if (error) throw error;
+      return history;
     } catch (e) {
       console.warn("Failed to save conversation history, saving to localStorage", e);
     }
@@ -175,11 +188,13 @@ async createProject(
 
   async deleteConversationHistory(projectId: string) {
     try {
-      const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/conversations`, {
-        method: "DELETE",
-        headers: { "Authorization": "Bearer TEST_TOKEN" }
-      });
-      if (res.ok) return true;
+      if (!supabase) throw new Error("Supabase is not configured.");
+      const { error } = await supabase
+        .from("conversations")
+        .delete()
+        .eq("project_id", Number(projectId));
+      if (error) throw error;
+      return true;
     } catch (e) {
       console.warn("Failed to delete conversation history, clearing localStorage", e);
     }
@@ -188,22 +203,22 @@ async createProject(
   },
 
   async getProjectFiles(id: string) {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${id}/files`, { headers: { "Authorization": "Bearer TEST_TOKEN" } });
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${id}/files`, { headers: {} });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   // Real working-directory tree (includes .pio, untracked files, binaries).
   async getProjectTree(id: string) {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${id}/tree`, { headers: { "Authorization": "Bearer TEST_TOKEN" } });
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${id}/tree`, { headers: {} });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   // Read a single working-dir file's content on demand (for untracked/.pio files).
   async getDiskFile(id: string, path: string) {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${id}/disk-file?path=${encodeURIComponent(path)}`, {
-      headers: { "Authorization": "Bearer TEST_TOKEN" }
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${id}/disk-file?path=${encodeURIComponent(path)}`, {
+      headers: {}
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
@@ -211,9 +226,9 @@ async createProject(
 
   async upsertFile(id: string, path: string, content: string, language: string = "c") {
     // The backend path is a path param, needs URL encoding if it has slashes, though FastAPI path:path handles it
-    const res = await fetch(`${BACKEND_URL}/api/projects/${id}/files/${path}`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${id}/files/${path}`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json", "Authorization": "Bearer TEST_TOKEN" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ content, language })
     });
     if (!res.ok) throw new Error(await res.text());
@@ -221,55 +236,64 @@ async createProject(
   },
 
   async deleteFile(id: string, path: string) {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${id}/files/${path}`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${id}/files/${path}`, {
       method: "DELETE",
-      headers: { "Authorization": "Bearer TEST_TOKEN" }
+      headers: {}
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
+  async searchWorkspace(projectId: string, query: string, include: string) {
+    const response = await authenticatedFetch(
+      `${BACKEND_URL}/api/projects/${projectId}/search`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, include }),
+      },
+    );
+    if (!response.ok) throw new Error(await responseError(response));
+    return response.json();
+  },
+
   // --- Backend (Python FastAPI) ---
-  
+
   async uploadRagDocument(file: File) {
     const formData = new FormData();
     formData.append("documents", file);
-    const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/rag/upload`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${activeProjectId}/rag/upload`, {
       method: "POST",
       body: formData,
-      headers: {
-        "Authorization": "Bearer TEST_TOKEN"
-      }
+      headers: {}
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async listRagDocuments() {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/rag/documents`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${activeProjectId}/rag/documents`, {
       method: "GET",
-      headers: { "Authorization": "Bearer TEST_TOKEN" }
+      headers: {}
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async deleteRagDocument(filename: string) {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/rag/documents/${encodeURIComponent(filename)}`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${activeProjectId}/rag/documents/${encodeURIComponent(filename)}`, {
       method: "DELETE",
-      headers: { "Authorization": "Bearer TEST_TOKEN" }
+      headers: {}
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async searchRag(query: string) {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/rag/search`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${activeProjectId}/rag/search`, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer TEST_TOKEN"
-      },
+        "Content-Type": "application/json" },
       body: JSON.stringify({ query })
     });
     if (!res.ok) throw new Error(await res.text());
@@ -277,12 +301,10 @@ async createProject(
   },
 
   async scrapeUrl(url: string) {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/rag/scrape-url`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${activeProjectId}/rag/scrape-url`, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer TEST_TOKEN"
-      },
+        "Content-Type": "application/json" },
       body: JSON.stringify({ url })
     });
     if (!res.ok) throw new Error(await res.text());
@@ -290,79 +312,71 @@ async createProject(
   },
 
   async scrapeSearch(query: string, numResults: number = 3) {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/rag/scrape-search`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${activeProjectId}/rag/scrape-search`, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer TEST_TOKEN"
-      },
+        "Content-Type": "application/json" },
       body: JSON.stringify({ query, num_results: numResults })
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
-  async askAgent(query: string, conversationHistory?: any[], phase?: string, provider: string = "openrouter", buildOutput: string = "", autoApprove: boolean = false) {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/agent/solve`, {
+  async askAgent(query: string, conversationHistory?: any[], phase?: string, provider: string = "cloud", buildOutput: string = "", autoApprove: boolean = false, agentRunId: string = crypto.randomUUID()) {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${activeProjectId}/agent/solve`, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer TEST_TOKEN"
-      },
+        "Content-Type": "application/json" },
       body: JSON.stringify({
         provider,
         problem: query,
         conversation_history: conversationHistory,
         phase: phase,
         build_output: buildOutput,
-        auto_approve: autoApprove
-      })
+        auto_approve: autoApprove,
+        agent_run_id: agentRunId })
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async getAgentProviders() {
-    const res = await fetch(`${BACKEND_URL}/api/agent/providers`, {
-      headers: { "Authorization": "Bearer TEST_TOKEN" }
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/agent/providers`, {
+      headers: {}
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async getGitInfo() {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/git/info`, {
-      headers: { "Authorization": "Bearer TEST_TOKEN" }
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${activeProjectId}/git/info`, {
+      headers: {}
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async getGitStatus() {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/git/status`, {
-      headers: {
-        "Authorization": "Bearer TEST_TOKEN"
-      }
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${activeProjectId}/git/status`, {
+      headers: {}
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async getGitLog(n: number = 50) {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/git/log?n=${n}`, {
-      headers: { "Authorization": "Bearer TEST_TOKEN" }
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${activeProjectId}/git/log?n=${n}`, {
+      headers: {}
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async commitChanges(message: string) {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/git/commit`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${activeProjectId}/git/commit`, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer TEST_TOKEN"
-      },
+        "Content-Type": "application/json" },
       body: JSON.stringify({ message })
     });
     if (!res.ok) throw new Error(await res.text());
@@ -370,9 +384,9 @@ async createProject(
   },
 
   async checkoutCommit(ref: string) {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/git/checkout`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${activeProjectId}/git/checkout`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": "Bearer TEST_TOKEN" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ref })
     });
     if (!res.ok) throw new Error(await res.text());
@@ -380,26 +394,26 @@ async createProject(
   },
 
   async checkoutHead() {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/git/checkout-head`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${activeProjectId}/git/checkout-head`, {
       method: "POST",
-      headers: { "Authorization": "Bearer TEST_TOKEN" }
+      headers: {}
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async getGitBranches() {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/git/branches`, {
-      headers: { "Authorization": "Bearer TEST_TOKEN" }
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${activeProjectId}/git/branches`, {
+      headers: {}
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async createGitBranch(name: string) {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/git/branches`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${activeProjectId}/git/branches`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": "Bearer TEST_TOKEN" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name })
     });
     if (!res.ok) throw new Error(await res.text());
@@ -412,8 +426,8 @@ async createProject(
     const url = projectId
       ? `${BACKEND_URL}/api/device/status?project_id=${projectId}`
       : `${BACKEND_URL}/api/device/status`;
-    const res = await fetch(url, {
-      headers: { "Authorization": "Bearer TEST_TOKEN" }
+    const res = await authenticatedFetch(url, {
+      headers: {}
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
@@ -425,17 +439,17 @@ async createProject(
     const url = projectId
       ? `${BACKEND_URL}/api/device/detect?project_id=${projectId}`
       : `${BACKEND_URL}/api/device/detect`;
-    const res = await fetch(url, {
-      headers: { "Authorization": "Bearer TEST_TOKEN" }
+    const res = await authenticatedFetch(url, {
+      headers: {}
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async buildProject() {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/build`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${activeProjectId}/build`, {
       method: "POST",
-      headers: { "Authorization": "Bearer TEST_TOKEN" }
+      headers: {}
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
@@ -448,9 +462,9 @@ async createProject(
    * Resolves when the stream closes.
    */
   async streamBuild(onEvent: (event: any) => void, signal?: AbortSignal) {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/build/stream`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${activeProjectId}/build/stream`, {
       method: "POST",
-      headers: { "Authorization": "Bearer TEST_TOKEN" },
+      headers: {},
       signal
     });
     if (!res.ok || !res.body) throw new Error(await res.text());
@@ -482,9 +496,9 @@ async createProject(
   },
 
   async flashProject() {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/flash`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${activeProjectId}/flash`, {
       method: "POST",
-      headers: { "Authorization": "Bearer TEST_TOKEN" }
+      headers: {}
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
@@ -501,25 +515,24 @@ async createProject(
     onEvent: (event: any) => void,
     conversationHistory?: any[],
     phase?: string,
-    provider: string = "openrouter",
+    provider: string = "cloud",
     buildOutput: string = "",
     signal?: AbortSignal,
-    autoApprove: boolean = false
+    autoApprove: boolean = false,
+    agentRunId: string = crypto.randomUUID(),
   ) {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${activeProjectId}/agent/stream`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${activeProjectId}/agent/stream`, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer TEST_TOKEN"
-      },
+        "Content-Type": "application/json" },
       body: JSON.stringify({
         provider,
         problem: query,
         conversation_history: conversationHistory,
         phase: phase,
         build_output: buildOutput,
-        auto_approve: autoApprove
-      }),
+        auto_approve: autoApprove,
+        agent_run_id: agentRunId }),
       signal
     });
     if (!res.ok || !res.body) throw new Error(await res.text());
@@ -557,33 +570,33 @@ async createProject(
     const params = new URLSearchParams();
     if (search) params.set("search", search);
     if (category) params.set("category", category);
-    const res = await fetch(`${BACKEND_URL}/api/libraries?${params}`, {
-      headers: { "Authorization": "Bearer TEST_TOKEN" }
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/libraries?${params}`, {
+      headers: {}
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async getLibraryCategories() {
-    const res = await fetch(`${BACKEND_URL}/api/libraries/categories`, {
-      headers: { "Authorization": "Bearer TEST_TOKEN" }
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/libraries/categories`, {
+      headers: {}
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async getInstalledLibraries(projectId: string) {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/libraries`, {
-      headers: { "Authorization": "Bearer TEST_TOKEN" }
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/libraries`, {
+      headers: {}
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async installLibrary(projectId: string, libraryId?: string, gitUrl?: string) {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/libraries/install`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/libraries/install`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": "Bearer TEST_TOKEN" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ library_id: libraryId ?? null, git_url: gitUrl ?? null })
     });
     if (!res.ok) throw new Error(await res.text());
@@ -591,9 +604,9 @@ async createProject(
   },
 
   async uninstallLibrary(projectId: string, libraryId: string) {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/libraries/${encodeURIComponent(libraryId)}`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/libraries/${encodeURIComponent(libraryId)}`, {
       method: "DELETE",
-      headers: { "Authorization": "Bearer TEST_TOKEN" }
+      headers: {}
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
@@ -602,16 +615,16 @@ async createProject(
   // --- Component research / resolution ---
 
   async getComponentSchema() {
-    const res = await fetch(`${BACKEND_URL}/api/components/schema`, {
-      headers: { "Authorization": "Bearer TEST_TOKEN" }
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/components/schema`, {
+      headers: {}
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async getComponentContext(projectId: string) {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/components/context`, {
-      headers: { "Authorization": "Bearer TEST_TOKEN" }
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/components/context`, {
+      headers: {}
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
@@ -621,11 +634,11 @@ async createProject(
     const params = new URLSearchParams();
     if (installLibraries) params.set("install_libraries", "true");
     const query = params.toString();
-    const res = await fetch(
+    const res = await authenticatedFetch(
       `${BACKEND_URL}/api/projects/${projectId}/components/resolve${query ? `?${query}` : ""}`,
       {
         method: "POST",
-        headers: { "Authorization": "Bearer TEST_TOKEN" }
+        headers: {}
       }
     );
     if (!res.ok) throw new Error(await res.text());
@@ -635,17 +648,17 @@ async createProject(
   // --- Research / ideation flow ---
 
   async getResearchState(projectId: string) {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/research`, {
-      headers: { "Authorization": "Bearer TEST_TOKEN" }
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/research`, {
+      headers: {}
     });
     if (!res.ok) throw new Error(await responseError(res));
     return res.json();
   },
 
   async createResearchContext(projectId: string, title = "") {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/research/contexts`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/research/contexts`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": "Bearer TEST_TOKEN" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title })
     });
     if (!res.ok) throw new Error(await responseError(res));
@@ -653,27 +666,27 @@ async createProject(
   },
 
   async activateResearchContext(projectId: string, contextId: string) {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/research/contexts/${contextId}/activate`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/research/contexts/${contextId}/activate`, {
       method: "POST",
-      headers: { "Authorization": "Bearer TEST_TOKEN" }
+      headers: {}
     });
     if (!res.ok) throw new Error(await responseError(res));
     return res.json();
   },
 
   async deleteResearchContext(projectId: string, contextId: string) {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/research/contexts/${contextId}`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/research/contexts/${contextId}`, {
       method: "DELETE",
-      headers: { "Authorization": "Bearer TEST_TOKEN" }
+      headers: {}
     });
     if (!res.ok) throw new Error(await responseError(res));
     return res.json();
   },
 
-  async ideateResearch(projectId: string, idea: string, provider: string = "deepseek", contextId?: string) {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/research/ideate`, {
+  async ideateResearch(projectId: string, idea: string, provider: string = "cloud", contextId?: string) {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/research/ideate`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": "Bearer TEST_TOKEN" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ idea, provider, context_id: contextId })
     });
     if (!res.ok) throw new Error(await responseError(res));
@@ -689,9 +702,9 @@ async createProject(
     onEvent: (event: any) => void,
     signal?: AbortSignal
   ) {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/research/ideate/stream`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/research/ideate/stream`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": "Bearer TEST_TOKEN" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ idea, provider, context_id: contextId }),
       signal
     });
@@ -720,9 +733,9 @@ async createProject(
   },
 
   async selectResearchComponents(projectId: string, selectedComponentIds: string[], notes = "", installLibraries = false, contextId?: string) {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/research/select`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/research/select`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": "Bearer TEST_TOKEN" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ selected_component_ids: selectedComponentIds, notes, install_libraries: installLibraries, context_id: contextId })
     });
     if (!res.ok) throw new Error(await responseError(res));
@@ -738,9 +751,9 @@ async createProject(
     const timeoutMs = expectedStage === "final_review" ? 300_000 : 45_000;
     const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/research/advance`, {
+      const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/research/advance`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": "Bearer TEST_TOKEN" },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action, selected_component_ids: selectedComponentIds, notes, message, provider, expected_stage: expectedStage }),
         signal: controller.signal
       });
@@ -770,18 +783,16 @@ async createProject(
     onEvent: (event: any) => void,
     signal?: AbortSignal
   ) {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/research/verify/stream`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/research/verify/stream`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": "Bearer TEST_TOKEN" },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         action: "confirm",
         selected_component_ids: selectedComponentIds,
         notes,
         provider,
-        expected_stage: expectedStage,
-      }),
-      signal,
-    });
+        expected_stage: expectedStage }),
+      signal });
     if (!res.ok || !res.body) throw new Error(await responseError(res));
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -808,27 +819,27 @@ async createProject(
   async prepareResearchPhase3(projectId: string, installLibraries = true) {
     const params = new URLSearchParams();
     params.set("install_libraries", installLibraries ? "true" : "false");
-    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/research/phase3?${params}`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/research/phase3?${params}`, {
       method: "POST",
-      headers: { "Authorization": "Bearer TEST_TOKEN" }
+      headers: {}
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async condenseResearch(projectId: string) {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/research/condense`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/research/condense`, {
       method: "POST",
-      headers: { "Authorization": "Bearer TEST_TOKEN" }
+      headers: {}
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async generateResearchReadme(projectId: string) {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/research/readme`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/research/readme`, {
       method: "POST",
-      headers: { "Authorization": "Bearer TEST_TOKEN" }
+      headers: {}
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
@@ -841,16 +852,13 @@ async createProject(
     throw new Error("No STM32 board selected");
   }
 
-  const res = await fetch(
+  const res = await authenticatedFetch(
     `${BACKEND_URL}/api/projects/${projectId}/debug/start`,
     {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer TEST_TOKEN",
-      },
-      body: JSON.stringify({ board }),
-    }
+        "Content-Type": "application/json" },
+      body: JSON.stringify({ board }) }
   );
 
   if (!res.ok) {
@@ -861,101 +869,99 @@ async createProject(
 },
 
   async stopDebug(projectId: string) {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/debug/stop`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/debug/stop`, {
       method: "POST",
-      headers: { "Authorization": "Bearer TEST_TOKEN" },
-    });
+      headers: {} });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   /** Open an SSE stream of debug events. Call `controller.abort()` to close. */
-  streamDebug(
+  async streamDebug(
     projectId: string,
     onEvent: (event: Record<string, unknown>) => void,
     signal: AbortSignal,
-  ): EventSource | null {
-    // Use EventSource for SSE; it auto-reconnects on network drops
+  ): Promise<void> {
     const url = `${BACKEND_URL}/api/projects/${projectId}/debug/stream`;
-    try {
-      // EventSource does not support custom headers, so we embed the token
-      // via a query param that the backend accepts in dev mode.
-      const es = new EventSource(url);
-      es.onmessage = (e) => {
+    const response = await authenticatedFetch(url, { signal });
+    if (!response.ok || !response.body) {
+      throw new Error(await responseError(response));
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (!signal.aborted) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let separator: number;
+      while ((separator = buffer.indexOf("\n\n")) !== -1) {
+        const frame = buffer.slice(0, separator);
+        buffer = buffer.slice(separator + 2);
+        const dataLine = frame.split("\n").find((line) => line.startsWith("data:"));
+        if (!dataLine) continue;
         try {
-          onEvent(JSON.parse(e.data));
+          onEvent(JSON.parse(dataLine.slice(5).trim()));
         } catch {
-          // ignore parse errors
+          // Ignore malformed diagnostic events and continue the stream.
         }
-      };
-      es.onerror = () => es.close();
-      signal.addEventListener("abort", () => es.close());
-      return es;
-    } catch {
-      return null;
+      }
     }
   },
 
   async setBreakpoint(projectId: string, file: string, line: number) {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/debug/breakpoint`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/debug/breakpoint`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": "Bearer TEST_TOKEN" },
-      body: JSON.stringify({ file, line }),
-    });
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file, line }) });
     if (!res.ok) throw new Error(await res.text());
     return res.json() as Promise<{ id: number; file: string; line: number; enabled: boolean }>;
   },
 
   async removeBreakpoint(projectId: string, bpId: number) {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/debug/breakpoint/${bpId}`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/debug/breakpoint/${bpId}`, {
       method: "DELETE",
-      headers: { "Authorization": "Bearer TEST_TOKEN" },
-    });
+      headers: {} });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async debugContinue(projectId: string) {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/debug/continue`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/debug/continue`, {
       method: "POST",
-      headers: { "Authorization": "Bearer TEST_TOKEN" },
-    });
+      headers: {} });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async debugStepOver(projectId: string) {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/debug/step-over`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/debug/step-over`, {
       method: "POST",
-      headers: { "Authorization": "Bearer TEST_TOKEN" },
-    });
+      headers: {} });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async debugStepInto(projectId: string) {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/debug/step-into`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/debug/step-into`, {
       method: "POST",
-      headers: { "Authorization": "Bearer TEST_TOKEN" },
-    });
+      headers: {} });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async debugStepOut(projectId: string) {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/debug/step-out`, {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/debug/step-out`, {
       method: "POST",
-      headers: { "Authorization": "Bearer TEST_TOKEN" },
-    });
+      headers: {} });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async getDebugSnapshot(projectId: string) {
-    const res = await fetch(`${BACKEND_URL}/api/projects/${projectId}/debug/snapshot`, {
-      headers: { "Authorization": "Bearer TEST_TOKEN" },
-    });
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/debug/snapshot`, {
+      headers: {} });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
-  },
-};
+  } };

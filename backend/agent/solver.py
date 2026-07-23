@@ -9,6 +9,7 @@ conversational board-aware copilot that:
 
 from __future__ import annotations
 
+import copy
 from functools import partial
 
 import llm
@@ -556,6 +557,8 @@ async def run_agent_phase(
     auto_approve: bool = False,
     on_event=None,
     device=None,
+    agent_run_id: str | None = None,
+    access_token: str | None = None,
 ) -> tuple[AgentTrace, dict]:
     """Run the board-aware firmware copilot. Returns (trace, mutated-files).
 
@@ -567,6 +570,22 @@ async def run_agent_phase(
     if device is None:
         device = registry.default()
     entry_path, entry_language = _entrypoint_for(device)
+
+    from services.source_safety import filter_project_files, merge_agent_file_changes
+
+    original_files = copy.deepcopy(files)
+    if not bool(llm.PROVIDERS.get(provider, {}).get("local")):
+        safe_files, context_manifest = filter_project_files(files)
+    else:
+        safe_files = copy.deepcopy(files)
+        context_manifest = {
+            "included": sorted(files),
+            "excluded": [],
+            "redacted": [],
+        }
+    files = safe_files
+    if on_event is not None:
+        await on_event({"type": "context_manifest", **context_manifest})
 
     toolbox = CodingToolbox(
         project_name=project_name,
@@ -661,13 +680,21 @@ async def run_agent_phase(
         user_prompt=user_prompt,
         messages=messages,
         toolbox=toolbox,
-        complete_fn=partial(llm.complete, provider),
+        complete_fn=partial(
+            llm.complete,
+            provider,
+            mode="agent",
+            project_id=project_id,
+            agent_run_id=agent_run_id,
+            access_token=access_token,
+        ),
         on_event=on_event,
         provider=provider,
         model=llm.model_for_provider(provider),
         context_window=llm.context_window_for_provider(provider),
     )
-    return trace, toolbox.files
+    trace.context_manifest = context_manifest
+    return trace, merge_agent_file_changes(original_files, safe_files, toolbox.files)
 
 
 # ---------------------------------------------------------------------------

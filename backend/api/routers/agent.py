@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -19,7 +20,11 @@ from sqlmodel import Session, select
 import llm
 from agent import AgentTrace, run_agent_phase
 from core.config import now_utc
-from core.security import get_current_user_id
+from core.security import (
+    get_current_user_id,
+    request_access_token,
+    set_cloud_request_context,
+)
 from db.models import CodeFileRow, ProjectRow
 from db.session import db_session
 from schemas import (
@@ -158,6 +163,8 @@ async def agent_solve(project_id: str, payload: AgentRequest, user_id: str = Dep
 
     prior_history = _strip_duplicate_turn(payload.conversation_history, payload.problem)
 
+    agent_run_id = str(payload.agent_run_id or uuid.uuid4())
+    set_cloud_request_context(agent_run_id=agent_run_id, project_id=project_id)
     try:
         agent_trace, new_files = await run_agent_phase(
             provider=payload.provider,
@@ -172,6 +179,8 @@ async def agent_solve(project_id: str, payload: AgentRequest, user_id: str = Dep
             build_output=payload.build_output,
             auto_approve=payload.auto_approve,
             device=device,
+            agent_run_id=agent_run_id,
+            access_token=request_access_token(),
         )
     except llm.LLMError as exc:
         raise HTTPException(status_code=502, detail=f"LLM error: {exc}")
@@ -192,6 +201,7 @@ async def agent_solve(project_id: str, payload: AgentRequest, user_id: str = Dep
             options=getattr(t, "options", []),
             messages=getattr(t, "messages", []),
             context_usage=getattr(t, "context_usage", {}),
+            context_manifest=getattr(t, "context_manifest", {}),
         )
 
     return AgentRunResult(
@@ -240,6 +250,9 @@ async def agent_stream(project_id: str, payload: AgentRequest, user_id: str = De
 
     prior_history = _strip_duplicate_turn(payload.conversation_history, payload.problem)
 
+    agent_run_id = str(payload.agent_run_id or uuid.uuid4())
+    set_cloud_request_context(agent_run_id=agent_run_id, project_id=project_id)
+    access_token = request_access_token()
     queue: asyncio.Queue = asyncio.Queue()
 
     async def on_event(event: dict) -> None:
@@ -266,6 +279,8 @@ async def agent_stream(project_id: str, payload: AgentRequest, user_id: str = De
                 auto_approve=payload.auto_approve,
                 on_event=on_event,
                 device=device,
+                agent_run_id=agent_run_id,
+                access_token=access_token,
             )
             # Stage, don't commit: the agent's file changes are surfaced as
             # proposals for the user to Allow/Reject in the chat. We persist
@@ -280,6 +295,8 @@ async def agent_stream(project_id: str, payload: AgentRequest, user_id: str = De
                 "options": getattr(agent_trace, "options", []),
                 "confirm_action": getattr(agent_trace, "confirm_action", ""),
                 "context_usage": getattr(agent_trace, "context_usage", {}),
+                "context_manifest": getattr(agent_trace, "context_manifest", {}),
+                "agent_run_id": agent_run_id,
                 "proposals": proposals,
             })
         except llm.LLMError as exc:

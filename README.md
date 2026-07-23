@@ -31,6 +31,18 @@ cd backend
 uv sync
 ```
 
+Copy the public authentication configuration:
+
+```bash
+cp frontend/.env.example frontend/.env.local
+cp backend/.env.example backend/.env
+```
+
+Set the same Supabase project URL and anon key in both files. The frontend
+performs OAuth and sends only the user's access token to the local backend.
+Paid LLM and search provider keys belong only in the separately deployed
+private cloud proxy; they are not supported by this repository's app config.
+
 ### 3. Development Servers
 Start the backend and frontend dev servers together from the repo root:
 ```bash
@@ -90,7 +102,27 @@ $env:RELEASE_VERSION="v0.1.0"; node scripts/release.mjs
 
 The archive contains the backend source and built `frontend/dist`, excluding
 local env files, virtual environments, Node dependencies, and generated build
-artifacts.
+artifacts. Packaging also fails if a provider/service-role key identifier,
+JWT-like credential, or provider-key-like value is found in the staged bundle.
+
+Use an isolated output directory for a non-destructive packaging check:
+
+```bash
+RELEASE_OUTPUT_DIR=/tmp/hardcoreai-release-check \
+RELEASE_VERSION=verification \
+node scripts/release.mjs --skip-build
+```
+
+## Cloud integration
+
+- Configure a Supabase OAuth provider and allow the exact
+  `VITE_SUPABASE_REDIRECT_URL` used by the packaged app.
+- Apply `supabase/migrations/20260723010000_complete_application_rls.sql`.
+- Set `HARDCOREAI_PROXY_URL` to the private proxy deployment. The checked-in
+  default points at the current production URL.
+- The app exposes one `HardcoreAI Cloud` selection. Model names, provider keys,
+  output limits, and system policy remain server-owned.
+- llama.cpp and Ollama remain direct, local-only paths.
 
 ### GitHub Releases
 The GitHub Actions workflow at `.github/workflows/release.yml` publishes the

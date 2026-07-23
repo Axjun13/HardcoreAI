@@ -93,6 +93,7 @@ export interface ChatMessage {
   thinkingCollapsed?: boolean; // user/auto collapse state for the think block
   streaming?: boolean;       // true while the SSE run is in flight
   proposals?: FileProposal[]; // staged file changes awaiting Allow/Reject
+  agentRunId?: string;
 }
 
 export interface AgentContextStatus {
@@ -440,11 +441,11 @@ const getInitialSelectedProvider = () => {
   if (!isBrowser) return "deepseek";
   try {
     const provider = localStorage.getItem("selectedProvider");
-    return provider && ["gemini", "deepseek", "sarvam"].includes(provider)
+    return provider && ["cloud"].includes(provider)
       ? provider
-      : "deepseek";
+      : "cloud";
   } catch {
-    return "deepseek";
+    return "cloud";
   }
 };
 
@@ -1769,7 +1770,7 @@ export const actions = {
       let currentPhase: string | undefined = undefined;
       let buildOutput = "";
 
-      let selectedProvider = "deepseek";
+      let selectedProvider = "cloud";
       let autoApprove = false;
       workspaceStore.update(s => {
         history = s.aiMessages.map(m => ({
@@ -1783,7 +1784,7 @@ export const actions = {
         }
 
         // Read the currently selected LLM provider
-        selectedProvider = (s as any).selectedProvider || "deepseek";
+        selectedProvider = (s as any).selectedProvider || "cloud";
         autoApprove = (s as any).autoApproveAgent || false;
         buildOutput = s.buildLogs.join("\n").slice(-20000);
 
@@ -1836,6 +1837,7 @@ export const actions = {
       // --- Real agent run over SSE ---
       // Insert a live placeholder AI message that we mutate as events arrive.
       const aiMsgId = Math.random().toString();
+      const agentRunId = crypto.randomUUID();
       workspaceStore.update(s => ({
         ...s,
         aiWaiting: false,            // dots handled by the streaming placeholder now
@@ -1845,6 +1847,7 @@ export const actions = {
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           steps: [], thinking: "", thinkingDone: false, thinkingCollapsed: false,
           streaming: true, submitted: false,
+          agentRunId,
         } as ChatMessage],
       }));
 
@@ -1873,6 +1876,21 @@ export const actions = {
               agentContextStatus: ev as AgentContextStatus,
             }));
             break;
+          case "context_manifest": {
+            const included = Array.isArray(ev.included) ? ev.included : [];
+            const excluded = Array.isArray(ev.excluded) ? ev.excluded : [];
+            const redacted = Array.isArray(ev.redacted) ? ev.redacted : [];
+            patchAiMsg(m => {
+              (m.steps as AgentStep[]).push({
+                kind: "note",
+                text:
+                  `Cloud context: ${included.length} project file(s) available` +
+                  (excluded.length ? `; ${excluded.length} sensitive/build file(s) excluded` : "") +
+                  (redacted.length ? `; secrets redacted in ${redacted.join(", ")}` : ""),
+              });
+            });
+            break;
+          }
           case "think":
             patchAiMsg(m => {
               m.thinking = ev.text;
@@ -2015,7 +2033,7 @@ export const actions = {
             }
             break;
         }
-      }, history, currentPhase, selectedProvider, buildOutput, agentAbortController.signal, autoApprove);
+      }, history, currentPhase, selectedProvider, buildOutput, agentAbortController.signal, autoApprove, agentRunId);
 
       // Do not finalize/persist the response while its auto-approved file writes
       // are still in flight. This makes the toggle reliably cover every proposal

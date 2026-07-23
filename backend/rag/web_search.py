@@ -7,13 +7,11 @@ server, no port, no Docker.
 
 Two backends, selected automatically:
 
-  * Brave Search API — used when ``BRAVE_API_KEY`` is set. A licensed,
-    key-based API whose ToS permits commercial use. This is the recommended
-    path for a commercial deployment.
+  * HardcoreAI's authenticated cloud proxy. The distributed application never
+    receives or reads the paid Brave API key.
   * DuckDuckGo via the ``ddgs`` library — the zero-config default when no key
     is present. Works with no signup, but scrapes DuckDuckGo (against its ToS)
-    and is rate-limited, so it is intended for dev/MVP use. Set BRAVE_API_KEY
-    before a commercial launch.
+    and is rate-limited, so it is intended for local development only.
 
 Public surface::
 
@@ -29,43 +27,57 @@ contract the previous SearXNG-based implementation exposed).
 from __future__ import annotations
 
 import os
+import uuid
 
-# Licensed search API key (Brave). When set, we use Brave instead of ddgs.
-BRAVE_API_KEY = os.getenv("BRAVE_API_KEY", "").strip()
-BRAVE_ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
-BRAVE_IMAGES_ENDPOINT = "https://api.search.brave.com/res/v1/images/search"
+from core.security import cloud_request_context, request_access_token
+
+CLOUD_PROXY_URL = os.getenv(
+    "HARDCOREAI_PROXY_URL",
+    "https://hardcoreai-proxy-server.vercel.app",
+).rstrip("/")
 
 
 def _err(msg: str) -> list[dict]:
     return [{"error": msg, "title": "", "url": "", "snippet": ""}]
 
 
-def _search_brave(query: str, num_results: int) -> list[dict]:
-    """Query the Brave Search API (licensed, commercial-safe)."""
+def _search_cloud(query: str, num_results: int) -> list[dict]:
+    """Query paid search through the authenticated gateway."""
     import httpx
 
-    headers = {
-        "Accept": "application/json",
-        "X-Subscription-Token": BRAVE_API_KEY,
+    access_token = request_access_token()
+    if not access_token:
+        return _err("Sign in again before using cloud search.")
+    agent_run_id, project_id = cloud_request_context()
+    payload = {
+        "query": query,
+        "count": max(1, min(int(num_results), 10)),
+        "agentRunId": agent_run_id or str(uuid.uuid4()),
+        **({"projectId": project_id} if project_id else {}),
     }
-    params = {"q": query, "count": max(1, min(int(num_results), 20))}
     try:
         with httpx.Client(timeout=15.0) as client:
-            resp = client.get(BRAVE_ENDPOINT, headers=headers, params=params)
+            resp = client.post(
+                f"{CLOUD_PROXY_URL}/api/search",
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
             resp.raise_for_status()
             data = resp.json()
     except Exception as exc:
-        return _err(f"Brave Search API request failed: {exc}")
+        return _err(f"Cloud search request failed: {exc}")
 
-    web = (data.get("web") or {}).get("results", []) or []
-    results = []
-    for item in web[:num_results]:
-        results.append({
+    return [
+        {
             "title": item.get("title", ""),
             "url": item.get("url", ""),
             "snippet": item.get("description", ""),
-        })
-    return results
+        }
+        for item in (data.get("results") or [])[:num_results]
+    ]
 
 
 def _search_ddg(query: str, num_results: int) -> list[dict]:
@@ -75,8 +87,8 @@ def _search_ddg(query: str, num_results: int) -> list[dict]:
     except ImportError:
         return _err(
             "Web search is not available: the 'ddgs' package is not installed "
-            "and no BRAVE_API_KEY is set. Install ddgs (`uv add ddgs`) or set "
-            "BRAVE_API_KEY in the backend .env."
+            "and no authenticated cloud session is available. Install ddgs "
+            "(`uv add ddgs`) for local development."
         )
 
     try:
@@ -98,14 +110,14 @@ def _search_ddg(query: str, num_results: int) -> list[dict]:
 def search_web(query: str, num_results: int = 5) -> list[dict]:
     """Run an in-process web search and return result metadata.
 
-    Uses Brave when ``BRAVE_API_KEY`` is set, otherwise falls back to the
-    key-less DuckDuckGo (``ddgs``) backend. Never raises.
+    Uses the paid cloud proxy for authenticated requests, otherwise falls back
+    to the key-less DuckDuckGo development backend. Never raises.
     """
     query = (query or "").strip()
     if not query:
         return _err("Empty search query.")
-    if BRAVE_API_KEY:
-        return _search_brave(query, num_results)
+    if request_access_token():
+        return _search_cloud(query, num_results)
     return _search_ddg(query, num_results)
 
 
@@ -120,33 +132,6 @@ def search_images(query: str, num_results: int = 5) -> list[dict]:
     if not query:
         return _err("Empty image search query.")
     limit = max(1, min(int(num_results), 20))
-    if BRAVE_API_KEY:
-        import httpx
-
-        try:
-            with httpx.Client(timeout=15.0) as client:
-                response = client.get(
-                    BRAVE_IMAGES_ENDPOINT,
-                    headers={
-                        "Accept": "application/json",
-                        "X-Subscription-Token": BRAVE_API_KEY,
-                    },
-                    params={"q": query, "count": limit, "safesearch": "strict"},
-                )
-                response.raise_for_status()
-                payload = response.json()
-        except Exception as exc:
-            return _err(f"Brave Image Search API request failed: {exc}")
-        return [
-            {
-                "title": item.get("title", ""),
-                "url": item.get("url", "") or item.get("source", ""),
-                "image": (item.get("properties") or {}).get("url", "")
-                or (item.get("thumbnail") or {}).get("src", ""),
-            }
-            for item in (payload.get("results") or [])[:limit]
-        ]
-
     try:
         from ddgs import DDGS
         with DDGS() as ddgs:

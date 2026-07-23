@@ -45,7 +45,7 @@
   onDestroy(() => window.clearInterval(phase3Clock));
 
   $: projectId = $workspaceStore.activeProjectId;
-  $: provider = $workspaceStore.selectedProvider || "deepseek";
+  $: provider = $workspaceStore.selectedProvider || "cloud";
   $: contexts = state?.contexts || [];
   $: activeContext =
     contexts.find((item: any) => item.id === activeContextId) ||

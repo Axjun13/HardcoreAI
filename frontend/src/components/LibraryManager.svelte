@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { authenticatedFetch } from "../auth";
   import { workspaceStore } from "../store";
   import {
     Search,
@@ -35,7 +36,9 @@
   }
 
   // ── Constants ─────────────────────────────────────────────────────────────
-  const BASE = "http://127.0.0.1:62018";
+  const BASE = import.meta.env.DEV
+    ? "http://127.0.0.1:62018"
+    : window.location.origin;
 
   // ── Reactive project id ───────────────────────────────────────────────────
   $: projectId = $workspaceStore.activeProjectId;
@@ -116,7 +119,7 @@
         // ── Live PlatformIO registry search ──────────────────────────────
         isRegistrySearch = true;
         const params = new URLSearchParams({ query: q });
-        const res = await fetch(`${BASE}/api/libraries/search?${params}`, {
+        const res = await authenticatedFetch(`${BASE}/api/libraries/search?${params}`, {
           cache: "no-store",
         });
         if (!res.ok) throw new Error(`Registry HTTP ${res.status}`);
@@ -137,7 +140,7 @@
         const params = new URLSearchParams();
         if (librarySelectedCategory)
           params.set("category", librarySelectedCategory);
-        const res = await fetch(`${BASE}/api/libraries?${params}`, {
+        const res = await authenticatedFetch(`${BASE}/api/libraries?${params}`, {
           cache: "no-store",
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -152,7 +155,7 @@
 
   async function fetchCategories() {
     try {
-      const res = await fetch(`${BASE}/api/libraries/categories`);
+      const res = await authenticatedFetch(`${BASE}/api/libraries/categories`);
       if (!res.ok) return;
       libraryCategories = await res.json();
     } catch {}
@@ -163,7 +166,7 @@
     installedLoading = true;
     installedError = "";
     try {
-      const res = await fetch(`${BASE}/api/projects/${projectId}/libraries`, {
+      const res = await authenticatedFetch(`${BASE}/api/projects/${projectId}/libraries`, {
         cache: "no-store",
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -211,7 +214,7 @@
     }
     opStatus = { ...opStatus, [id]: "installing" };
     try {
-      const res = await fetch(
+      const res = await authenticatedFetch(
         `${BASE}/api/projects/${projectId}/libraries/install`,
         {
           method: "POST",
@@ -241,7 +244,7 @@
     if (!projectId) return;
     opStatus = { ...opStatus, [id]: "removing" };
     try {
-      const res = await fetch(
+      const res = await authenticatedFetch(
         `${BASE}/api/projects/${projectId}/libraries/${id}`,
         {
           method: "DELETE",

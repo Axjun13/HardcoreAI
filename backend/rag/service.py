@@ -19,9 +19,8 @@ implementation so callers (api/routers/rag.py, agent/tools.py) need no changes:
     === LLM-READY PROMPT CONTEXT WINDOW ===
 
 Web-scraping extensions (search_web / ingest_url):
-  - search_web(query)  → in-process web search (see rag/web_search.py): Brave
-    API when BRAVE_API_KEY is set, else the key-less DuckDuckGo backend. No
-    external server or port.
+  - search_web(query)  → paid search through the authenticated cloud proxy,
+    with key-less DuckDuckGo retained only as a local development fallback.
   - ingest_url(url)    → fetches the page with httpx, strips HTML, saves as a
     ``web__<slug>.txt`` file in data_dir, then re-indexes.
 """
@@ -284,8 +283,8 @@ class RAGService:
     def search_web(self, query: str, num_results: int = 5) -> list[dict]:
         """Run an in-process web search and return result metadata.
 
-        Delegates to ``rag.web_search.search_web`` (Brave API when
-        ``BRAVE_API_KEY`` is set, otherwise the key-less DuckDuckGo backend).
+        Delegates to ``rag.web_search.search_web`` (authenticated cloud proxy,
+        or the key-less DuckDuckGo local-development fallback).
 
         Returns a list of dicts::
 

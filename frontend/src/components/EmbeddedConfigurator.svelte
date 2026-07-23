@@ -1,5 +1,6 @@
 <script lang="ts">
   import { workspaceStore, actions, type PinConfig } from "../store";
+  import { authenticatedFetch } from "../auth";
   import "./EmbeddedConfigurator.css";
   import {
     X,
@@ -341,7 +342,8 @@
       archKind === "xtensa" ||
       archKind === "arm-samd" ||
       archKind === "arduino-generic");
-  $: isEspIdfFramework = archKind === "xtensa" && boardFrameworks.includes("espidf");
+  $: isEspIdfFramework =
+    archKind === "xtensa" && boardFrameworks.includes("espidf");
   $: projectName = `blinky-${(selectedBoard || "board").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`;
   $: linkerFile = `${boardModel.replace(/[^a-zA-Z0-9]+/g, "") || "STM32"}_FLASH.ld`;
   $: halVersion = boardMeta?.family
@@ -353,34 +355,33 @@
   // there); the other three architectures all build through the Arduino
   // framework, but their toolchain/upload/core details differ from each
   // other and from STM32, not just from AVR.
-  $: archProjectRows =
-    isEspIdfFramework
-      ? [
-          {
-            label: "Target Framework",
-            value: "ESP-IDF via PlatformIO",
-          },
-          {
-            label: "Target Toolchain compiler",
-            value:
-              boardMeta?.core === "riscv32"
-                ? "riscv32-esp-elf-gcc"
-                : "xtensa-esp32-elf-gcc",
-          },
-          {
-            label: "Upload method",
-            value: "esptool serial bootloader",
-          },
-          {
-            label: "Entrypoint",
-            value: "app_main()",
-          },
-          {
-            label: "Runtime",
-            value: "FreeRTOS + ESP-IDF drivers",
-          },
-        ]
-      : archKind === "avr"
+  $: archProjectRows = isEspIdfFramework
+    ? [
+        {
+          label: "Target Framework",
+          value: "ESP-IDF via PlatformIO",
+        },
+        {
+          label: "Target Toolchain compiler",
+          value:
+            boardMeta?.core === "riscv32"
+              ? "riscv32-esp-elf-gcc"
+              : "xtensa-esp32-elf-gcc",
+        },
+        {
+          label: "Upload method",
+          value: "esptool serial bootloader",
+        },
+        {
+          label: "Entrypoint",
+          value: "app_main()",
+        },
+        {
+          label: "Runtime",
+          value: "FreeRTOS + ESP-IDF drivers",
+        },
+      ]
+    : archKind === "avr"
       ? [
           { label: "Target Toolchain compiler", value: "avr-gcc" },
           {
@@ -455,7 +456,8 @@
                 },
                 {
                   label: "Upload method",
-                  value: boardMeta?.upload_protocol ?? "PlatformIO board default",
+                  value:
+                    boardMeta?.upload_protocol ?? "PlatformIO board default",
                 },
                 {
                   label: "Processor Heap Limit",
@@ -470,16 +472,19 @@
                   value: "Resolved by selected PlatformIO platform",
                 },
               ]
-          : [
-              {
-                label: "Target Toolchain compiler",
-                value: "arm-none-eabi-gcc",
-              },
-              { label: "Microcontroller Linker File", value: linkerFile },
-              { label: "Processor Heap Limit", value: "0x200" },
-              { label: "Processor Stack Limit", value: "0x400" },
-              { label: "STM32Cube HAL Version", value: `${halVersion} v1.8.6` },
-            ];
+            : [
+                {
+                  label: "Target Toolchain compiler",
+                  value: "arm-none-eabi-gcc",
+                },
+                { label: "Microcontroller Linker File", value: linkerFile },
+                { label: "Processor Heap Limit", value: "0x200" },
+                { label: "Processor Stack Limit", value: "0x400" },
+                {
+                  label: "STM32Cube HAL Version",
+                  value: `${halVersion} v1.8.6`,
+                },
+              ];
 
   // Oscillator + PLL setup used by each family's SystemClock_Config()
   // template in hal_codegen.py. Mirrors the backend's per-family choices so
@@ -716,11 +721,10 @@
     generateSuccess = false;
 
     try {
-      const res = await fetch("/api/generate-hal", {
+      const res = await authenticatedFetch("/api/generate-hal", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: "Bearer TEST_TOKEN",
         },
         body: JSON.stringify({
           project_id: projectId,
@@ -985,18 +989,17 @@
             No RCC/PLL tree for {boardDisplayLabel}
           </div>
           <p>
-            {isEspIdfFramework ? "ESP-IDF" : "The Arduino framework"} configures
-            the system clock for you at startup — there's no
-            SystemClock_Config()-style RCC/PLL tree to expose here, the way
-            there is for STM32Cube HAL boards. This board runs at a
-            fixed <strong>{specs.speed}</strong> core clock set by the {archKind ===
-            "avr"
+            {isEspIdfFramework ? "ESP-IDF" : "The Arduino framework"} configures the
+            system clock for you at startup — there's no SystemClock_Config()-style
+            RCC/PLL tree to expose here, the way there is for STM32Cube HAL boards.
+            This board runs at a fixed <strong>{specs.speed}</strong> core clock
+            set by the {archKind === "avr"
               ? "AVR"
               : archKind === "xtensa"
                 ? "Espressif"
                 : archKind === "arm-samd"
                   ? "SAMD"
-                  : boardMeta?.pio_platform ?? "Arduino"}
+                  : (boardMeta?.pio_platform ?? "Arduino")}
             board definition.
           </p>
         </div>

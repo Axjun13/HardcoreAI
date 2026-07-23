@@ -21,7 +21,10 @@ than nested JSON, and it costs fewer tokens.
 
 from __future__ import annotations
 
+import asyncio
 import inspect
+import os
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 import re
@@ -433,6 +436,7 @@ class AgentTrace:
     options: list[str] = field(default_factory=list)
     messages: list[dict] = field(default_factory=list)
     context_usage: dict[str, Any] = field(default_factory=dict)
+    context_manifest: dict[str, list[str]] = field(default_factory=dict)
     # Set when the run paused on a build/flash approval prompt ("build" | "flash").
     confirm_action: str = ""
 
@@ -458,6 +462,9 @@ async def run_phase(
     model: str = "",
     context_window: int = 0,
     context_warning_percent: float = LOW_CONTEXT_PERCENT,
+    max_steps: int | None = None,
+    max_retries: int | None = None,
+    max_duration_seconds: float | None = None,
 ) -> AgentTrace:
     """Drive one isolated THINK/CALL phase to completion.
 
@@ -525,6 +532,21 @@ async def run_phase(
     total_input_tokens = 0
     total_output_tokens = 0
     step = 0
+    retry_count = 0
+    max_steps = max_steps or int(os.environ.get("AGENT_MAX_STEPS", "24"))
+    max_retries = max_retries or int(os.environ.get("AGENT_MAX_RETRIES", "4"))
+    max_duration_seconds = max_duration_seconds or float(
+        os.environ.get("AGENT_MAX_DURATION_SECONDS", "600")
+    )
+    llm_timeout_seconds = float(os.environ.get("AGENT_LLM_TIMEOUT_SECONDS", "150"))
+    started_at = time.monotonic()
+
+    async def stop_for_local_budget(reason: str) -> AgentTrace:
+        trace.status = "budget_exhausted"
+        trace.final = reason
+        trace.messages = messages
+        await emit({"type": "final", "text": reason})
+        return trace
 
     if context_window > 0:
         initial_tokens = estimate_message_tokens(messages)
@@ -548,6 +570,15 @@ async def run_phase(
             return trace
 
     while True:
+        elapsed = time.monotonic() - started_at
+        if step >= max_steps:
+            return await stop_for_local_budget(
+                f"Stopped after the local safety limit of {max_steps} agent steps."
+            )
+        if elapsed >= max_duration_seconds:
+            return await stop_for_local_budget(
+                f"Stopped after the local {int(max_duration_seconds)} second run limit."
+            )
         if step > 0 and context_window > 0 and trace.context_usage.get("last_output_tokens", 0) > 0:
             next_prompt_tokens = estimate_message_tokens(messages)
             trace.context_usage = _context_status(
@@ -569,8 +600,23 @@ async def run_phase(
                 await emit({"type": "final", "text": trace.final})
                 return trace
         try:
-            raw = await complete_fn(messages)
+            remaining = max_duration_seconds - (time.monotonic() - started_at)
+            raw = await asyncio.wait_for(
+                complete_fn(messages),
+                timeout=max(1.0, min(llm_timeout_seconds, remaining)),
+            )
             print("RAW LLM OUTPUT:", repr(raw))
+        except TimeoutError:
+            retry_count += 1
+            if retry_count > max_retries:
+                return await stop_for_local_budget(
+                    f"Stopped after {max_retries} timed-out model retries."
+                )
+            await emit({
+                "type": "note",
+                "message": f"Model call timed out; retry {retry_count}/{max_retries}.",
+            })
+            continue
         except Exception as e:
             print("LLM CALL FAILED:", repr(e))
             import traceback; traceback.print_exc()
@@ -605,6 +651,11 @@ async def run_phase(
         try:
             parsed = parse_call(raw, specs_by_name)
         except ParseError as exc:
+            retry_count += 1
+            if retry_count > max_retries:
+                return await stop_for_local_budget(
+                    f"Stopped after {max_retries} invalid model-call retries."
+                )
             trace.log_think_call(step, "", "parse_error", {}, f"ERROR: {exc}")
             await emit({"type": "error", "step": step, "message": f"ParseError: {exc}"})
             messages.append({"role": "assistant", "content": raw})
@@ -652,6 +703,7 @@ async def run_phase(
             return trace
 
         thought, name, kwargs, body = parsed
+        retry_count = 0
         spec = specs_by_name[name]
 
         # Stream the reasoning and the call itself before executing the tool, so

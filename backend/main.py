@@ -20,7 +20,6 @@ from fastapi.staticfiles import StaticFiles
 from api.routers import (
     agent,
     components,
-    conversations,
     debug,
     files,
     git,
@@ -60,7 +59,6 @@ app.include_router(projects.router)
 app.include_router(workbench.router)
 app.include_router(files.router)
 app.include_router(agent.router)
-app.include_router(conversations.router)
 app.include_router(rag.router)
 app.include_router(research.router)
 app.include_router(git.router)

@@ -1,6 +1,12 @@
 <script lang="ts">
   import { tick, onMount } from "svelte";
   import { api } from "./api";
+  import {
+    authConfigured,
+    authState,
+    signInWithOAuth,
+    signOut,
+  } from "./auth";
   import { workspaceStore, actions, DIFF_PREFIX, type FileItem } from "./store";
   import * as monaco from "monaco-editor";
   import EmbeddedConfigurator from "./components/EmbeddedConfigurator.svelte";
@@ -252,27 +258,13 @@
     local: boolean;
     context_window?: number;
   };
-  const selectableProviderIds = new Set(["gemini", "deepseek", "sarvam"]);
+  const selectableProviderIds = new Set(["cloud"]);
   let agentProviders: AgentProvider[] = [
     {
-      id: "gemini",
-      label: "Google Gemini",
-      model: "gemini-2.5-flash",
-      available: false,
-      local: false,
-    },
-    {
-      id: "deepseek",
-      label: "DeepSeek",
-      model: "deepseek-chat",
-      available: false,
-      local: false,
-    },
-    {
-      id: "sarvam",
-      label: "Sarvam",
-      model: "sarvam",
-      available: false,
+      id: "cloud",
+      label: "HardcoreAI Cloud",
+      model: "server-selected",
+      available: true,
       local: false,
     },
   ];
@@ -537,6 +529,7 @@
   }
 
   onMount(async () => {
+    if (!$authState.user) return;
     await actions.loadBoardCatalog();
     await actions.loadProjects();
     try {
@@ -551,10 +544,10 @@
       if (!current || !current.available) {
         const preferred =
           agentProviders.find(
-            (provider) => provider.id === "deepseek" && provider.available,
+            (provider) => provider.id === "cloud" && provider.available,
           ) ??
           agentProviders.find((provider) => provider.available) ??
-          agentProviders.find((provider) => provider.id === "deepseek") ??
+          agentProviders.find((provider) => provider.id === "cloud") ??
           agentProviders[0];
         if (preferred) setSelectedProvider(preferred.id);
       }
@@ -592,6 +585,7 @@
 
   // Poll whether an ST-Link + STM32 board is connected, for the status chip.
   onMount(() => {
+    if (!$authState.user) return;
     actions.pollDeviceStatus();
     const deviceTimer = window.setInterval(
       () => actions.pollDeviceStatus(),
@@ -1348,25 +1342,11 @@
     searching = true;
 
     try {
-      const response = await fetch(
-        `http://127.0.0.1:62018/api/projects/${projectId}/search`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            query: searchQuery,
-            include: includePattern,
-          }),
-        },
+      searchResults = await api.searchWorkspace(
+        projectId,
+        searchQuery,
+        includePattern,
       );
-
-      if (!response.ok) {
-        throw new Error(`Search failed (${response.status})`);
-      }
-
-      searchResults = await response.json();
     } catch (err) {
       console.error("Workspace search failed:", err);
       searchResults = [];
@@ -1410,7 +1390,35 @@
     }
   }}
 />
-<div class="helix-app {isLightTheme ? 'light-theme' : ''}">
+{#if !$authState.user}
+  <main class="auth-screen" aria-live="polite">
+    <section class="auth-card">
+      <img src={hardcoreaiLogo} alt="" class="auth-logo" />
+      <h1>HARDCORE<span>AI</span></h1>
+      {#if $authState.loading}
+        <p>Restoring your secure session…</p>
+      {:else}
+        <p>Sign in to open your projects and use cloud inference.</p>
+        <button
+          type="button"
+          class="auth-primary"
+          disabled={!authConfigured}
+          onclick={() => signInWithOAuth()}
+        >
+          Sign in with OAuth
+        </button>
+      {/if}
+      {#if $authState.error}
+        <div class="auth-error" role="alert">{$authState.error}</div>
+      {/if}
+    </section>
+  </main>
+{/if}
+
+<div
+  class="helix-app {isLightTheme ? 'light-theme' : ''}"
+  class:auth-hidden={!$authState.user}
+>
   <!-- 1. Header Command Bar -->
   <header class="helix-header">
     <div class="logo-section">
@@ -1562,7 +1570,7 @@
                     <option value={provider.id} disabled={!provider.available}>
                       {provider.label} - {provider.model}{provider.available
                         ? ""
-                        : " (key missing)"}
+                        : " (unavailable)"}
                     </option>
                   {/each}
                 </select>
@@ -1678,6 +1686,14 @@
         >
           <X size={14} />
         </div>
+        <button
+          type="button"
+          class="auth-signout"
+          title={$authState.user?.email || "Signed in"}
+          onclick={() => signOut()}
+        >
+          Sign out
+        </button>
       </div>
     </div>
   </header>
@@ -5043,6 +5059,98 @@
 {/if}
 
 <style>
+  .auth-hidden {
+    display: none;
+  }
+
+  .auth-screen {
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    background:
+      radial-gradient(circle at 50% 20%, rgba(139, 92, 246, 0.18), transparent 42%),
+      var(--bg-primary);
+    color: var(--text-primary);
+  }
+
+  .auth-card {
+    width: min(420px, 100%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    padding: 42px;
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
+    background: var(--bg-secondary);
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.35);
+    text-align: center;
+  }
+
+  .auth-logo {
+    width: 58px;
+    height: 58px;
+    object-fit: contain;
+  }
+
+  .auth-card h1 {
+    margin: 0;
+    letter-spacing: 0.08em;
+  }
+
+  .auth-card h1 span {
+    color: var(--accent-violet);
+  }
+
+  .auth-card p {
+    margin: 0;
+    color: var(--text-muted);
+  }
+
+  .auth-primary,
+  .auth-signout {
+    border: 1px solid var(--accent-violet);
+    border-radius: 6px;
+    background: var(--accent-violet);
+    color: white;
+    cursor: pointer;
+    font: inherit;
+  }
+
+  .auth-primary {
+    width: 100%;
+    padding: 11px 16px;
+    font-weight: 650;
+  }
+
+  .auth-primary:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  .auth-signout {
+    padding: 4px 9px;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 0.68rem;
+  }
+
+  .auth-signout:hover {
+    color: white;
+    background: var(--accent-violet);
+  }
+
+  .auth-error {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    border-radius: 6px;
+    background: rgba(239, 68, 68, 0.08);
+    color: #fca5a5;
+    font-size: 0.78rem;
+  }
+
   /* Custom layouts specifically needed for Svelte overlays and resize indicators */
   /* Vertical handles (left/right sidebars) remain absolute */
   .vertical-handle {

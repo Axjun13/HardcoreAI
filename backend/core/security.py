@@ -1,21 +1,40 @@
-"""Authentication: resolve a Supabase JWT to a user id.
+"""Authentication: resolve a Supabase access token to a user id.
 
-Verifies the token locally with the Supabase JWT secret when available
-(HMAC-SHA256), falling back to a network call to Supabase's ``/auth/v1/user``
-endpoint. ``TEST_TOKEN`` short-circuits to a fixed id for the test suite.
+The desktop backend verifies live sessions through Supabase Auth using only the
+public project URL and anon key. No JWT secret or service-role key is shipped.
+The legacy test token works only with an explicit local-test flag.
 """
 
 from __future__ import annotations
 
-import base64
-import hashlib
-import hmac
-import json
 import os
-import time
+from contextvars import ContextVar
 
 import httpx
 from fastapi import Header, HTTPException
+
+_access_token: ContextVar[str | None] = ContextVar("request_access_token", default=None)
+_user_id: ContextVar[str | None] = ContextVar("request_user_id", default=None)
+_agent_run_id: ContextVar[str | None] = ContextVar("request_agent_run_id", default=None)
+_project_id: ContextVar[str | None] = ContextVar("request_project_id", default=None)
+
+
+def request_access_token() -> str | None:
+    """Return the current request's Supabase access token without persisting it."""
+    return _access_token.get()
+
+
+def request_user_id() -> str | None:
+    return _user_id.get()
+
+
+def set_cloud_request_context(*, agent_run_id: str, project_id: str) -> None:
+    _agent_run_id.set(agent_run_id)
+    _project_id.set(project_id)
+
+
+def cloud_request_context() -> tuple[str | None, str | None]:
+    return _agent_run_id.get(), _project_id.get()
 
 
 async def get_current_user_id(authorization: str = Header(None)) -> str:
@@ -23,45 +42,15 @@ async def get_current_user_id(authorization: str = Header(None)) -> str:
         raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
 
     token = authorization.split(" ")[1]
+    _access_token.set(token)
 
     if token == "TEST_TOKEN":
-        return "cee19697-23d0-44f1-8e98-1460239ed921"
+        if os.environ.get("ALLOW_TEST_TOKEN", "").lower() not in {"1", "true", "yes"}:
+            raise HTTPException(status_code=401, detail="Invalid auth token")
+        test_user = "cee19697-23d0-44f1-8e98-1460239ed921"
+        _user_id.set(test_user)
+        return test_user
 
-    # 1. Attempt local JWT signature verification if the secret is available
-    supabase_jwt_secret = os.environ.get("SUPABASE_JWT_SECRET")
-    if supabase_jwt_secret:
-        try:
-            parts = token.split(".")
-            if len(parts) == 3:
-                header_b64, payload_b64, signature_b64 = parts
-
-                # Re-verify the HMAC-SHA256 signature
-                signing_input = f"{header_b64}.{payload_b64}".encode("utf-8")
-                key = supabase_jwt_secret.encode("utf-8")
-                expected_sig = hmac.new(key, signing_input, hashlib.sha256).digest()
-
-                # base64url decode signature
-                rem = len(signature_b64) % 4
-                sig_padded = signature_b64 + ("=" * (4 - rem) if rem else "")
-                decoded_sig = base64.urlsafe_b64decode(sig_padded)
-
-                if hmac.compare_digest(expected_sig, decoded_sig):
-                    # Decode payload
-                    rem = len(payload_b64) % 4
-                    payload_padded = payload_b64 + ("=" * (4 - rem) if rem else "")
-                    payload_json = base64.urlsafe_b64decode(payload_padded).decode("utf-8")
-                    payload = json.loads(payload_json)
-
-                    # Verify expiration
-                    if payload.get("exp") and payload["exp"] >= int(time.time()):
-                        # Verify Supabase client audience
-                        if payload.get("aud") == "authenticated":
-                            return payload["sub"]
-        except Exception:
-            # Fall back to external Supabase validation if any error occurs
-            pass
-
-    # 2. Network Fallback
     supabase_url = os.environ.get("SUPABASE_URL")
     anon_key = os.environ.get("SUPABASE_ANON_KEY")
 
@@ -77,11 +66,13 @@ async def get_current_user_id(authorization: str = Header(None)) -> str:
                     "apikey": anon_key,
                 },
             )
-        except Exception as e:
-            raise HTTPException(status_code=401, detail=f"Failed to verify token: {str(e)}")
+        except Exception:
+            raise HTTPException(status_code=401, detail="Failed to verify auth token")
 
         if response.status_code != 200:
             raise HTTPException(status_code=401, detail="Invalid auth token")
 
         user_data = response.json()
-        return user_data["id"]
+        user_id = str(user_data["id"])
+        _user_id.set(user_id)
+        return user_id
