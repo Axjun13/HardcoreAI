@@ -134,7 +134,14 @@ def test_gateway_complete_retries_a_transient_500(monkeypatch):
         return httpx.Response(
             200,
             text=f"data: {json.dumps(event)}\n\ndata: [DONE]\n\n",
-            headers={"content-type": "text/event-stream"},
+            headers={
+                "content-type": "text/event-stream",
+                "x-hardcoreai-quota": json.dumps({
+                    "tier": "default",
+                    "agentLlmCallLimit": 200,
+                    "agentLlmCallsRemaining": 198,
+                }),
+            },
         )
 
     transport = httpx.MockTransport(handler)
@@ -158,6 +165,8 @@ def test_gateway_complete_retries_a_transient_500(monkeypatch):
 
     assert result == "Recovered"
     assert result.model == "test-model"
+    assert result.quota["tier"] == "default"
+    assert result.quota["agentLlmCallsRemaining"] == 198
     assert calls == 2
 
 

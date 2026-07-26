@@ -112,6 +112,37 @@ export interface AgentContextStatus {
   estimated: boolean;
   warning_percent: number;
   low: boolean;
+  quota?: GatewayQuotaStatus;
+}
+
+export interface GatewayMinuteQuotaStatus {
+  limit: number;
+  used: number;
+  remaining: number;
+  resetAt: string;
+}
+
+export interface GatewayQuotaStatus {
+  tier: string;
+  concurrentLimit: number;
+  concurrentUsed: number;
+  concurrentRemaining: number;
+  agentLlmCallLimit: number;
+  agentLlmCallsUsed: number;
+  agentLlmCallsRemaining: number;
+  agentSearchCallLimit: number;
+  agentSearchCallsUsed: number;
+  agentSearchCallsRemaining: number;
+  agentInputTokenLimit: number;
+  agentInputTokensUsed: number;
+  agentInputTokensRemaining: number;
+  agentOutputTokenLimit: number;
+  agentOutputTokensUsed: number;
+  agentOutputTokensRemaining: number;
+  agentCostLimit: number;
+  agentCostUsed: number;
+  agentCostRemaining: number;
+  minute?: GatewayMinuteQuotaStatus;
 }
 
 export interface PlotDataPoint {

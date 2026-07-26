@@ -12,6 +12,7 @@ import asyncio
 import json
 import os
 from collections.abc import AsyncIterator
+from typing import Any
 
 import httpx
 
@@ -76,11 +77,12 @@ PROVIDERS = {
 
 
 class CompletionText(str):
-    """String-compatible completion carrying token-usage metadata."""
+    """String-compatible completion carrying usage and cloud quota metadata."""
 
     usage: dict[str, int]
     model: str
     context_window: int
+    quota: dict[str, Any]
 
     def __new__(
         cls,
@@ -89,11 +91,13 @@ class CompletionText(str):
         usage: dict[str, int] | None = None,
         model: str = "",
         context_window: int = 0,
+        quota: dict[str, Any] | None = None,
     ):
         obj = super().__new__(cls, value)
         obj.usage = usage or {}
         obj.model = model
         obj.context_window = context_window
+        obj.quota = quota or {}
         return obj
 
 
@@ -365,6 +369,7 @@ async def _gateway_complete(
     )
     text_parts: list[str] = []
     usage: dict[str, int] = {}
+    quota: dict[str, Any] = {}
     response_model = "server-selected"
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
         for attempt in range(CLOUD_MAX_ATTEMPTS):
@@ -385,6 +390,15 @@ async def _gateway_complete(
                             await _gateway_retry_delay(response, attempt)
                             continue
                         raise error
+                    quota_header = response.headers.get("x-hardcoreai-quota", "")
+                    if quota_header:
+                        try:
+                            parsed_quota = json.loads(quota_header)
+                            if isinstance(parsed_quota, dict):
+                                quota = parsed_quota
+                        except (TypeError, ValueError):
+                            # Quota display metadata must never break a model call.
+                            pass
                     async for line in response.aiter_lines():
                         chunk, event_usage, event_model = _parse_sse_data(line)
                         if chunk:
@@ -411,6 +425,7 @@ async def _gateway_complete(
         usage=usage,
         model=response_model,
         context_window=context_window_for_model(response_model, "cloud"),
+        quota=quota,
     )
 
 

@@ -295,6 +295,13 @@
       notation: "compact",
       maximumFractionDigits: 1,
     }).format(value || 0);
+  const formatQuotaCost = (value: number | undefined) =>
+    new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    }).format(value || 0);
 
   let rightPaneSplit = 55;
 
@@ -3957,6 +3964,56 @@
                       >
                     </div>
                   </div>
+                  {#if context.quota}
+                    {@const quota = context.quota}
+                    <div class="agent-quota-status">
+                      <div class="agent-quota-status-head">
+                        <strong>Cloud quota</strong>
+                        <span>{quota.tier || "default"} tier</span>
+                      </div>
+                      <div class="agent-context-grid">
+                        {#if quota.minute}
+                          <div>
+                            <small>Requests / minute</small><strong
+                              >{quota.minute.remaining} / {quota.minute.limit} left</strong
+                            >
+                          </div>
+                        {/if}
+                        <div>
+                          <small>Agent LLM calls</small><strong
+                            >{quota.agentLlmCallsRemaining} / {quota.agentLlmCallLimit} left</strong
+                          >
+                        </div>
+                        <div>
+                          <small>Agent searches</small><strong
+                            >{quota.agentSearchCallsRemaining} / {quota.agentSearchCallLimit} left</strong
+                          >
+                        </div>
+                        <div>
+                          <small>Agent input tokens</small><strong
+                            >{formatTokenCount(quota.agentInputTokensRemaining)} left</strong
+                          >
+                        </div>
+                        <div>
+                          <small>Agent output tokens</small><strong
+                            >{formatTokenCount(quota.agentOutputTokensRemaining)} left</strong
+                          >
+                        </div>
+                        <div>
+                          <small>Concurrent requests</small><strong
+                            >{quota.concurrentRemaining} / {quota.concurrentLimit} free</strong
+                          >
+                        </div>
+                        <div>
+                          <small>Agent cost</small><strong
+                            >{formatQuotaCost(quota.agentCostRemaining)} / {formatQuotaCost(
+                              quota.agentCostLimit,
+                            )} left</strong
+                          >
+                        </div>
+                      </div>
+                    </div>
+                  {/if}
                   {#if context.low}
                     <div class="agent-context-inline-warning">
                       <AlertTriangle size={13} /> Please use another session.
@@ -3973,7 +4030,8 @@
                       )} tokens</span
                     >
                     <small
-                      >Token usage appears here when the next run starts.</small
+                      >Token usage and cloud quota appear here when the next run
+                      starts.</small
                     >
                   </div>
                 {/if}
