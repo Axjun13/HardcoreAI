@@ -159,3 +159,42 @@ def test_gateway_complete_retries_a_transient_500(monkeypatch):
     assert result == "Recovered"
     assert result.model == "test-model"
     assert calls == 2
+
+
+def test_gateway_complete_does_not_retry_configuration_errors(monkeypatch):
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(
+            503,
+            json={
+                "error": {
+                    "code": "configuration_error",
+                    "message": "HardcoreAI Cloud is not fully configured",
+                    "requestId": "req-config",
+                }
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    real_async_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        core.httpx,
+        "AsyncClient",
+        lambda **kwargs: real_async_client(transport=transport, **kwargs),
+    )
+
+    with pytest.raises(core.LLMError, match="not fully configured"):
+        asyncio.run(
+            core._gateway_complete(
+                [{"role": "user", "content": "Hello"}],
+                mode="agent",
+                project_id="42",
+                agent_run_id="fd15bb17-19a3-4745-baca-4ab6982db74b",
+                access_token="user-access-token",
+            )
+        )
+
+    assert calls == 1

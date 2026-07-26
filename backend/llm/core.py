@@ -100,6 +100,9 @@ class CompletionText(str):
 class LLMError(RuntimeError):
     """A sanitized local/provider failure."""
 
+    gateway_code: str = ""
+    retryable: bool = False
+
 
 def context_window_for_model(model: str, provider: str = "") -> int:
     provider_key = provider.strip().upper()
@@ -263,14 +266,17 @@ async def _gateway_response_error(response: httpx.Response) -> LLMError:
     """Turn the gateway's sanitized error envelope into a useful local error."""
     request_id = response.headers.get("x-request-id", "").strip()
     message = ""
+    error_code = ""
     try:
         data = json.loads((await response.aread()).decode(errors="replace"))
         error = data.get("error") if isinstance(data, dict) else None
         if isinstance(error, dict):
             message = str(error.get("message") or "").strip()
+            error_code = str(error.get("code") or "").strip()
             request_id = request_id or str(error.get("requestId") or "").strip()
         elif isinstance(data, dict):
             message = str(data.get("detail") or data.get("message") or "").strip()
+            error_code = str(data.get("code") or "").strip()
             request_id = request_id or str(data.get("requestId") or "").strip()
     except (json.JSONDecodeError, UnicodeDecodeError):
         pass
@@ -279,25 +285,37 @@ async def _gateway_response_error(response: httpx.Response) -> LLMError:
     # sanitizes this message; arbitrary upstream response bodies are not shown.
     message = " ".join(message.split())[:300]
     request_suffix = f" (request {request_id})" if request_id else ""
+
+    def gateway_error(text: str) -> LLMError:
+        error = LLMError(text)
+        error.gateway_code = error_code
+        error.retryable = (
+            response.status_code in CLOUD_RETRY_STATUSES
+            and error_code != "configuration_error"
+        )
+        return error
+
     if response.status_code == 401:
-        return LLMError(
+        return gateway_error(
             f"{message or 'Your cloud session has expired; sign in again'}{request_suffix}."
         )
     if response.status_code == 403:
-        return LLMError(
+        return gateway_error(
             f"{message or 'This account or project cannot use HardcoreAI Cloud'}"
             f"{request_suffix}."
         )
     if response.status_code == 429:
-        return LLMError(
+        return gateway_error(
             f"{message or 'HardcoreAI Cloud quota is temporarily exhausted'}"
             f"{request_suffix}."
         )
     if message:
-        return LLMError(f"HardcoreAI Cloud: {message}{request_suffix}.")
+        return gateway_error(f"HardcoreAI Cloud: {message}{request_suffix}.")
     if response.status_code in CLOUD_RETRY_STATUSES:
-        return LLMError(f"HardcoreAI Cloud is temporarily unavailable{request_suffix}.")
-    return LLMError(
+        return gateway_error(
+            f"HardcoreAI Cloud is temporarily unavailable{request_suffix}."
+        )
+    return gateway_error(
         f"HardcoreAI Cloud returned HTTP {response.status_code}{request_suffix}."
     )
 
@@ -363,10 +381,7 @@ async def _gateway_complete(
                 ) as response:
                     if response.status_code != 200:
                         error = await _gateway_response_error(response)
-                        if (
-                            response.status_code in CLOUD_RETRY_STATUSES
-                            and attempt + 1 < CLOUD_MAX_ATTEMPTS
-                        ):
+                        if error.retryable and attempt + 1 < CLOUD_MAX_ATTEMPTS:
                             await _gateway_retry_delay(response, attempt)
                             continue
                         raise error
@@ -431,10 +446,7 @@ async def _gateway_stream(
                 ) as response:
                     if response.status_code != 200:
                         error = await _gateway_response_error(response)
-                        if (
-                            response.status_code in CLOUD_RETRY_STATUSES
-                            and attempt + 1 < CLOUD_MAX_ATTEMPTS
-                        ):
+                        if error.retryable and attempt + 1 < CLOUD_MAX_ATTEMPTS:
                             await _gateway_retry_delay(response, attempt)
                             continue
                         raise error
