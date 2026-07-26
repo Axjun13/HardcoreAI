@@ -8,6 +8,7 @@ Provider API keys are intentionally not read by the distributed application.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from collections.abc import AsyncIterator
@@ -29,6 +30,8 @@ CLOUD_PROXY_URL = os.environ.get(
 TEMPERATURE = 0.1
 MAX_TOKENS = 4096
 HTTP_TIMEOUT = 120.0
+CLOUD_MAX_ATTEMPTS = max(1, int(os.environ.get("CLOUD_MAX_ATTEMPTS", "3")))
+CLOUD_RETRY_STATUSES = {500, 502, 503, 504}
 CLOUD_PROVIDER_ALIASES = {"cloud", "openrouter", "gemini", "deepseek", "sarvam"}
 
 PROVIDERS = {
@@ -256,6 +259,58 @@ def _parse_sse_data(line: str) -> tuple[str, dict[str, int], str]:
     return content, _normalise_openai_usage(data), str(data.get("model") or "")
 
 
+async def _gateway_response_error(response: httpx.Response) -> LLMError:
+    """Turn the gateway's sanitized error envelope into a useful local error."""
+    request_id = response.headers.get("x-request-id", "").strip()
+    message = ""
+    try:
+        data = json.loads((await response.aread()).decode(errors="replace"))
+        error = data.get("error") if isinstance(data, dict) else None
+        if isinstance(error, dict):
+            message = str(error.get("message") or "").strip()
+            request_id = request_id or str(error.get("requestId") or "").strip()
+        elif isinstance(data, dict):
+            message = str(data.get("detail") or data.get("message") or "").strip()
+            request_id = request_id or str(data.get("requestId") or "").strip()
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        pass
+
+    # Keep UI errors short and single-line. The private gateway owns and
+    # sanitizes this message; arbitrary upstream response bodies are not shown.
+    message = " ".join(message.split())[:300]
+    request_suffix = f" (request {request_id})" if request_id else ""
+    if response.status_code == 401:
+        return LLMError(
+            f"{message or 'Your cloud session has expired; sign in again'}{request_suffix}."
+        )
+    if response.status_code == 403:
+        return LLMError(
+            f"{message or 'This account or project cannot use HardcoreAI Cloud'}"
+            f"{request_suffix}."
+        )
+    if response.status_code == 429:
+        return LLMError(
+            f"{message or 'HardcoreAI Cloud quota is temporarily exhausted'}"
+            f"{request_suffix}."
+        )
+    if message:
+        return LLMError(f"HardcoreAI Cloud: {message}{request_suffix}.")
+    if response.status_code in CLOUD_RETRY_STATUSES:
+        return LLMError(f"HardcoreAI Cloud is temporarily unavailable{request_suffix}.")
+    return LLMError(
+        f"HardcoreAI Cloud returned HTTP {response.status_code}{request_suffix}."
+    )
+
+
+async def _gateway_retry_delay(response: httpx.Response, attempt: int) -> None:
+    retry_after = response.headers.get("retry-after", "").strip()
+    try:
+        delay = min(5.0, max(0.0, float(retry_after)))
+    except ValueError:
+        delay = min(2.0, 0.5 * (2 ** attempt))
+    await asyncio.sleep(delay)
+
+
 def _gateway_payload(
     messages: list[dict],
     *,
@@ -294,32 +349,48 @@ async def _gateway_complete(
     usage: dict[str, int] = {}
     response_model = "server-selected"
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-        try:
-            async with client.stream(
-                "POST",
-                f"{CLOUD_PROXY_URL}/api/llm",
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-            ) as response:
-                if response.status_code != 200:
-                    request_id = response.headers.get("x-request-id", "")
-                    suffix = f" (request {request_id})" if request_id else ""
-                    raise LLMError(
-                        f"HardcoreAI Cloud returned HTTP {response.status_code}{suffix}."
-                    )
-                async for line in response.aiter_lines():
-                    chunk, event_usage, event_model = _parse_sse_data(line)
-                    if chunk:
-                        text_parts.append(chunk)
-                    if event_usage and event_usage.get("total_tokens", 0):
-                        usage = event_usage
-                    if event_model:
-                        response_model = event_model
-        except httpx.RequestError as exc:
-            raise LLMError("HardcoreAI Cloud is temporarily unavailable.") from exc
+        for attempt in range(CLOUD_MAX_ATTEMPTS):
+            parts_before_attempt = len(text_parts)
+            try:
+                async with client.stream(
+                    "POST",
+                    f"{CLOUD_PROXY_URL}/api/llm",
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                ) as response:
+                    if response.status_code != 200:
+                        error = await _gateway_response_error(response)
+                        if (
+                            response.status_code in CLOUD_RETRY_STATUSES
+                            and attempt + 1 < CLOUD_MAX_ATTEMPTS
+                        ):
+                            await _gateway_retry_delay(response, attempt)
+                            continue
+                        raise error
+                    async for line in response.aiter_lines():
+                        chunk, event_usage, event_model = _parse_sse_data(line)
+                        if chunk:
+                            text_parts.append(chunk)
+                        if event_usage and event_usage.get("total_tokens", 0):
+                            usage = event_usage
+                        if event_model:
+                            response_model = event_model
+                    break
+            except httpx.RequestError as exc:
+                # Retrying after content has arrived could duplicate a model
+                # response in the agent transcript.
+                if (
+                    len(text_parts) == parts_before_attempt
+                    and attempt + 1 < CLOUD_MAX_ATTEMPTS
+                ):
+                    await asyncio.sleep(min(2.0, 0.5 * (2 ** attempt)))
+                    continue
+                raise LLMError("HardcoreAI Cloud is temporarily unavailable.") from exc
+    if not text_parts:
+        raise LLMError("HardcoreAI Cloud returned an empty response. Please try again.")
     return CompletionText(
         "".join(text_parts),
         usage=usage,
@@ -346,28 +417,42 @@ async def _gateway_stream(
         agent_run_id=agent_run_id,
     )
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
-        try:
-            async with client.stream(
-                "POST",
-                f"{CLOUD_PROXY_URL}/api/llm",
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-            ) as response:
-                if response.status_code != 200:
-                    request_id = response.headers.get("x-request-id", "")
-                    suffix = f" (request {request_id})" if request_id else ""
-                    raise LLMError(
-                        f"HardcoreAI Cloud returned HTTP {response.status_code}{suffix}."
-                    )
-                async for line in response.aiter_lines():
-                    chunk, _usage, _model = _parse_sse_data(line)
-                    if chunk:
-                        yield chunk
-        except httpx.RequestError as exc:
-            raise LLMError("HardcoreAI Cloud is temporarily unavailable.") from exc
+        emitted = False
+        for attempt in range(CLOUD_MAX_ATTEMPTS):
+            try:
+                async with client.stream(
+                    "POST",
+                    f"{CLOUD_PROXY_URL}/api/llm",
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                ) as response:
+                    if response.status_code != 200:
+                        error = await _gateway_response_error(response)
+                        if (
+                            response.status_code in CLOUD_RETRY_STATUSES
+                            and attempt + 1 < CLOUD_MAX_ATTEMPTS
+                        ):
+                            await _gateway_retry_delay(response, attempt)
+                            continue
+                        raise error
+                    async for line in response.aiter_lines():
+                        chunk, _usage, _model = _parse_sse_data(line)
+                        if chunk:
+                            emitted = True
+                            yield chunk
+                    if not emitted:
+                        raise LLMError(
+                            "HardcoreAI Cloud returned an empty response. Please try again."
+                        )
+                    return
+            except httpx.RequestError as exc:
+                if not emitted and attempt + 1 < CLOUD_MAX_ATTEMPTS:
+                    await asyncio.sleep(min(2.0, 0.5 * (2 ** attempt)))
+                    continue
+                raise LLMError("HardcoreAI Cloud is temporarily unavailable.") from exc
 
 
 async def complete(

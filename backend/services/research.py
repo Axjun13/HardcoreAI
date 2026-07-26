@@ -520,6 +520,12 @@ def research_fallback_response(
     history: list[dict[str, str]] | None = None,
     stage: str = "ideation",
 ) -> str:
+    if stage == "final_review":
+        return (
+            "I couldn’t reach the selected model to answer that final-review question. "
+            "The plan has not been changed. Please retry when the model connection is available, "
+            "or submit a direct edit and I’ll apply it to the review."
+        )
     if stage == "ideation":
         prior_user_turns = [
             item.get("content", "").strip()
@@ -561,6 +567,7 @@ def research_chat_messages(
     recommendations: list[dict[str, Any]],
     history: list[dict[str, str]] | None = None,
     stage: str = "ideation",
+    review_context: str = "",
 ) -> list[dict[str, str]]:
     """Build phase-aware chat messages without leaking catalogue mechanics into ideation."""
     names = "\n".join(
@@ -583,6 +590,15 @@ def research_chat_messages(
             "use headings such as Goal, Constraints, Capabilities, Tradeoffs, or Recommended direction. "
             "The catalogue matches below are private background only: do not enumerate or recommend them "
             "unless the user explicitly asks about parts. Keep the reply conversational and under 160 words."
+        )
+    elif stage == "final_review":
+        system = (
+            "You are reviewing a completed embedded-system implementation plan with the user. "
+            "Answer the user's question directly from the final-review context below. Explain tradeoffs, "
+            "risks, wiring, components, pins, and TODO items accurately. Do not claim the plan was changed "
+            "or work was executed. If the user asks for a change, tell them to submit it as an edit in the "
+            "Final Review composer. Keep the answer concise and under 220 words.\n\n"
+            f"FINAL REVIEW CONTEXT:\n{review_context[-14000:] or 'No final-review artifact is available.'}"
         )
     else:
         system = (
@@ -611,6 +627,7 @@ async def stream_research_response(
     provider: str = "deepseek",
     history: list[dict[str, str]] | None = None,
     stage: str = "ideation",
+    review_context: str = "",
 ) -> AsyncIterator[str]:
     """Yield the research reply directly from the provider."""
     async for chunk in llm.stream(
@@ -620,6 +637,7 @@ async def stream_research_response(
             recommendations=recommendations,
             history=history,
             stage=stage,
+            review_context=review_context,
         ),
     ):
         yield chunk

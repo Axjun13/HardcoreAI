@@ -38,8 +38,9 @@ cp frontend/.env.example frontend/.env.local
 cp backend/.env.example backend/.env
 ```
 
-Set the same Supabase project URL and anon key in both files. The frontend
-performs OAuth and sends only the user's access token to the local backend.
+Set the same Supabase project URL and anon key in both files. Enable both Google
+and GitHub under Supabase Authentication > Providers if you want both sign-in
+buttons available. The frontend performs OAuth and sends only the user's access token to the local backend.
 Paid LLM and search provider keys belong only in the separately deployed
 private cloud proxy; they are not supported by this repository's app config.
 
@@ -115,7 +116,7 @@ node scripts/release.mjs --skip-build
 
 ## Cloud integration
 
-- Configure a Supabase OAuth provider and allow the exact
+- Configure the Google and/or GitHub Supabase OAuth providers and allow the exact
   `VITE_SUPABASE_REDIRECT_URL` used by the packaged app.
 - Apply `supabase/migrations/20260723010000_complete_application_rls.sql`.
 - Set `HARDCOREAI_PROXY_URL` to the private proxy deployment. The checked-in

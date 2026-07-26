@@ -6,6 +6,7 @@
     authState,
     signInWithOAuth,
     signOut,
+    switchUser,
   } from "./auth";
   import { workspaceStore, actions, DIFF_PREFIX, type FileItem } from "./store";
   import * as monaco from "monaco-editor";
@@ -55,6 +56,10 @@
     Circle,
     Brain,
     Gauge,
+    ChevronDown,
+    Github,
+    LogOut,
+    UserRound,
   } from "lucide-svelte";
 
   let aiInput = "";
@@ -366,6 +371,8 @@
   // Decoupled panel states
   let showSidebar = true;
   let showViewDropdown = false;
+  let showAccountMenu = false;
+  let choosingAnotherUser = false;
   let html2canvas: any = null;
 
   // Input prompt modal state (New File/Folder)
@@ -511,6 +518,44 @@
     if (frame) frame.scrollTop = 0;
     if (wrapper) wrapper.scrollTop = 0;
     if (container) container.scrollTop = 0;
+  }
+
+  function clearUserWorkspace() {
+    api.setActiveProject(null);
+    localStorage.removeItem("activeProjectId");
+    localStorage.removeItem("activeFile");
+    localStorage.removeItem("openFiles");
+    workspaceStore.update((state) => ({
+      ...state,
+      activeProjectId: null,
+      projectsList: [],
+      activeFile: null,
+      openFiles: [],
+      diffTabs: {},
+      fileContents: {},
+      fileTree: [],
+      untrackedPaths: {},
+      expandedFolders: {},
+      aiMessages: [],
+      agentContextStatus: null,
+      showWelcomeScreen: true,
+    }));
+  }
+
+  async function handleSwitchUser() {
+    showAccountMenu = false;
+    choosingAnotherUser = true;
+    if (await switchUser()) {
+      clearUserWorkspace();
+    } else {
+      choosingAnotherUser = false;
+    }
+  }
+
+  async function handleSignOut() {
+    showAccountMenu = false;
+    choosingAnotherUser = false;
+    if (await signOut()) clearUserWorkspace();
   }
 
   function handleMouseUp() {
@@ -1388,6 +1433,9 @@
     if (showViewDropdown && !target.closest(".view-menu-container")) {
       showViewDropdown = false;
     }
+    if (showAccountMenu && !target.closest(".account-menu-container")) {
+      showAccountMenu = false;
+    }
   }}
 />
 {#if !$authState.user}
@@ -1398,15 +1446,31 @@
       {#if $authState.loading}
         <p>Restoring your secure session…</p>
       {:else}
-        <p>Sign in to open your projects and use cloud inference.</p>
-        <button
-          type="button"
-          class="auth-primary"
-          disabled={!authConfigured}
-          onclick={() => signInWithOAuth()}
-        >
-          Sign in with OAuth
-        </button>
+        <p>
+          {choosingAnotherUser
+            ? "Choose another account to continue."
+            : "Sign in to open your projects and use cloud inference."}
+        </p>
+        <div class="auth-providers">
+          <button
+            type="button"
+            class="auth-primary auth-google"
+            disabled={!authConfigured}
+            onclick={() => signInWithOAuth("google")}
+          >
+            <span class="google-mark" aria-hidden="true">G</span>
+            Continue with Google
+          </button>
+          <button
+            type="button"
+            class="auth-primary auth-github"
+            disabled={!authConfigured}
+            onclick={() => signInWithOAuth("github")}
+          >
+            <Github size={17} />
+            Continue with GitHub
+          </button>
+        </div>
       {/if}
       {#if $authState.error}
         <div class="auth-error" role="alert">{$authState.error}</div>
@@ -1686,14 +1750,48 @@
         >
           <X size={14} />
         </div>
-        <button
-          type="button"
-          class="auth-signout"
-          title={$authState.user?.email || "Signed in"}
-          onclick={() => signOut()}
-        >
-          Sign out
-        </button>
+        <div class="account-menu-container">
+          <button
+            type="button"
+            class="account-trigger"
+            title={$authState.user?.email || "Signed in"}
+            aria-haspopup="menu"
+            aria-expanded={showAccountMenu}
+            onclick={() => (showAccountMenu = !showAccountMenu)}
+          >
+            <span class="account-avatar"
+              >{($authState.user?.email || "U").slice(0, 1).toUpperCase()}</span
+            >
+            <span>Account</span>
+            <ChevronDown size={12} />
+          </button>
+          {#if showAccountMenu}
+            <div class="account-dropdown" role="menu">
+              <div class="account-identity">
+                <UserRound size={16} class="account-identity-icon" />
+                <div>
+                  <strong>{$authState.user?.user_metadata?.full_name ||
+                    $authState.user?.user_metadata?.name ||
+                    "Signed in"}</strong>
+                  <small>{$authState.user?.email || "Authenticated user"}</small>
+                </div>
+              </div>
+              <button type="button" role="menuitem" onclick={handleSwitchUser}>
+                <UserRound size={15} />
+                <span>Switch user</span>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                class="account-signout"
+                onclick={handleSignOut}
+              >
+                <LogOut size={15} />
+                <span>Sign out</span>
+              </button>
+            </div>
+          {/if}
+        </div>
       </div>
     </div>
   </header>
@@ -5108,8 +5206,7 @@
     color: var(--text-muted);
   }
 
-  .auth-primary,
-  .auth-signout {
+  .auth-primary {
     border: 1px solid var(--accent-violet);
     border-radius: 6px;
     background: var(--accent-violet);
@@ -5122,6 +5219,10 @@
     width: 100%;
     padding: 11px 16px;
     font-weight: 650;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
   }
 
   .auth-primary:disabled {
@@ -5129,16 +5230,138 @@
     opacity: 0.5;
   }
 
-  .auth-signout {
-    padding: 4px 9px;
+  .auth-providers {
+    width: 100%;
+    display: grid;
+    gap: 10px;
+  }
+
+  .auth-google {
+    border-color: var(--border-color);
+    background: white;
+    color: #202124;
+  }
+
+  .auth-google:hover {
+    background: #f8fafc;
+  }
+
+  .google-mark {
+    font-family: Arial, sans-serif;
+    font-size: 17px;
+    font-weight: 700;
+    color: #4285f4;
+  }
+
+  .auth-github {
+    border-color: #30363d;
+    background: #24292f;
+  }
+
+  .account-menu-container {
+    position: relative;
+  }
+
+  .account-trigger {
+    height: 30px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 8px 3px 4px;
+    border: 1px solid rgba(139, 92, 246, 0.55);
+    border-radius: 7px;
     background: transparent;
     color: var(--text-muted);
     font-size: 0.68rem;
   }
 
-  .auth-signout:hover {
+  .account-trigger:hover,
+  .account-trigger[aria-expanded="true"] {
+    color: var(--text-active);
+    background: var(--accent-violet-muted);
+  }
+
+  .account-avatar {
+    width: 21px;
+    height: 21px;
+    display: grid;
+    place-items: center;
+    border-radius: 5px;
+    background: linear-gradient(135deg, var(--accent-violet), var(--accent-cyan));
     color: white;
-    background: var(--accent-violet);
+    font-size: 0.65rem;
+    font-weight: 750;
+  }
+
+  .account-dropdown {
+    position: absolute;
+    top: calc(100% + 7px);
+    right: 0;
+    z-index: 1200;
+    width: 238px;
+    padding: 6px;
+    border: 1px solid var(--border-color);
+    border-radius: 9px;
+    background: var(--bg-secondary);
+    box-shadow: 0 16px 42px rgba(0, 0, 0, 0.48);
+  }
+
+  .account-identity {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr);
+    gap: 8px;
+    align-items: center;
+    padding: 9px 8px 11px;
+    margin-bottom: 5px;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  :global(.account-identity-icon) {
+    color: var(--accent-violet-hover);
+  }
+
+  .account-identity strong,
+  .account-identity small {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .account-identity strong {
+    color: var(--text-active);
+    font-size: 0.74rem;
+  }
+
+  .account-identity small {
+    margin-top: 2px;
+    color: var(--text-dark);
+    font-size: 0.64rem;
+  }
+
+  .account-dropdown > button {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 9px 10px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-muted);
+    font: inherit;
+    font-size: 0.72rem;
+    text-align: left;
+  }
+
+  .account-dropdown > button:hover {
+    color: var(--text-active);
+    background: var(--bg-tertiary);
+  }
+
+  .account-dropdown > button.account-signout:hover {
+    color: #fca5a5;
+    background: rgba(239, 68, 68, 0.08);
   }
 
   .auth-error {
@@ -5164,8 +5387,10 @@
   }
 
   .research-workspace-view {
-    position: absolute;
-    inset: 50px 0 0;
+    position: relative;
+    flex: 1 1 auto;
+    width: 100%;
+    min-width: 0;
     min-height: 0;
     overflow: hidden;
     background: var(--bg-primary);

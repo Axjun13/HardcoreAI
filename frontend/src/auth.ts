@@ -3,9 +3,11 @@ import { get, writable } from "svelte/store";
 
 const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL || "").trim();
 const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || "").trim();
-const configuredProvider = (
-  import.meta.env.VITE_SUPABASE_OAUTH_PROVIDER || "github"
-) as Provider;
+export type SupportedOAuthProvider = Extract<Provider, "github" | "google">;
+const configuredProvider =
+  import.meta.env.VITE_SUPABASE_OAUTH_PROVIDER === "google"
+    ? "google"
+    : "github";
 
 export const authConfigured = Boolean(supabaseUrl && supabaseAnonKey);
 
@@ -68,7 +70,9 @@ export async function initializeAuth(): Promise<void> {
   });
 }
 
-export async function signInWithOAuth(): Promise<void> {
+export async function signInWithOAuth(
+  provider: SupportedOAuthProvider = configuredProvider,
+): Promise<void> {
   if (!supabase) {
     authState.update((state) => ({
       ...state,
@@ -83,8 +87,14 @@ export async function signInWithOAuth(): Promise<void> {
     (import.meta.env.VITE_SUPABASE_REDIRECT_URL || "").trim() ||
     `${window.location.origin}${window.location.pathname}`;
   const { error } = await supabase.auth.signInWithOAuth({
-    provider: configuredProvider,
-    options: { redirectTo },
+    provider,
+    options: {
+      redirectTo,
+      // Google otherwise commonly reuses the last browser account, which makes
+      // the explicit Switch user flow appear to do nothing.
+      queryParams:
+        provider === "google" ? { prompt: "select_account" } : undefined,
+    },
   });
   if (error) {
     authState.update((state) => ({
@@ -95,12 +105,31 @@ export async function signInWithOAuth(): Promise<void> {
   }
 }
 
-export async function signOut(): Promise<void> {
-  if (!supabase) return;
-  const { error } = await supabase.auth.signOut();
+export async function signOut(): Promise<boolean> {
+  if (!supabase) return false;
+  const { error } = await supabase.auth.signOut({ scope: "local" });
   if (error) {
     authState.update((state) => ({ ...state, error: error.message }));
+    return false;
   }
+  authState.set({ loading: false, session: null, user: null, error: "" });
+  return true;
+}
+
+export async function switchUser(): Promise<boolean> {
+  if (!supabase) return false;
+  authState.update((state) => ({ ...state, loading: true, error: "" }));
+  const { error } = await supabase.auth.signOut({ scope: "local" });
+  if (error) {
+    authState.update((state) => ({
+      ...state,
+      loading: false,
+      error: error.message,
+    }));
+    return false;
+  }
+  authState.set({ loading: false, session: null, user: null, error: "" });
+  return true;
 }
 
 export async function getAccessToken(): Promise<string> {

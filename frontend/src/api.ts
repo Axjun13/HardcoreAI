@@ -17,7 +17,7 @@ async function responseError(res: Response): Promise<string> {
 }
 
 export const api = {
-  setActiveProject(id: string) {
+  setActiveProject(id: string | null) {
     activeProjectId = id;
   },
 
