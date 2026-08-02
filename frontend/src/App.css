@@ -1160,6 +1160,32 @@ input, button, select, textarea {
   white-space: nowrap;
 }
 
+.agent-quota-status {
+  margin-top: 11px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-color);
+}
+
+.agent-quota-status-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.agent-quota-status-head strong {
+  color: var(--text-active);
+  font-size: 0.64rem;
+}
+
+.agent-quota-status-head span {
+  color: var(--accent-cyan);
+  font-size: 0.56rem;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
 .agent-context-empty {
   display: flex;
   flex-direction: column;

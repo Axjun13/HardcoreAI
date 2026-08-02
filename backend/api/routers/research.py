@@ -390,7 +390,13 @@ async def ideate_stream(
     stage = state.get("stage", "ideation")
 
     async def events():
-        status = "Exploring your idea" if stage == "ideation" else "Comparing the component tradeoffs"
+        status = (
+            "Exploring your idea"
+            if stage == "ideation"
+            else "Reviewing the final plan"
+            if stage == "final_review"
+            else "Comparing the component tradeoffs"
+        )
         yield _research_sse({"type": "status", "text": status})
         current_recommendations = recommendations
         if stage == "component_selection":
@@ -415,6 +421,7 @@ async def ideate_stream(
                 provider=payload.provider or "deepseek",
                 history=prior_messages,
                 stage=stage,
+                review_context=state.get("final_markdown", ""),
             ):
                 chunks.append(chunk)
                 yield _research_sse({"type": "delta", "text": chunk})
@@ -441,10 +448,11 @@ async def ideate_stream(
             yield _research_sse({"type": "error", "message": "The research agent returned an empty response."})
             return
 
-        state.setdefault("ideas", []).append(payload.idea)
-        state["summary"] = summary
-        state["condensed_state"] = ""
-        state["recommendations"] = current_recommendations
+        if stage in {"ideation", "component_selection"}:
+            state.setdefault("ideas", []).append(payload.idea)
+            state["summary"] = summary
+            state["condensed_state"] = ""
+            state["recommendations"] = current_recommendations
         context["messages"] = prior_messages + [
             {"role": "user", "content": payload.idea},
             {"role": "assistant", "content": summary},
@@ -924,6 +932,20 @@ async def advance_research_workflow(
             set_todo_status(state, "review:approval", "in_progress", f"Review round {state['review_revision'] + 1} requested")
             state["final_markdown"] = render_final_markdown(project.name, state)
             state["stage"] = "final_review"
+            active = _context_or_none(state, state.get("active_context_id"))
+            if active is not None:
+                active["messages"] = [
+                    *(active.get("messages") or []),
+                    {"role": "user", "content": revision},
+                    {
+                        "role": "assistant",
+                        "content": (
+                            "I incorporated that edit into the implementation plan and regenerated "
+                            "the final review. Please check the updated plan before approving it."
+                        ),
+                    },
+                ]
+                active["updated_at"] = datetime.now(timezone.utc).isoformat()
             _upsert_markdown(session, project, "plan.md", state["plan_markdown"])
             _upsert_markdown(session, project, "final-review.md", state["final_markdown"])
             artifacts.extend(["plan.md", "final-review.md"])

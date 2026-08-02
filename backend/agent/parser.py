@@ -376,12 +376,13 @@ def _context_status(
     last_output_tokens: int,
     estimated: bool,
     warning_percent: float,
+    quota: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     used = max(0, context_used_tokens)
     remaining = max(0, context_window - used)
     remaining_percent = (remaining / context_window * 100.0) if context_window else 0.0
     used_percent = min(100.0, 100.0 - remaining_percent) if context_window else 0.0
-    return {
+    status = {
         "provider": provider,
         "model": model or provider or "unknown",
         "context_window": context_window,
@@ -398,6 +399,9 @@ def _context_status(
         "warning_percent": warning_percent,
         "low": remaining_percent <= warning_percent,
     }
+    if quota:
+        status["quota"] = quota
+    return status
 
 
 def _low_context_message(status: dict[str, Any]) -> str:
@@ -531,6 +535,7 @@ async def run_phase(
     trace = AgentTrace(phase=phase)
     total_input_tokens = 0
     total_output_tokens = 0
+    gateway_quota: dict[str, Any] = {}
     step = 0
     retry_count = 0
     max_steps = max_steps or int(os.environ.get("AGENT_MAX_STEPS", "24"))
@@ -561,6 +566,7 @@ async def run_phase(
             last_output_tokens=0,
             estimated=True,
             warning_percent=context_warning_percent,
+            quota=gateway_quota,
         )
         await emit({"type": "context", **trace.context_usage})
         if trace.context_usage["low"]:
@@ -592,6 +598,7 @@ async def run_phase(
                 last_output_tokens=0,
                 estimated=True,
                 warning_percent=context_warning_percent,
+                quota=gateway_quota,
             )
             await emit({"type": "context", **trace.context_usage})
             if trace.context_usage["low"]:
@@ -623,6 +630,9 @@ async def run_phase(
             raise
 
         usage = getattr(raw, "usage", {}) or {}
+        response_quota = getattr(raw, "quota", {}) or {}
+        if isinstance(response_quota, dict) and response_quota:
+            gateway_quota = response_quota
         reported_prompt_tokens = int(usage.get("prompt_tokens") or 0)
         reported_completion_tokens = int(usage.get("completion_tokens") or 0)
         input_tokens = reported_prompt_tokens or estimate_message_tokens(messages)
@@ -645,6 +655,7 @@ async def run_phase(
                 last_output_tokens=output_tokens,
                 estimated=not bool(reported_prompt_tokens and reported_completion_tokens),
                 warning_percent=context_warning_percent,
+                quota=gateway_quota,
             )
             await emit({"type": "context", **trace.context_usage})
         
@@ -804,6 +815,7 @@ async def run_phase(
                 last_output_tokens=0,
                 estimated=True,
                 warning_percent=context_warning_percent,
+                quota=gateway_quota,
             )
             await emit({"type": "context", **trace.context_usage})
             if trace.context_usage["low"]:

@@ -36,6 +36,19 @@ def test_research_prompt_is_conversational_during_ideation_and_decisive_later():
     assert "voltage and current" in selection
 
 
+def test_final_review_prompt_is_grounded_in_the_saved_artifact():
+    prompt = research_chat_messages(
+        idea="Why is PA5 used for the clock?",
+        recommendations=[],
+        stage="final_review",
+        review_context="# Final Review\n\nSPI clock is assigned to PA5.",
+    )[0]["content"]
+
+    assert "reviewing a completed" in prompt
+    assert "SPI clock is assigned to PA5" in prompt
+    assert "Do not claim the plan was changed" in prompt
+
+
 def test_research_fallback_does_not_repeat_a_clarifying_loop():
     response = research_fallback_response(
         idea="wdym, i thought i was pretty clear",

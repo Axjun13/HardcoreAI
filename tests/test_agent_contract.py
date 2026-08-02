@@ -248,6 +248,11 @@ def test_agent_stops_at_low_context_and_streams_usage():
             obj.usage = {"prompt_tokens": 85, "completion_tokens": 3, "total_tokens": 88}
             obj.model = "test-model"
             obj.context_window = 100
+            obj.quota = {
+                "tier": "default",
+                "agentLlmCallLimit": 200,
+                "agentLlmCallsRemaining": 199,
+            }
             return obj
 
     async def complete_fn(messages):
@@ -281,6 +286,8 @@ def test_agent_stops_at_low_context_and_streams_usage():
     assert context_events[-1]["low"] is True
     assert context_events[-1]["total_input_tokens"] == 85
     assert context_events[-1]["total_output_tokens"] == 3
+    assert context_events[-1]["quota"]["tier"] == "default"
+    assert context_events[-1]["quota"]["agentLlmCallsRemaining"] == 199
 
 
 def test_ask_user_streams_question_event():

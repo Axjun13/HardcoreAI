@@ -282,6 +282,23 @@
     (event.currentTarget as HTMLImageElement).style.display = "none";
   }
 
+  function looksLikeFinalReviewQuestion(message: string) {
+    const value = message.trim();
+    const editVerb =
+      "(?:add|change|edit|include|modify|remove|rename|replace|revise|set|switch|update|use)";
+    const explicitEdit = new RegExp(
+      `^(?:(?:can|could|will|would) you\\s+)?(?:please\\s+)?${editVerb}\\b|^(?:i want|i need|i(?:'d| would) like|let's|we should)\\b`,
+      "i",
+    ).test(value);
+    if (explicitEdit) return false;
+    return (
+      /\?\s*$/.test(value) ||
+      /^(can|could|did|do|does|how|is|should|what|when|where|which|who|why|will|would)\b/i.test(
+        value,
+      )
+    );
+  }
+
   function queueScroll() {
     cancelAnimationFrame(scrollFrame);
     scrollFrame = requestAnimationFrame(async () => {
@@ -309,17 +326,27 @@
       return;
     }
     if (stage === "final_review") {
-      const edit = input.trim();
-      input = "";
-      await advance("revise", edit);
-      return;
+      const finalReviewMessage = input.trim();
+      if (!looksLikeFinalReviewQuestion(finalReviewMessage)) {
+        input = "";
+        pendingUser = finalReviewMessage;
+        streamingText = "";
+        thinkingLabel = "Revising the final plan";
+        queueScroll();
+        await advance("revise", finalReviewMessage);
+        return;
+      }
     }
     const message = input.trim();
     input = "";
     pendingUser = message;
     streamingText = "";
     thinkingLabel =
-      stage === "ideation" ? "Exploring your idea" : "Comparing the tradeoffs";
+      stage === "ideation"
+        ? "Exploring your idea"
+        : stage === "final_review"
+          ? "Reviewing the final plan"
+          : "Comparing the tradeoffs";
     loading = true;
     notice = "";
     let completed = false;
@@ -452,6 +479,12 @@
         stage,
       );
       state = result.state;
+      if (action === "revise") {
+        pendingUser = "";
+        streamingText = "";
+        thinkingLabel = "";
+        queueScroll();
+      }
       // File-tree refresh is secondary to the workflow transition and can be
       // slow for large real project folders. Never keep the stage button in a
       // permanent "Working…" state while waiting for it.
@@ -476,6 +509,10 @@
         error instanceof Error
           ? error.message
           : "Could not advance the workflow.";
+      if (action === "revise") {
+        pendingUser = "";
+        thinkingLabel = "";
+      }
       loadState(projectId);
     } finally {
       loading = false;
@@ -672,6 +709,16 @@
         </section>
       {/if}
 
+      {#if stage === "final_review" && artifact}
+        <article class="artifact-card">
+          <div class="artifact-title">
+            <FileText size={16} />
+            final-review.md
+          </div>
+          <div class="markdown">{@html renderMarkdown(artifact)}</div>
+        </article>
+      {/if}
+
       {#if activeContext?.messages?.length}
         {#each activeContext.messages as message}
           <article class:user={message.role === "user"} class="message">
@@ -716,7 +763,7 @@
         </article>
       {/if}
 
-      {#if artifact}
+      {#if artifact && stage !== "final_review"}
         <article class="artifact-card">
           <div class="artifact-title">
             <FileText size={16} />
@@ -751,7 +798,7 @@
                   {#if hasRemoteImage(component)}
                     <img
                       class="component-image"
-                      src={component.thumbnail}
+                      src={`/api/components/${encodeURIComponent(component.id)}/image`}
                       alt={component.name}
                       loading="lazy"
                       referrerpolicy="no-referrer"
@@ -808,6 +855,16 @@
     </div>
 
     <footer>
+      {#if stage === "final_review" && loading}
+        <div class="review-processing" aria-live="polite" aria-busy="true">
+          <span class="thinking-orbit"><i></i></span>
+          <div>
+            <strong>{thinkingLabel || "Writing the final-review response"}</strong>
+            <small>Your request was sent and is being processed.</small>
+          </div>
+          <span class="thinking-dots"><i></i><i></i><i></i></span>
+        </div>
+      {/if}
       {#if notice}<div class="notice">{notice}</div>{/if}
       {#if stage !== "act"}
         <div class="composer">
@@ -820,7 +877,7 @@
               }
             }}
             placeholder={stage === "final_review"
-              ? "Describe an edit to the final plan…"
+              ? "Ask about the final plan or describe an edit…"
               : "Message the research agent…"}
           ></textarea>
           <button
@@ -853,13 +910,18 @@
 <style>
   .research-view {
     height: 100%;
+    min-height: 0;
+    max-height: 100%;
     display: grid;
     grid-template-columns: 250px minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
     background: var(--bg-primary);
     color: var(--text-primary);
     overflow: hidden;
   }
   .research-sidebar {
+    min-height: 0;
+    overflow: hidden;
     border-right: 1px solid var(--border-color);
     background: var(--bg-secondary);
     padding: 18px 12px;
@@ -1208,9 +1270,36 @@
   }
   .research-chat > footer {
     flex: none;
+    position: relative;
+    z-index: 4;
     padding: 12px max(28px, calc((100% - 900px) / 2)) 16px;
     border-top: 1px solid var(--border-color);
     background: var(--bg-primary);
+    box-shadow: 0 -12px 28px rgba(0, 0, 0, 0.14);
+  }
+  .review-processing {
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 9px;
+    padding: 10px 12px;
+    border: 1px solid rgba(124, 58, 237, 0.42);
+    border-radius: 9px;
+    background: rgba(124, 58, 237, 0.08);
+    color: var(--text-primary);
+  }
+  .review-processing strong,
+  .review-processing small {
+    display: block;
+  }
+  .review-processing strong {
+    font-size: 12px;
+  }
+  .review-processing small {
+    margin-top: 2px;
+    color: var(--text-muted);
+    font-size: 10px;
   }
   .composer {
     display: flex;
@@ -1310,8 +1399,9 @@
     margin-top: 0;
   }
   .todo-panel {
+    flex: 1 1 auto;
     min-height: 0;
-    max-height: 42%;
+    max-height: none;
     overflow: auto;
     border: 1px solid var(--border-color);
     border-radius: 9px;
@@ -1357,7 +1447,38 @@
     color: #f59e0b;
   }
   .workflow {
+    flex: 0 0 auto;
     margin-top: 0;
+  }
+  @media (max-height: 820px) {
+    .research-sidebar {
+      padding-top: 12px;
+      padding-bottom: 12px;
+      gap: 10px;
+    }
+    .research-chat > header {
+      height: 62px;
+    }
+    .conversation {
+      padding-top: 18px;
+      padding-bottom: 18px;
+    }
+    .research-chat > footer {
+      padding-top: 8px;
+      padding-bottom: 9px;
+    }
+    .composer textarea {
+      min-height: 34px;
+      padding-top: 4px;
+      padding-bottom: 4px;
+    }
+    .confirm {
+      margin-top: 7px;
+      padding: 8px;
+    }
+    .hint {
+      margin-top: 4px;
+    }
   }
   .arriving {
     animation: message-arrive 0.28s cubic-bezier(0.2, 0.8, 0.2, 1) both;

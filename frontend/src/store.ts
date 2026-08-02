@@ -112,6 +112,37 @@ export interface AgentContextStatus {
   estimated: boolean;
   warning_percent: number;
   low: boolean;
+  quota?: GatewayQuotaStatus;
+}
+
+export interface GatewayMinuteQuotaStatus {
+  limit: number;
+  used: number;
+  remaining: number;
+  resetAt: string;
+}
+
+export interface GatewayQuotaStatus {
+  tier: string;
+  concurrentLimit: number;
+  concurrentUsed: number;
+  concurrentRemaining: number;
+  agentLlmCallLimit: number;
+  agentLlmCallsUsed: number;
+  agentLlmCallsRemaining: number;
+  agentSearchCallLimit: number;
+  agentSearchCallsUsed: number;
+  agentSearchCallsRemaining: number;
+  agentInputTokenLimit: number;
+  agentInputTokensUsed: number;
+  agentInputTokensRemaining: number;
+  agentOutputTokenLimit: number;
+  agentOutputTokensUsed: number;
+  agentOutputTokensRemaining: number;
+  agentCostLimit: number;
+  agentCostUsed: number;
+  agentCostRemaining: number;
+  minute?: GatewayMinuteQuotaStatus;
 }
 
 export interface PlotDataPoint {
@@ -1982,6 +2013,16 @@ export const actions = {
           case "error":
             patchAiMsg(m => {
               (m.steps as AgentStep[]).push({ kind: "error", text: ev.message });
+              if (ev.fatal) {
+                m.status = "error";
+                // The trace already renders the fatal message in its error
+                // card. Clear any stale final text and, importantly, prevent
+                // the stream-close fallback from appending a false "Done."
+                m.text = "";
+                m.streaming = false;
+                m.thinkingDone = true;
+                m.thinkingCollapsed = true;
+              }
             });
             break;
           case "question":
@@ -2074,7 +2115,11 @@ export const actions = {
         const msgs = s.aiMessages.map(m => {
           if (m.id !== aiMsgId) return m;
           const copy = { ...m, streaming: false };
-          if (!copy.text?.trim() && (!copy.status || copy.status === "completed")) {
+          if (
+            !copy.text?.trim()
+            && (!copy.status || copy.status === "completed")
+            && !(copy.steps || []).some(step => step.kind === "error")
+          ) {
             copy.text = sawAnyEvent ? "Done." : "I successfully completed your request.";
           }
           return copy;
