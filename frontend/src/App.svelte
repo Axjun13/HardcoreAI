@@ -1429,6 +1429,50 @@
 
     actions.setActiveFile(path);
   }
+
+  async function readDirRecursive(
+    dirHandle: any,
+    prefix = "",
+  ): Promise<{ path: string; content: string }[]> {
+    const out: { path: string; content: string }[] = [];
+    const SKIP = new Set([".git", "node_modules", ".pio", "__pycache__"]);
+    for await (const [name, handle] of dirHandle.entries()) {
+      if (SKIP.has(name)) continue;
+      const path = prefix ? `${prefix}/${name}` : name;
+      if (handle.kind === "file") {
+        try {
+          const file = await handle.getFile();
+          const content = await file.text();
+          out.push({ path, content });
+        } catch {
+          // binary/unreadable file, skip
+        }
+      } else if (handle.kind === "directory") {
+        out.push(...(await readDirRecursive(handle, path)));
+      }
+    }
+    return out;
+  }
+
+  async function handleOpenFolder() {
+    try {
+      const path = await api.pickFolder();
+      if (!path) return; // user cancelled the native dialog
+
+      const folderName =
+        path
+          .replace(/[\\/]+$/, "")
+          .split(/[\\/]/)
+          .pop() || "Imported Project";
+      const project = await api.createProject(folderName, "", path);
+      await actions.loadProjects();
+      await actions.loadProject(project.id);
+      actions.setShowWelcomeScreen(false);
+      actions.setActiveSidebarTab("explorer");
+    } catch (err) {
+      console.error("Open Folder failed:", err);
+    }
+  }
 </script>
 
 <svelte:window
@@ -2466,7 +2510,7 @@
                 <button
                   type="button"
                   class="quick-access-item"
-                  onclick={() => actions.setShowWelcomeScreen(true)}
+                  onclick={handleOpenFolder}
                 >
                   <div style="display: flex; align-items: center; gap: 8px;">
                     <FolderOpen
@@ -5224,8 +5268,11 @@
     display: grid;
     place-items: center;
     padding: 24px;
-    background:
-      radial-gradient(circle at 50% 20%, rgba(139, 92, 246, 0.18), transparent 42%),
+    background: radial-gradient(
+        circle at 50% 20%,
+        rgba(139, 92, 246, 0.18),
+        transparent 42%
+      ),
       var(--bg-primary);
     color: var(--text-primary);
   }

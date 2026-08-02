@@ -171,6 +171,48 @@ def derive_avr_info(mcu: str) -> dict[str, str]:
     return _AVR_DEFAULT_ENTRY
 
 
+# Renesas RA (Arm Cortex-M, used by Arduino's Uno R4 / Nano R4 / Portenta
+# C33). Built from real `pio boards renesas-ra --json-output` output, which
+# as of this writing only surfaces two silicon families across four Arduino
+# boards — this table WILL need new entries the day PlatformIO adds more RA
+# boards. mcu strings for these boards come in two shapes: a bare group name
+# ("RA4M1") on the Uno/Nano R4 boards, and a full Renesas part number
+# ("R7FA6M5BH2CBG") on the Portenta C33 — match on whichever substring
+# identifies the group.
+#
+# openocd_target is NOT independently verified against a real OpenOCD
+# install here (no hardware/toolchain access during this change) — OpenOCD
+# added upstream Renesas RA support as `target/renesas_ra.cfg` in recent
+# releases, but confirm this path exists in whatever OpenOCD version ships
+# with this project before relying on it for real debugging.
+RENESAS_FAMILY_BY_MCU_PREFIX: dict[str, dict[str, str]] = {
+    "RA4M1": {"family": "RA4M1", "core": "cortex-m4",
+              "openocd_target": "target/renesas_ra.cfg"},
+    "R7FA6M5": {"family": "RA6M5", "core": "cortex-m33",
+                "openocd_target": "target/renesas_ra.cfg"},
+}
+_RENESAS_DEFAULT_ENTRY = {"family": "unknown-RA", "core": "cortex-m4",
+                           "openocd_target": "target/renesas_ra.cfg"}
+
+# All 4 boards seen in real pio_boards output expose either a J-Link or
+# CMSIS-DAP debug tool (the Uno R4 WiFi's is onboard); CMSIS-DAP is the
+# documented default for Arduino's own RA debug tooling, so use it as the
+# fallback the same way SAMD_DEFAULT_OPENOCD_INTERFACE does for SAMD.
+RENESAS_DEFAULT_OPENOCD_INTERFACE = "interface/cmsis-dap.cfg"
+
+
+def derive_renesas_info(mcu: str) -> dict[str, str]:
+    """mcu like 'RA4M1' or 'R7FA6M5BH2CBG' -> family/core/openocd_target.
+    Unrecognized RA parts still import with family=='unknown-RA' rather
+    than raising, same fallback philosophy as derive_family_info/
+    derive_avr_info — flag it, don't crash the batch."""
+    mcu_upper = mcu.upper()
+    for prefix, info in sorted(RENESAS_FAMILY_BY_MCU_PREFIX.items(), key=lambda item: len(item[0]), reverse=True):
+        if mcu_upper.startswith(prefix):
+            return info
+    return _RENESAS_DEFAULT_ENTRY
+
+
 def derive_family_info(mcu: str) -> dict[str, str]:
     """mcu like 'STM32F446RET6' -> family/core/hal_header/openocd_target.
     Falls back to a generic Cortex-M4 guess for unrecognized prefixes rather
@@ -203,4 +245,4 @@ def derive_openocd_interface(debug_tools: dict, fallback: str = "interface/stlin
     for name, meta in debug_tools.items():
         if meta.get("default") or meta.get("onboard"):
             return _PROBE_TO_INTERFACE_CFG.get(name, fallback)
-    return fallback
+    return fallback 

@@ -317,10 +317,18 @@ async def verify_component_online(
     )
     if not online_evidence:
         warnings.append("Online cross-verification returned no usable evidence; existing catalogue facts were retained.")
+    datasheet_status = "found" if (final_datasheet_url and online_evidence) else "missing"
     return {
         "component_id": component.get("id") or component.get("definition_id"),
         "name": name,
         "datasheet_url": final_datasheet_url,
+        "datasheet_status": datasheet_status,
+        "needs_upload": datasheet_status == "missing",
+        "upload_prompt": (
+            f"Couldn't find an authoritative datasheet for {name} online. "
+            f"Upload the datasheet PDF and I'll use it instead."
+            if datasheet_status == "missing" else None
+        ),
         "source_urls": [item["url"] for item in results],
         "pins": normalized_pins,
         "pin_count": len(normalized_pins),

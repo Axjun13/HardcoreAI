@@ -501,6 +501,16 @@ def select_components(project_id: str, payload: SelectRequest, user_id: str = De
         _sync_project_decision(state, catalogue)
         state["condensed_state"] = ""
 
+        # Keep project.board_id — the single source of truth read by the top
+        # nav target selector and the coding agent (get_device_for_project) —
+        # in sync the moment the research selection changes a board, instead
+        # of waiting until Phase 3 verify/advance. Without this, the top bar
+        # and coding chat keep showing the pre-research board for the entire
+        # research conversation, which is the "wrong board wins" bug.
+        board = _apply_research_target_board(session, project, selected, state)
+        state["target_board_id"] = board.id
+        session.commit()
+
         component_context = resolve_component_context(
             catalogue=catalogue,
             workbench=read_workbench(session, project).model_dump(),
@@ -691,6 +701,14 @@ async def stream_phase3_verification(
             finally:
                 if not verification_task.done():
                     verification_task.cancel()
+            if verification.get("needs_upload"):
+                yield _research_sse({
+                    "type": "datasheet_missing",
+                    "component_id": verification.get("component_id"),
+                    "component_name": verification.get("name"),
+                    "message": verification.get("upload_prompt"),
+                    "upload_endpoint": f"/api/projects/{project_id}/rag/upload",
+                })
             try:
                 with db_session(user_id) as verification_session:
                     persist_component_verification(verification_session, verification)

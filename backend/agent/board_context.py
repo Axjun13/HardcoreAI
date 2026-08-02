@@ -322,14 +322,38 @@ _ARDUINO_BOARD_NOTES: dict[str, dict[str, str]] = {
 
 
 def _build_arduino_board_context(device: Device) -> str:
-    notes = _ARDUINO_BOARD_NOTES.get(device.id, {"led_pin": "check board silkscreen", "board_tip": ""})
+    notes = _ARDUINO_BOARD_NOTES.get(device.id)
+    if notes is None:
+        notes = {"led_pin": "check board silkscreen", "board_tip": ""}
+        if device.arch not in {"avr", "arm-samd", "xtensa"}:
+            notes["board_tip"] = (
+                f"This {device.family or 'board'} family has no curated pin/quirk notes yet "
+                f"(imported generically from PlatformIO) — verify pin numbering and any "
+                f"peripheral caveats against the board's own documentation before trusting "
+                f"generated code on real hardware."
+            )
     board_tip_line = f"  Notes: {notes['board_tip']}\n" if notes.get("board_tip") else ""
     if device.arch == "avr":
         upload_line = f"avrdude via {device.avrdude_programmer or 'the board default programmer'}, {device.upload_speed or 115200} baud"
     elif device.arch == "arm-samd":
         upload_line = f"bossac (1200bps touch-reset into the UF2/SAM-BA bootloader), {device.upload_speed or 921600} baud"
-    else:
+    elif device.arch == "xtensa":
         upload_line = f"esptool, {device.upload_speed or 460800} baud"
+    else:
+        # Any other Arduino-framework board (arch == "arduino-generic" —
+        # e.g. Microchip PIC32/chipKIT). These were previously mislabeled
+        # as esptool (copy-pasted from the ESP32 branch above), which told
+        # the agent to give wrong flashing instructions. PlatformIO already
+        # recorded the real upload protocol per board at import time
+        # (boards/pio_importer.py) — trust that instead of assuming ESP32.
+        upload_line = f"{device.upload_protocol or 'the PlatformIO-selected programmer for this board'}, {device.upload_speed or 115200} baud"
+    debug_line = (
+        f"  ✓ This board has an on-chip debug interface (via {device.openocd_interface or 'its debug probe'}) "
+        f"— live GDB breakpoint debugging is available.\n"
+        if device.supports_live_debug else
+        "  ✗ Never assume live GDB breakpoint debugging is available — this board has no\n"
+        "    on-chip debug interface over its bootloader (flash + Serial Monitor only).\n"
+    )
     return f"""\
 ══════════════════════════════════════════════════════════════
 RULE 1 — BOARD: {device.label} ({device.mcu}, Arduino/{device.family} family)
@@ -342,9 +366,7 @@ The target for THIS project is: {device.label}
 
   ✗ Never ask the user which board — it is fixed for this project.
   ✗ Never emit STM32 HAL/register code, HAL_Init(), or #include "stm32*_hal.h" for this board.
-  ✗ Never assume live GDB breakpoint debugging is available — this board has no
-    on-chip debug interface over its bootloader (flash + Serial Monitor only).
-
+{debug_line}
 All generated code must use the Arduino API (pinMode/digitalWrite/analogRead/
 Serial/Wire/SPI) — this board has no register-level HAL of its own to target.
 

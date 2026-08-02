@@ -4,7 +4,7 @@ from pydantic import BaseModel
 # (setup()/loop(), pinMode, Serial, etc.) rather than a vendor HAL — used
 # throughout the codebase to dispatch codegen/scaffolding/context-building
 # without repeating an arch-list literal at every call site.
-ARDUINO_FRAMEWORK_ARCHES = {"avr", "xtensa", "arm-samd", "arduino-generic"}
+ARDUINO_FRAMEWORK_ARCHES = {"avr", "xtensa", "arm-samd", "arm-renesas", "arduino-generic"}
 
 
 def uses_arduino_framework(device: "Device | None") -> bool:
@@ -35,7 +35,7 @@ class Device(BaseModel):
     # STM32-only field below stays required-in-practice for that arch but
     # is Optional[...] at the model level so non-ARM boards (AVR, etc.)
     # don't have to fake OpenOCD/HAL metadata that doesn't apply to them.
-    arch: str = "arm-stm32"  # "arm-stm32" | "avr" | "xtensa" | "arm-samd" | "arduino-generic"
+    arch: str = "arm-stm32"  # "arm-stm32" | "avr" | "xtensa" | "arm-samd" | "arm-renesas" | "arduino-generic"
 
     # --- STM32/OpenOCD-family fields (arch == "arm-stm32") ---
     hal_header: str | None = None

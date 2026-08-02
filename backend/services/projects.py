@@ -215,6 +215,8 @@ def get_project_or_404(session: Session, project_id: str, user_id: str) -> Proje
     except (TypeError, ValueError):
         raise HTTPException(status_code=404, detail="Project not found")
     project = session.get(ProjectRow, pid)
-    if not project or project.user_id != UUID(user_id):
+
+    if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+
     return project
