@@ -54,10 +54,11 @@ def create_project(payload: ProjectCreate, user_id: str = Depends(get_current_us
     project_name = payload.name.strip()
     if not project_name:
         raise HTTPException(status_code=422, detail="Project name cannot be empty.")
-    # New projects always have a local home. An explicit path is retained for
-    # imports/backwards compatibility; the normal UI sends only the name.
-    local_path = Path(payload.path).expanduser() if payload.path else default_project_path(project_name)
-    local_path.mkdir(parents=True, exist_ok=bool(payload.path))
+
+    is_import = bool(payload.path)
+    local_path = Path(payload.path).expanduser() if is_import else default_project_path(project_name)
+    local_path.mkdir(parents=True, exist_ok=is_import)
+
     with db_session(user_id) as session:
         from boards.registry import registry
         resolved_board_id = payload.board_id or registry.default().id
@@ -72,52 +73,67 @@ def create_project(payload: ProjectCreate, user_id: str = Depends(get_current_us
         session.commit()
         session.refresh(project)
 
-        files = default_files(project.name, resolved_board_id)
-        for path, language, content in files:
-            session.add(
-                CodeFileRow(project_id=project.id, path=path, language=language, content=content)
-            )
+        if is_import:
+            # Register whatever's actually on disk — don't touch existing files.
+            _register_existing_files(session, project, local_path)
+        else:
+            files = default_files(project.name, resolved_board_id)
+            for path, language, content in files:
+                session.add(CodeFileRow(project_id=project.id, path=path, language=language, content=content))
 
-        # Create backend workspace for Build/Flash
-        files_dict = {
-            path: {
-                "language": language,
-                "content": content,
-            }
-            for path, language, content in files
-        }
+            files_dict = {p: {"language": l, "content": c} for p, l, c in files}
+            git_mgr = GitManager(str(project.id))
+            git_mgr.sync_db_to_disk(files_dict)
 
-        git_mgr = GitManager(str(project.id))
-        git_mgr.sync_db_to_disk(files_dict)
-
-        if project.path:
-            import os
-            import subprocess
+            import os, subprocess
             for rel_path, _language, content in files:
                 full_path = os.path.join(project.path, rel_path)
                 os.makedirs(os.path.dirname(full_path), exist_ok=True)
                 with open(full_path, "w", encoding="utf-8") as f:
                     f.write(content)
-
-            # Auto-initialize git and make the first commit
             try:
                 subprocess.run(["git", "init"], cwd=project.path, check=True, capture_output=True)
                 subprocess.run(["git", "config", "user.name", "HardcoreAI Copilot"], cwd=project.path, capture_output=True)
                 subprocess.run(["git", "config", "user.email", "copilot@hardcore-ai.local"], cwd=project.path, capture_output=True)
                 subprocess.run(["git", "add", "."], cwd=project.path, capture_output=True)
                 subprocess.run(["git", "commit", "-m", "Initial commit from HardcoreAI template"], cwd=project.path, capture_output=True)
-                
-                # Fetch the commit hash and save to version_number
                 hash_res = subprocess.run(["git", "rev-parse", "HEAD"], cwd=project.path, capture_output=True, text=True)
                 if hash_res.returncode == 0:
                     project.version_number = hash_res.stdout.strip()
-                    
             except Exception as e:
                 print(f"Failed to auto-init git in {project.path}: {e}")
 
         session.commit()
         session.refresh(project)
         return project_out(project)
+
+_TEXT_EXTS_HINT = {".c": "c", ".h": "c", ".cpp": "cpp", ".hpp": "cpp", ".ino": "cpp",
+                   ".py": "python", ".md": "markdown", ".ini": "ini", ".json": "json",
+                   ".txt": "plaintext", ".yml": "yaml", ".yaml": "yaml"}
+
+def _register_existing_files(session, project, root: Path) -> None:
+    from services.projects import build_disk_tree, _is_binary_path
+
+    def walk(nodes):
+        for node in nodes:
+            if node["isFolder"]:
+                walk(node["children"])
+            elif not node.get("isBinary"):
+                full = root / node["path"].lstrip("/")
+                try:
+                    content = full.read_text(encoding="utf-8")
+                except (UnicodeDecodeError, OSError):
+                    continue
+                ext = full.suffix.lower()
+                language = _TEXT_EXTS_HINT.get(ext, "plaintext")
+                session.add(CodeFileRow(
+                    project_id=project.id,
+                    path=node["path"].lstrip("/"),
+                    language=language,
+                    content=content,
+                ))
+
+    walk(build_disk_tree(root))
 
 
 @router.get("/api/projects/{project_id}", response_model=ProjectOut)

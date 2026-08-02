@@ -621,16 +621,40 @@ export const actions = {
     return result;
   },
   loadProjects: async () => {
-    try {
-      const projects = await api.getProjects();
-      workspaceStore.update(s => ({ ...s, projectsList: projects }));
-      
-    } 
-    catch (e) {
-      console.error("Failed to load projects", e);
+  try {
+    const projects = await api.getProjects();
+
+    workspaceStore.update(s => ({
+      ...s,
+      projectsList: projects
+    }));
+
+    let activeProjectId: string | null = null;
+    workspaceStore.subscribe(s => {
+      activeProjectId = s.activeProjectId;
+    })();
+
+    const validProject = projects.find(
+      (p: any) => String(p.id) === String(activeProjectId)
+    );
+
+    if (validProject) {
+      await actions.loadProject(String(validProject.id));
+    } else if (projects.length > 0) {
+      await actions.loadProject(String(projects[0].id));
+    } else {
+      workspaceStore.update(s => ({
+        ...s,
+        activeProjectId: null,
+        activeFile: null,
+        fileTree: [],
+        fileContents: {}
+      }));
     }
-    
-  },
+  } catch (e) {
+    console.error("Failed to load projects", e);
+  }
+},
 
   deleteProject: async (id: string) => {
     try {

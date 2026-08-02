@@ -19,7 +19,9 @@ from boards.family_map import (
     derive_avr_info,
     derive_espressif_info,
     derive_samd_info,
+    derive_renesas_info,
     SAMD_DEFAULT_OPENOCD_INTERFACE,
+    RENESAS_DEFAULT_OPENOCD_INTERFACE,
 )
 from boards.stm32_part import derive_package_pin_count
 
@@ -31,6 +33,7 @@ _PLATFORM_TO_ARCH: dict[str, str] = {
     "espressif32": "xtensa",
     "espressif8266": "xtensa",
     "atmelsam": "arm-samd",
+    "renesas-ra": "arm-renesas",
     "ststm32": "arm-stm32",
 }
 
@@ -138,6 +141,33 @@ def _normalize(raw: dict) -> Device | None:
                 openocd_target=samd_info["openocd_target"] if has_debug_port else None,
                 openocd_interface=(
                     derive_openocd_interface(debug_tools, fallback=SAMD_DEFAULT_OPENOCD_INTERFACE)
+                    if has_debug_port else None
+                ),
+                supports_live_debug=has_debug_port,
+                pinout_status="unavailable",
+            )
+
+        if arch == "arm-renesas":
+            renesas_info = derive_renesas_info(mcu)
+            debug_tools = raw.get("debug", {}).get("tools", {})
+            has_debug_port = bool(debug_tools)
+            # NOTE: `pio boards renesas-ra --json-output` did not return an
+            # "upload" section for any of the 4 boards seen at the time this
+            # branch was written (Nano R4, Portenta C33, Uno R4 Minima/WiFi)
+            # — Arduino's RA core is documented to use a DFU-based
+            # bootloader, so "dfu" is used as the best-effort default below.
+            # Verify against `pio run -t upload -v` output on real hardware
+            # before trusting this for anything beyond a first attempt.
+            return Device(
+                **common,
+                family=renesas_info["family"],
+                core=renesas_info["core"],
+                upload_speed=int(raw.get("upload", {}).get("speed", 115200)),
+                upload_protocol=raw.get("upload", {}).get("protocol") or "dfu",
+                debug_tool="openocd" if has_debug_port else "dfu",
+                openocd_target=renesas_info["openocd_target"] if has_debug_port else None,
+                openocd_interface=(
+                    derive_openocd_interface(debug_tools, fallback=RENESAS_DEFAULT_OPENOCD_INTERFACE)
                     if has_debug_port else None
                 ),
                 supports_live_debug=has_debug_port,
