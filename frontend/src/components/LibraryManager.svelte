@@ -36,9 +36,14 @@
   }
 
   // ── Constants ─────────────────────────────────────────────────────────────
-  const BASE = import.meta.env.DEV
+  // Matches api.ts's resolution: same-origin only works when the backend
+  // serves the built frontend itself (the local/desktop setup). A split
+  // deploy (frontend on Vercel, backend elsewhere) needs VITE_BACKEND_URL
+  // set at build time, or every request here silently hits the wrong host.
+  const DEFAULT_BASE = import.meta.env.DEV
     ? "http://127.0.0.1:62018"
     : window.location.origin;
+  const BASE = import.meta.env.VITE_BACKEND_URL || DEFAULT_BASE;
 
   // ── Reactive project id ───────────────────────────────────────────────────
   $: projectId = $workspaceStore.activeProjectId;

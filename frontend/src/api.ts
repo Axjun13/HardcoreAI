@@ -4,13 +4,55 @@ const DEFAULT_BACKEND_URL = import.meta.env.DEV
   ? "http://127.0.0.1:62018"
   : window.location.origin;
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || DEFAULT_BACKEND_URL;
+
+// Build/flash/debug/device-detect need a process with real USB/serial access
+// to the customer's board — the cloud backend (Render, etc.) never has that.
+// Those calls go to a separate, user-configurable "local agent" URL instead:
+// the customer runs the same backend (main.py) on their own machine, and the
+// deployed web app talks to it directly over loopback. Defaults to the
+// standard local dev port; overridable per-browser via localStorage so a
+// settings UI can let the customer point it elsewhere (e.g. a different
+// port, or a machine on their LAN) without a rebuild.
+const HARDWARE_URL_STORAGE_KEY = "hardcoreai.hardwareAgentUrl";
+const DEFAULT_HARDWARE_URL = "http://127.0.0.1:62018";
+
+function readHardwareUrl(): string {
+  try {
+    return (
+      localStorage.getItem(HARDWARE_URL_STORAGE_KEY) || DEFAULT_HARDWARE_URL
+    );
+  } catch {
+    return DEFAULT_HARDWARE_URL; // localStorage unavailable (SSR/private mode edge cases)
+  }
+}
+
+let HARDWARE_URL = readHardwareUrl();
+
+export function setHardwareAgentUrl(url: string) {
+  HARDWARE_URL = url.replace(/\/+$/, "") || DEFAULT_HARDWARE_URL;
+  try {
+    localStorage.setItem(HARDWARE_URL_STORAGE_KEY, HARDWARE_URL);
+  } catch {
+    // best-effort persistence only
+  }
+}
+
+export function getHardwareAgentUrl(): string {
+  return HARDWARE_URL;
+}
+
 let activeProjectId: string | null = null; // Default to null so Landing Page shows
 
 async function responseError(res: Response): Promise<string> {
   const text = await res.text();
   try {
     const parsed = JSON.parse(text);
-    return parsed.detail || parsed.message || text || `Request failed (${res.status})`;
+    return (
+      parsed.detail ||
+      parsed.message ||
+      text ||
+      `Request failed (${res.status})`
+    );
   } catch {
     return text || `Request failed (${res.status})`;
   }
@@ -43,15 +85,20 @@ export const api = {
     }));
   },
   async listBoards() {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/boards`, { headers: {} });
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/boards`, {
+      headers: {},
+    });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
   async refreshBoards(query: string = "STM32") {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/boards/refresh?query=${encodeURIComponent(query)}`, {
-      method: "POST",
-      headers: {}
-    });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/boards/refresh?query=${encodeURIComponent(query)}`,
+      {
+        method: "POST",
+        headers: {},
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
@@ -61,72 +108,95 @@ export const api = {
     // reachable refresh route defaulted to STM32 alone, so the Arduino/
     // ESP/SAMD side of the catalog could never grow past the hand-seeded
     // boards from the UI.
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/boards/refresh-all`, {
-      method: "POST",
-      headers: {}
-    });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/boards/refresh-all`,
+      {
+        method: "POST",
+        headers: {},
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
-  async addCustomBoard(payload: { id: string; mcu: string; label?: string; arch?: string }) {
+  async addCustomBoard(payload: {
+    id: string;
+    mcu: string;
+    label?: string;
+    arch?: string;
+  }) {
     const res = await authenticatedFetch(`${BACKEND_URL}/api/boards/custom`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload) });
+      body: JSON.stringify(payload),
+    });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
   async importStm32Metadata() {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/boards/stm32-data/import`, {
-      method: "POST",
-      headers: {} });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/boards/stm32-data/import`,
+      {
+        method: "POST",
+        headers: {},
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
   async getStm32MetadataStatus() {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/boards/stm32-data/status`, {
-      headers: {} });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/boards/stm32-data/status`,
+      {
+        headers: {},
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
   async getBoard(boardId: string) {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/boards/${boardId}`, { headers: {} });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/boards/${boardId}`,
+      { headers: {} },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
   async setProjectBoard(projectId: string, boardId: string) {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/boards/projects/${projectId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ board_id: boardId })
-    });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/boards/projects/${projectId}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ board_id: boardId }),
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
   async pickFolder(): Promise<string | null> {
-  const res = await authenticatedFetch(`${BACKEND_URL}/api/pick-folder`, {
-    method: "POST",
-    headers: {}
-  });
-  if (!res.ok) throw new Error(await res.text());
-  const data = await res.json();
-  return data.path;
-},
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/pick-folder`, {
+      method: "POST",
+      headers: {},
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    return data.path;
+  },
 
-async createProject(
-  name: string,
-  description: string = "",
-  path: string | null = null,
-  boardId: string | null = null,
-) {
-  const res = await authenticatedFetch(`${BACKEND_URL}/api/projects`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, description, path, board_id: boardId })
-  });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
-},
+  async createProject(
+    name: string,
+    description: string = "",
+    path: string | null = null,
+    boardId: string | null = null,
+  ) {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, description, path, board_id: boardId }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
 
   async deleteProject(id: string) {
     if (!supabase) throw new Error("Supabase is not configured.");
@@ -161,7 +231,10 @@ async createProject(
       if (error) throw error;
       return Array.isArray(data?.history) ? data.history : [];
     } catch (e) {
-      console.warn("Failed to fetch conversation history, falling back to localStorage", e);
+      console.warn(
+        "Failed to fetch conversation history, falling back to localStorage",
+        e,
+      );
     }
     const local = localStorage.getItem(`chat_history_${projectId}`);
     return local ? JSON.parse(local) : [];
@@ -170,17 +243,23 @@ async createProject(
   async saveConversationHistory(projectId: string, history: any[]) {
     try {
       if (!supabase) throw new Error("Supabase is not configured.");
-      const { error } = await supabase.from("conversations").upsert({
-        project_id: Number(projectId),
-        history,
-        updated_at: new Date().toISOString(),
-      }, {
-        onConflict: "project_id",
-      });
+      const { error } = await supabase.from("conversations").upsert(
+        {
+          project_id: Number(projectId),
+          history,
+          updated_at: new Date().toISOString(),
+        },
+        {
+          onConflict: "project_id",
+        },
+      );
       if (error) throw error;
       return history;
     } catch (e) {
-      console.warn("Failed to save conversation history, saving to localStorage", e);
+      console.warn(
+        "Failed to save conversation history, saving to localStorage",
+        e,
+      );
     }
     localStorage.setItem(`chat_history_${projectId}`, JSON.stringify(history));
     return history;
@@ -196,50 +275,73 @@ async createProject(
       if (error) throw error;
       return true;
     } catch (e) {
-      console.warn("Failed to delete conversation history, clearing localStorage", e);
+      console.warn(
+        "Failed to delete conversation history, clearing localStorage",
+        e,
+      );
     }
     localStorage.removeItem(`chat_history_${projectId}`);
     return true;
   },
 
   async getProjectFiles(id: string) {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${id}/files`, { headers: {} });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/projects/${id}/files`,
+      { headers: {} },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   // Real working-directory tree (includes .pio, untracked files, binaries).
   async getProjectTree(id: string) {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${id}/tree`, { headers: {} });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/projects/${id}/tree`,
+      { headers: {} },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   // Read a single working-dir file's content on demand (for untracked/.pio files).
   async getDiskFile(id: string, path: string) {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${id}/disk-file?path=${encodeURIComponent(path)}`, {
-      headers: {}
-    });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/projects/${id}/disk-file?path=${encodeURIComponent(path)}`,
+      {
+        headers: {},
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
-  async upsertFile(id: string, path: string, content: string, language: string = "c") {
+  async upsertFile(
+    id: string,
+    path: string,
+    content: string,
+    language: string = "c",
+  ) {
     // The backend path is a path param, needs URL encoding if it has slashes, though FastAPI path:path handles it
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${id}/files/${path}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content, language })
-    });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/projects/${id}/files/${path}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content, language }),
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async deleteFile(id: string, path: string) {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${id}/files/${path}`, {
-      method: "DELETE",
-      headers: {}
-    });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/projects/${id}/files/${path}`,
+      {
+        method: "DELETE",
+        headers: {},
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
@@ -262,160 +364,219 @@ async createProject(
   async uploadRagDocument(file: File) {
     const formData = new FormData();
     formData.append("documents", file);
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${activeProjectId}/rag/upload`, {
-      method: "POST",
-      body: formData,
-      headers: {}
-    });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/projects/${activeProjectId}/rag/upload`,
+      {
+        method: "POST",
+        body: formData,
+        headers: {},
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async listRagDocuments() {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${activeProjectId}/rag/documents`, {
-      method: "GET",
-      headers: {}
-    });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/projects/${activeProjectId}/rag/documents`,
+      {
+        method: "GET",
+        headers: {},
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async deleteRagDocument(filename: string) {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${activeProjectId}/rag/documents/${encodeURIComponent(filename)}`, {
-      method: "DELETE",
-      headers: {}
-    });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/projects/${activeProjectId}/rag/documents/${encodeURIComponent(filename)}`,
+      {
+        method: "DELETE",
+        headers: {},
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async searchRag(query: string) {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${activeProjectId}/rag/search`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json" },
-      body: JSON.stringify({ query })
-    });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/projects/${activeProjectId}/rag/search`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ query }),
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async scrapeUrl(url: string) {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${activeProjectId}/rag/scrape-url`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json" },
-      body: JSON.stringify({ url })
-    });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/projects/${activeProjectId}/rag/scrape-url`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ url }),
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async scrapeSearch(query: string, numResults: number = 3) {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${activeProjectId}/rag/scrape-search`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json" },
-      body: JSON.stringify({ query, num_results: numResults })
-    });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/projects/${activeProjectId}/rag/scrape-search`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ query, num_results: numResults }),
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
-  async askAgent(query: string, conversationHistory?: any[], phase?: string, provider: string = "cloud", buildOutput: string = "", autoApprove: boolean = false, agentRunId: string = crypto.randomUUID()) {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${activeProjectId}/agent/solve`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json" },
-      body: JSON.stringify({
-        provider,
-        problem: query,
-        conversation_history: conversationHistory,
-        phase: phase,
-        build_output: buildOutput,
-        auto_approve: autoApprove,
-        agent_run_id: agentRunId })
-    });
+  async askAgent(
+    query: string,
+    conversationHistory?: any[],
+    phase?: string,
+    provider: string = "cloud",
+    buildOutput: string = "",
+    autoApprove: boolean = false,
+    agentRunId: string = crypto.randomUUID(),
+  ) {
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/projects/${activeProjectId}/agent/solve`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          provider,
+          problem: query,
+          conversation_history: conversationHistory,
+          phase: phase,
+          build_output: buildOutput,
+          auto_approve: autoApprove,
+          agent_run_id: agentRunId,
+        }),
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async getAgentProviders() {
     const res = await authenticatedFetch(`${BACKEND_URL}/api/agent/providers`, {
-      headers: {}
+      headers: {},
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async getGitInfo() {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${activeProjectId}/git/info`, {
-      headers: {}
-    });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/projects/${activeProjectId}/git/info`,
+      {
+        headers: {},
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async getGitStatus() {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${activeProjectId}/git/status`, {
-      headers: {}
-    });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/projects/${activeProjectId}/git/status`,
+      {
+        headers: {},
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async getGitLog(n: number = 50) {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${activeProjectId}/git/log?n=${n}`, {
-      headers: {}
-    });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/projects/${activeProjectId}/git/log?n=${n}`,
+      {
+        headers: {},
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async commitChanges(message: string) {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${activeProjectId}/git/commit`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json" },
-      body: JSON.stringify({ message })
-    });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/projects/${activeProjectId}/git/commit`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ message }),
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async checkoutCommit(ref: string) {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${activeProjectId}/git/checkout`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ref })
-    });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/projects/${activeProjectId}/git/checkout`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ref }),
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async checkoutHead() {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${activeProjectId}/git/checkout-head`, {
-      method: "POST",
-      headers: {}
-    });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/projects/${activeProjectId}/git/checkout-head`,
+      {
+        method: "POST",
+        headers: {},
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async getGitBranches() {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${activeProjectId}/git/branches`, {
-      headers: {}
-    });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/projects/${activeProjectId}/git/branches`,
+      {
+        headers: {},
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async createGitBranch(name: string) {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${activeProjectId}/git/branches`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name })
-    });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/projects/${activeProjectId}/git/branches`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
@@ -424,10 +585,10 @@ async createProject(
 
   async getDeviceStatus(projectId?: string) {
     const url = projectId
-      ? `${BACKEND_URL}/api/device/status?project_id=${projectId}`
-      : `${BACKEND_URL}/api/device/status`;
+      ? `${HARDWARE_URL}/api/device/status?project_id=${projectId}`
+      : `${HARDWARE_URL}/api/device/status`;
     const res = await authenticatedFetch(url, {
-      headers: {}
+      headers: {},
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
@@ -437,20 +598,23 @@ async createProject(
   // chip's DBGMCU DEV_ID, and returns { detected_family, suggested_boards }.
   async detectConnectedBoard(projectId?: string) {
     const url = projectId
-      ? `${BACKEND_URL}/api/device/detect?project_id=${projectId}`
-      : `${BACKEND_URL}/api/device/detect`;
+      ? `${HARDWARE_URL}/api/device/detect?project_id=${projectId}`
+      : `${HARDWARE_URL}/api/device/detect`;
     const res = await authenticatedFetch(url, {
-      headers: {}
+      headers: {},
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async buildProject() {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${activeProjectId}/build`, {
-      method: "POST",
-      headers: {}
-    });
+    const res = await authenticatedFetch(
+      `${HARDWARE_URL}/api/projects/${activeProjectId}/build`,
+      {
+        method: "POST",
+        headers: {},
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
@@ -462,11 +626,14 @@ async createProject(
    * Resolves when the stream closes.
    */
   async streamBuild(onEvent: (event: any) => void, signal?: AbortSignal) {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${activeProjectId}/build/stream`, {
-      method: "POST",
-      headers: {},
-      signal
-    });
+    const res = await authenticatedFetch(
+      `${HARDWARE_URL}/api/projects/${activeProjectId}/build/stream`,
+      {
+        method: "POST",
+        headers: {},
+        signal,
+      },
+    );
     if (!res.ok || !res.body) throw new Error(await res.text());
 
     const reader = res.body.getReader();
@@ -482,7 +649,7 @@ async createProject(
       while ((sep = buffer.indexOf("\n\n")) !== -1) {
         const frame = buffer.slice(0, sep);
         buffer = buffer.slice(sep + 2);
-        const line = frame.split("\n").find(l => l.startsWith("data:"));
+        const line = frame.split("\n").find((l) => l.startsWith("data:"));
         if (!line) continue;
         const json = line.slice(5).trim();
         if (!json) continue;
@@ -496,10 +663,13 @@ async createProject(
   },
 
   async flashProject() {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${activeProjectId}/flash`, {
-      method: "POST",
-      headers: {}
-    });
+    const res = await authenticatedFetch(
+      `${HARDWARE_URL}/api/projects/${activeProjectId}/flash`,
+      {
+        method: "POST",
+        headers: {},
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
@@ -521,20 +691,25 @@ async createProject(
     autoApprove: boolean = false,
     agentRunId: string = crypto.randomUUID(),
   ) {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${activeProjectId}/agent/stream`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json" },
-      body: JSON.stringify({
-        provider,
-        problem: query,
-        conversation_history: conversationHistory,
-        phase: phase,
-        build_output: buildOutput,
-        auto_approve: autoApprove,
-        agent_run_id: agentRunId }),
-      signal
-    });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/projects/${activeProjectId}/agent/stream`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          provider,
+          problem: query,
+          conversation_history: conversationHistory,
+          phase: phase,
+          build_output: buildOutput,
+          auto_approve: autoApprove,
+          agent_run_id: agentRunId,
+        }),
+        signal,
+      },
+    );
     if (!res.ok || !res.body) throw new Error(await res.text());
 
     const reader = res.body.getReader();
@@ -551,7 +726,7 @@ async createProject(
       while ((sep = buffer.indexOf("\n\n")) !== -1) {
         const frame = buffer.slice(0, sep);
         buffer = buffer.slice(sep + 2);
-        const line = frame.split("\n").find(l => l.startsWith("data:"));
+        const line = frame.split("\n").find((l) => l.startsWith("data:"));
         if (!line) continue;
         const json = line.slice(5).trim();
         if (!json) continue;
@@ -570,44 +745,62 @@ async createProject(
     const params = new URLSearchParams();
     if (search) params.set("search", search);
     if (category) params.set("category", category);
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/libraries?${params}`, {
-      headers: {}
-    });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/libraries?${params}`,
+      {
+        headers: {},
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async getLibraryCategories() {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/libraries/categories`, {
-      headers: {}
-    });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/libraries/categories`,
+      {
+        headers: {},
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async getInstalledLibraries(projectId: string) {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/libraries`, {
-      headers: {}
-    });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/projects/${projectId}/libraries`,
+      {
+        headers: {},
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async installLibrary(projectId: string, libraryId?: string, gitUrl?: string) {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/libraries/install`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ library_id: libraryId ?? null, git_url: gitUrl ?? null })
-    });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/projects/${projectId}/libraries/install`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          library_id: libraryId ?? null,
+          git_url: gitUrl ?? null,
+        }),
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async uninstallLibrary(projectId: string, libraryId: string) {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/libraries/${encodeURIComponent(libraryId)}`, {
-      method: "DELETE",
-      headers: {}
-    });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/projects/${projectId}/libraries/${encodeURIComponent(libraryId)}`,
+      {
+        method: "DELETE",
+        headers: {},
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
@@ -615,17 +808,23 @@ async createProject(
   // --- Component research / resolution ---
 
   async getComponentSchema() {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/components/schema`, {
-      headers: {}
-    });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/components/schema`,
+      {
+        headers: {},
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async getComponentContext(projectId: string) {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/components/context`, {
-      headers: {}
-    });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/projects/${projectId}/components/context`,
+      {
+        headers: {},
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
@@ -638,8 +837,8 @@ async createProject(
       `${BACKEND_URL}/api/projects/${projectId}/components/resolve${query ? `?${query}` : ""}`,
       {
         method: "POST",
-        headers: {}
-      }
+        headers: {},
+      },
     );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
@@ -648,47 +847,67 @@ async createProject(
   // --- Research / ideation flow ---
 
   async getResearchState(projectId: string) {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/research`, {
-      headers: {}
-    });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/projects/${projectId}/research`,
+      {
+        headers: {},
+      },
+    );
     if (!res.ok) throw new Error(await responseError(res));
     return res.json();
   },
 
   async createResearchContext(projectId: string, title = "") {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/research/contexts`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title })
-    });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/projects/${projectId}/research/contexts`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title }),
+      },
+    );
     if (!res.ok) throw new Error(await responseError(res));
     return res.json();
   },
 
   async activateResearchContext(projectId: string, contextId: string) {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/research/contexts/${contextId}/activate`, {
-      method: "POST",
-      headers: {}
-    });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/projects/${projectId}/research/contexts/${contextId}/activate`,
+      {
+        method: "POST",
+        headers: {},
+      },
+    );
     if (!res.ok) throw new Error(await responseError(res));
     return res.json();
   },
 
   async deleteResearchContext(projectId: string, contextId: string) {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/research/contexts/${contextId}`, {
-      method: "DELETE",
-      headers: {}
-    });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/projects/${projectId}/research/contexts/${contextId}`,
+      {
+        method: "DELETE",
+        headers: {},
+      },
+    );
     if (!res.ok) throw new Error(await responseError(res));
     return res.json();
   },
 
-  async ideateResearch(projectId: string, idea: string, provider: string = "cloud", contextId?: string) {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/research/ideate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ idea, provider, context_id: contextId })
-    });
+  async ideateResearch(
+    projectId: string,
+    idea: string,
+    provider: string = "cloud",
+    contextId?: string,
+  ) {
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/projects/${projectId}/research/ideate`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idea, provider, context_id: contextId }),
+      },
+    );
     if (!res.ok) throw new Error(await responseError(res));
     return res.json();
   },
@@ -700,14 +919,17 @@ async createProject(
     provider: string,
     contextId: string | undefined,
     onEvent: (event: any) => void,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ) {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/research/ideate/stream`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ idea, provider, context_id: contextId }),
-      signal
-    });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/projects/${projectId}/research/ideate/stream`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idea, provider, context_id: contextId }),
+        signal,
+      },
+    );
     if (!res.ok || !res.body) throw new Error(await responseError(res));
 
     const reader = res.body.getReader();
@@ -721,7 +943,7 @@ async createProject(
       while ((separator = buffer.indexOf("\n\n")) !== -1) {
         const frame = buffer.slice(0, separator);
         buffer = buffer.slice(separator + 2);
-        const line = frame.split("\n").find(item => item.startsWith("data:"));
+        const line = frame.split("\n").find((item) => item.startsWith("data:"));
         if (!line) continue;
         try {
           onEvent(JSON.parse(line.slice(5).trim()));
@@ -732,17 +954,39 @@ async createProject(
     }
   },
 
-  async selectResearchComponents(projectId: string, selectedComponentIds: string[], notes = "", installLibraries = false, contextId?: string) {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/research/select`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ selected_component_ids: selectedComponentIds, notes, install_libraries: installLibraries, context_id: contextId })
-    });
+  async selectResearchComponents(
+    projectId: string,
+    selectedComponentIds: string[],
+    notes = "",
+    installLibraries = false,
+    contextId?: string,
+  ) {
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/projects/${projectId}/research/select`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          selected_component_ids: selectedComponentIds,
+          notes,
+          install_libraries: installLibraries,
+          context_id: contextId,
+        }),
+      },
+    );
     if (!res.ok) throw new Error(await responseError(res));
     return res.json();
   },
 
-  async advanceResearch(projectId: string, action = "confirm", selectedComponentIds: string[] = [], notes = "", message = "", provider = "deepseek", expectedStage = "") {
+  async advanceResearch(
+    projectId: string,
+    action = "confirm",
+    selectedComponentIds: string[] = [],
+    notes = "",
+    message = "",
+    provider = "deepseek",
+    expectedStage = "",
+  ) {
     const controller = new AbortController();
     // 45s was tuned for the quick stage transitions (ideation/component_selection/
     // revise). final_review's confirm additionally runs install_component_libraries()
@@ -751,20 +995,30 @@ async createProject(
     const timeoutMs = expectedStage === "final_review" ? 300_000 : 45_000;
     const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/research/advance`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, selected_component_ids: selectedComponentIds, notes, message, provider, expected_stage: expectedStage }),
-        signal: controller.signal
-      });
+      const res = await authenticatedFetch(
+        `${BACKEND_URL}/api/projects/${projectId}/research/advance`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action,
+            selected_component_ids: selectedComponentIds,
+            notes,
+            message,
+            provider,
+            expected_stage: expectedStage,
+          }),
+          signal: controller.signal,
+        },
+      );
       if (!res.ok) throw new Error(await responseError(res));
       return res.json();
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
         throw new Error(
           `Confirmation timed out after ${Math.round(timeoutMs / 1000)}s — this step installs PlatformIO ` +
-          "libraries and can be slow on first run. The latest workflow state has been reloaded; check " +
-          "whether it already advanced before retrying."
+            "libraries and can be slow on first run. The latest workflow state has been reloaded; check " +
+            "whether it already advanced before retrying.",
         );
       }
       throw error;
@@ -781,18 +1035,23 @@ async createProject(
     provider: string,
     expectedStage: string,
     onEvent: (event: any) => void,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ) {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/research/verify/stream`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action: "confirm",
-        selected_component_ids: selectedComponentIds,
-        notes,
-        provider,
-        expected_stage: expectedStage }),
-      signal });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/projects/${projectId}/research/verify/stream`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "confirm",
+          selected_component_ids: selectedComponentIds,
+          notes,
+          provider,
+          expected_stage: expectedStage,
+        }),
+        signal,
+      },
+    );
     if (!res.ok || !res.body) throw new Error(await responseError(res));
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -805,7 +1064,7 @@ async createProject(
       while ((separator = buffer.indexOf("\n\n")) !== -1) {
         const frame = buffer.slice(0, separator);
         buffer = buffer.slice(separator + 2);
-        const line = frame.split("\n").find(item => item.startsWith("data:"));
+        const line = frame.split("\n").find((item) => item.startsWith("data:"));
         if (!line) continue;
         try {
           onEvent(JSON.parse(line.slice(5).trim()));
@@ -819,28 +1078,37 @@ async createProject(
   async prepareResearchPhase3(projectId: string, installLibraries = true) {
     const params = new URLSearchParams();
     params.set("install_libraries", installLibraries ? "true" : "false");
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/research/phase3?${params}`, {
-      method: "POST",
-      headers: {}
-    });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/projects/${projectId}/research/phase3?${params}`,
+      {
+        method: "POST",
+        headers: {},
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async condenseResearch(projectId: string) {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/research/condense`, {
-      method: "POST",
-      headers: {}
-    });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/projects/${projectId}/research/condense`,
+      {
+        method: "POST",
+        headers: {},
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async generateResearchReadme(projectId: string) {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/research/readme`, {
-      method: "POST",
-      headers: {}
-    });
+    const res = await authenticatedFetch(
+      `${BACKEND_URL}/api/projects/${projectId}/research/readme`,
+      {
+        method: "POST",
+        headers: {},
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
@@ -848,30 +1116,36 @@ async createProject(
   // ── Debug API ──────────────────────────────────────────────────────────────
 
   async startDebug(projectId: string, board: string) {
-  if (!board) {
-    throw new Error("No STM32 board selected");
-  }
+    if (!board) {
+      throw new Error("No STM32 board selected");
+    }
 
-  const res = await authenticatedFetch(
-    `${BACKEND_URL}/api/projects/${projectId}/debug/start`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json" },
-      body: JSON.stringify({ board }) }
-  );
+    const res = await authenticatedFetch(
+      `${HARDWARE_URL}/api/projects/${projectId}/debug/start`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ board }),
+      },
+    );
 
-  if (!res.ok) {
-    throw new Error(await res.text());
-  }
+    if (!res.ok) {
+      throw new Error(await res.text());
+    }
 
-  return res.json();
-},
+    return res.json();
+  },
 
   async stopDebug(projectId: string) {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/debug/stop`, {
-      method: "POST",
-      headers: {} });
+    const res = await authenticatedFetch(
+      `${HARDWARE_URL}/api/projects/${projectId}/debug/stop`,
+      {
+        method: "POST",
+        headers: {},
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
@@ -882,7 +1156,7 @@ async createProject(
     onEvent: (event: Record<string, unknown>) => void,
     signal: AbortSignal,
   ): Promise<void> {
-    const url = `${BACKEND_URL}/api/projects/${projectId}/debug/stream`;
+    const url = `${HARDWARE_URL}/api/projects/${projectId}/debug/stream`;
     const response = await authenticatedFetch(url, { signal });
     if (!response.ok || !response.body) {
       throw new Error(await responseError(response));
@@ -899,7 +1173,9 @@ async createProject(
       while ((separator = buffer.indexOf("\n\n")) !== -1) {
         const frame = buffer.slice(0, separator);
         buffer = buffer.slice(separator + 2);
-        const dataLine = frame.split("\n").find((line) => line.startsWith("data:"));
+        const dataLine = frame
+          .split("\n")
+          .find((line) => line.startsWith("data:"));
         if (!dataLine) continue;
         try {
           onEvent(JSON.parse(dataLine.slice(5).trim()));
@@ -911,57 +1187,91 @@ async createProject(
   },
 
   async setBreakpoint(projectId: string, file: string, line: number) {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/debug/breakpoint`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ file, line }) });
+    const res = await authenticatedFetch(
+      `${HARDWARE_URL}/api/projects/${projectId}/debug/breakpoint`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ file, line }),
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
-    return res.json() as Promise<{ id: number; file: string; line: number; enabled: boolean }>;
+    return res.json() as Promise<{
+      id: number;
+      file: string;
+      line: number;
+      enabled: boolean;
+    }>;
   },
 
   async removeBreakpoint(projectId: string, bpId: number) {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/debug/breakpoint/${bpId}`, {
-      method: "DELETE",
-      headers: {} });
+    const res = await authenticatedFetch(
+      `${HARDWARE_URL}/api/projects/${projectId}/debug/breakpoint/${bpId}`,
+      {
+        method: "DELETE",
+        headers: {},
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async debugContinue(projectId: string) {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/debug/continue`, {
-      method: "POST",
-      headers: {} });
+    const res = await authenticatedFetch(
+      `${HARDWARE_URL}/api/projects/${projectId}/debug/continue`,
+      {
+        method: "POST",
+        headers: {},
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async debugStepOver(projectId: string) {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/debug/step-over`, {
-      method: "POST",
-      headers: {} });
+    const res = await authenticatedFetch(
+      `${HARDWARE_URL}/api/projects/${projectId}/debug/step-over`,
+      {
+        method: "POST",
+        headers: {},
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async debugStepInto(projectId: string) {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/debug/step-into`, {
-      method: "POST",
-      headers: {} });
+    const res = await authenticatedFetch(
+      `${HARDWARE_URL}/api/projects/${projectId}/debug/step-into`,
+      {
+        method: "POST",
+        headers: {},
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async debugStepOut(projectId: string) {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/debug/step-out`, {
-      method: "POST",
-      headers: {} });
+    const res = await authenticatedFetch(
+      `${HARDWARE_URL}/api/projects/${projectId}/debug/step-out`,
+      {
+        method: "POST",
+        headers: {},
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
 
   async getDebugSnapshot(projectId: string) {
-    const res = await authenticatedFetch(`${BACKEND_URL}/api/projects/${projectId}/debug/snapshot`, {
-      headers: {} });
+    const res = await authenticatedFetch(
+      `${HARDWARE_URL}/api/projects/${projectId}/debug/snapshot`,
+      {
+        headers: {},
+      },
+    );
     if (!res.ok) throw new Error(await res.text());
     return res.json();
-  } };
+  },
+};
