@@ -43,10 +43,26 @@ FRONTEND_ASSETS_DIR = FRONTEND_DIST_DIR / "assets"
 
 app = FastAPI(title="HardcoreAI API", version="0.3.0", lifespan=lifespan)
 
-# The frontend normally runs on 127.0.0.1:62017, but keeping this to localhost
-# origins lets preview builds and one-off dev ports work without CORS churn.
+# In local/desktop use, the frontend runs on 127.0.0.1:62017 and the backend
+# serves the built frontend directly (see serve_frontend below), so same-
+# origin requests need no CORS at all — the regex below only covers dev
+# preview ports hitting the API cross-origin.
+#
+# When deployed as two separate services (e.g. frontend on Vercel, backend
+# on Render), the browser origin is a real https:// domain that the regex
+# below will never match, so every request would be silently blocked by
+# CORS. Set FRONTEND_ORIGINS to a comma-separated list of the deployed
+# frontend URL(s) — e.g. "https://hardcoreai.vercel.app" — as an env var on
+# the backend host.
+_extra_origins = [
+    origin.strip()
+    for origin in os.environ.get("FRONTEND_ORIGINS", "").split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
+    allow_origins=_extra_origins,
     allow_origin_regex=r"http://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
