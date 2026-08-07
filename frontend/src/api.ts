@@ -13,6 +13,12 @@ const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || DEFAULT_BACKEND_URL;
 // standard local dev port; overridable per-browser via localStorage so a
 // settings UI can let the customer point it elsewhere (e.g. a different
 // port, or a machine on their LAN) without a rebuild.
+//
+// NOTE: build/build-stream are NOT included here even though they're in the
+// same router file server-side — `pio run` with no `-t upload` never touches
+// USB/serial, it's a pure compile, so it runs fine on the cloud backend. Only
+// flash (real `-t upload`) and debug (live GDB against physical silicon) and
+// device status/detect (enumerates real serial ports) need local hardware.
 const HARDWARE_URL_STORAGE_KEY = "hardcoreai.hardwareAgentUrl";
 const DEFAULT_HARDWARE_URL = "http://127.0.0.1:62018";
 
@@ -607,9 +613,12 @@ export const api = {
     return res.json();
   },
 
+  // Pure `pio run` compile — no USB/serial involved, so this runs on the
+  // cloud backend, not the local hardware agent. Works straight off the
+  // deployed link with no local setup.
   async buildProject() {
     const res = await authenticatedFetch(
-      `${HARDWARE_URL}/api/projects/${activeProjectId}/build`,
+      `${BACKEND_URL}/api/projects/${activeProjectId}/build`,
       {
         method: "POST",
         headers: {},
@@ -624,10 +633,13 @@ export const api = {
    *   {type:"status"|"line", text} during the build, then
    *   {type:"done", success, returncode, firmware_path, duration_s, output}.
    * Resolves when the stream closes.
+   *
+   * Same as buildProject: compile-only, no hardware, so this stays on the
+   * cloud backend rather than the local hardware agent.
    */
   async streamBuild(onEvent: (event: any) => void, signal?: AbortSignal) {
     const res = await authenticatedFetch(
-      `${HARDWARE_URL}/api/projects/${activeProjectId}/build/stream`,
+      `${BACKEND_URL}/api/projects/${activeProjectId}/build/stream`,
       {
         method: "POST",
         headers: {},
