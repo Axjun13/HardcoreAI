@@ -407,6 +407,14 @@ async def _gateway_complete(
                             usage = event_usage
                         if event_model:
                             response_model = event_model
+
+                    if len(text_parts) == parts_before_attempt:
+                        if attempt + 1 < CLOUD_MAX_ATTEMPTS:
+                            await asyncio.sleep(min(2.0, 0.5 * (2 ** attempt)))
+                            continue
+                        raise LLMError(
+                            "HardcoreAI Cloud returned an empty response. Please try again."
+                        )
                     break
             except httpx.RequestError as exc:
                 # Retrying after content has arrived could duplicate a model
