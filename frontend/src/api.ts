@@ -194,7 +194,7 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, description, path, board_id: boardId }),
     });
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) throw new Error(await responseError(res));
     return res.json();
   },
 
@@ -1261,6 +1261,61 @@ export const api = {
       },
     );
     if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async getOnboarding() {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/profile/onboarding`, { headers: {} });
+    if (!res.ok) throw new Error(await responseError(res));
+    return res.json();
+  },
+  async saveOnboarding(payload: {
+    company_name?: string | null;
+    phone_number?: string | null;
+    role: string;
+    about?: string | null;
+    primary_use_case: string;
+    company_size?: string | null;
+    referral_source?: string | null;
+  }) {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/profile/onboarding`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(await responseError(res));
+    return res.json();
+  },
+
+  async getAdminDashboard() {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/admin/dashboard`, { headers: {} });
+    if (!res.ok) throw new Error(await responseError(res));
+    return res.json();
+  },
+  async getAdminUsers(search = "", page = 1) {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/admin/users?search=${encodeURIComponent(search)}&page=${page}`, { headers: {} });
+    if (!res.ok) throw new Error(await responseError(res));
+    return res.json();
+  },
+  async getAdminUser(userId: string) {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/admin/users/${encodeURIComponent(userId)}`, { headers: {} });
+    if (!res.ok) throw new Error(await responseError(res));
+    return res.json();
+  },
+  async saveProjectLimitFeedback(feedback: string, willingToPay: boolean) {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/profile/project-limit-feedback`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ feedback, willing_to_pay: willingToPay }),
+    });
+    if (!res.ok) throw new Error(await responseError(res));
+    return res.json();
+  },
+  async setAdminProjectLimit(userId: string, unlocked: boolean) {
+    const res = await authenticatedFetch(`${BACKEND_URL}/api/admin/users/${encodeURIComponent(userId)}/project-limit`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ unlocked }),
+    });
+    if (!res.ok) throw new Error(await responseError(res));
     return res.json();
   },
 

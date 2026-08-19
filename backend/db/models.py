@@ -135,3 +135,18 @@ class ConversationRow(SQLModel, table=True):
     project_id: int = SQLField(foreign_key="projects.id", index=True, unique=True)
     history: list[Any] = SQLField(default_factory=list, sa_column=Column(JSON))
     updated_at: datetime = SQLField(default_factory=now_utc)
+
+
+class AIUsageRow(SQLModel, table=True):
+    """One completed LLM call, recorded from the shared LLM client."""
+    __tablename__ = "ai_usage"
+    id: int | None = SQLField(default=None, primary_key=True)
+    user_id: UUID = SQLField(index=True)
+    project_id: int | None = SQLField(default=None, foreign_key="projects.id", index=True)
+    provider: str = ""
+    model: str = ""
+    request_type: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    created_at: datetime = SQLField(default_factory=now_utc)

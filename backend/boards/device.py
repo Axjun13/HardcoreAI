@@ -67,3 +67,39 @@ class Device(BaseModel):
     # left/right or digital/analog lists vs a flat chip-package list), so
     # it's a separate field rather than overloading full_pinout.
     arduino_pinout: dict | None = None
+
+    # Catalog fields are deliberately optional: a missing value means the
+    # source did not establish it, never an inferred specification.  Keeping
+    # these on Device also means existing registry/API consumers continue to
+    # receive the original fields unchanged.
+    manufacturer: str | None = None          # board manufacturer / brand
+    mcu_manufacturer: str | None = None      # silicon manufacturer
+    architecture: str | None = None          # display taxonomy, e.g. ARM Cortex-M4
+    series: str | None = None
+    variant: str | None = None
+    board_type: str | None = None
+    description: str | None = None
+    voltage: str | None = None
+    gpio_count: int | None = None
+    adc_channels: int | None = None
+    dac_channels: int | None = None
+    pwm_channels: int | None = None
+    uart: int | None = None
+    spi: int | None = None
+    i2c: int | None = None
+    can: bool | None = None
+    usb: bool | None = None
+    ethernet: bool | None = None
+    wifi: bool | None = None
+    bluetooth: bool | None = None
+    debug_interface: list[str] | None = None
+    debugger: list[str] | None = None
+    bootloader: str | None = None
+    platformio_board_id: str | None = None
+    toolchain: str | None = None
+    datasheet_url: str | None = None
+    manufacturer_url: str | None = None
+    documentation_url: str | None = None
+    supported: bool = True
+    availability: str | None = None
+    qemu_supported: bool | None = None
