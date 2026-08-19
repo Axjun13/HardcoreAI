@@ -6,6 +6,7 @@ from pathlib import Path
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
+from sqlalchemy import text
 from sqlmodel import select
 import threading
 from fastapi import HTTPException
@@ -55,11 +56,27 @@ def create_project(payload: ProjectCreate, user_id: str = Depends(get_current_us
     if not project_name:
         raise HTTPException(status_code=422, detail="Project name cannot be empty.")
 
-    is_import = bool(payload.path)
-    local_path = Path(payload.path).expanduser() if is_import else default_project_path(project_name)
-    local_path.mkdir(parents=True, exist_ok=is_import)
-
     with db_session(user_id) as session:
+        # Serialize the check and insert per user so two simultaneous requests
+        # cannot bypass the default two-project allowance.
+        session.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:user_id, 0))"), {"user_id": user_id})
+        project_count = session.exec(
+            select(ProjectRow).where(ProjectRow.user_id == UUID(user_id))
+        ).all()
+        unlocked = session.execute(
+            text("SELECT COALESCE(project_limit_unlocked, false) FROM public.user_profiles WHERE user_id = :user_id"),
+            {"user_id": user_id},
+        ).scalar()
+        if len(project_count) >= 2 and not unlocked:
+            raise HTTPException(
+                status_code=403,
+                detail="Project limit reached. Each account can create up to 2 projects. Contact an administrator to unlock additional projects.",
+            )
+
+        is_import = bool(payload.path)
+        local_path = Path(payload.path).expanduser() if is_import else default_project_path(project_name)
+        local_path.mkdir(parents=True, exist_ok=is_import)
+
         from boards.registry import registry
         resolved_board_id = payload.board_id or registry.default().id
         project = ProjectRow(

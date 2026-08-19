@@ -17,7 +17,8 @@ from typing import Any
 import httpx
 
 import core.config  # noqa: F401 - loads public/local configuration
-from core.security import request_access_token
+from core.security import request_access_token, request_user_id
+from db.usage import record_usage
 
 LLAMACPP_URL = os.environ.get("LLAMACPP_URL", "http://127.0.0.1:62021").rstrip("/")
 LLAMACPP_MODEL = os.environ.get("LLAMACPP_MODEL", "prism-bonsai-8b-1bit")
@@ -153,8 +154,10 @@ def available_providers() -> list[dict]:
 
 def _normalise_openai_usage(data: dict) -> dict[str, int]:
     usage = data.get("usage") or {}
-    prompt = int(usage.get("prompt_tokens") or 0)
-    completion = int(usage.get("completion_tokens") or 0)
+    # Ollama streams report these fields at the top level, while OpenAI-style
+    # servers nest their values in ``usage``.
+    prompt = int(usage.get("prompt_tokens") or data.get("prompt_eval_count") or 0)
+    completion = int(usage.get("completion_tokens") or data.get("eval_count") or 0)
     return {
         "prompt_tokens": prompt,
         "completion_tokens": completion,
@@ -195,6 +198,10 @@ async def _openai_style_stream(
     url: str,
     model: str,
     messages: list[dict],
+    *,
+    provider: str,
+    mode: str,
+    project_id: str | None,
 ) -> AsyncIterator[str]:
     payload = {
         "model": model,
@@ -202,7 +209,12 @@ async def _openai_style_stream(
         "temperature": TEMPERATURE,
         "max_tokens": MAX_TOKENS,
         "stream": True,
+        # OpenAI-compatible servers that support this emit a final usage chunk.
+        # Servers that do not support it simply ignore the extra option.
+        "stream_options": {"include_usage": True},
     }
+    usage: dict[str, int] = {}
+    response_model = model
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
         try:
             async with client.stream("POST", url, json=payload) as response:
@@ -211,9 +223,18 @@ async def _openai_style_stream(
                         f"The local LLM service returned HTTP {response.status_code}."
                     )
                 async for line in response.aiter_lines():
-                    chunk, _usage, _model = _parse_sse_data(line)
+                    chunk, event_usage, event_model = _parse_sse_data(line)
+                    if event_usage and event_usage.get("total_tokens", 0):
+                        usage = event_usage
+                    if event_model:
+                        response_model = event_model
                     if chunk:
                         yield chunk
+                record_usage(
+                    user_id=request_user_id(), project_id=project_id,
+                    provider=provider, model=response_model, request_type=mode,
+                    usage=usage,
+                )
         except httpx.RequestError as exc:
             raise LLMError("The local LLM service is unavailable.") from exc
 
@@ -448,6 +469,8 @@ async def _gateway_stream(
     )
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
         emitted = False
+        usage: dict[str, int] = {}
+        response_model = "server-selected"
         for attempt in range(CLOUD_MAX_ATTEMPTS):
             try:
                 async with client.stream(
@@ -466,7 +489,11 @@ async def _gateway_stream(
                             continue
                         raise error
                     async for line in response.aiter_lines():
-                        chunk, _usage, _model = _parse_sse_data(line)
+                        chunk, event_usage, event_model = _parse_sse_data(line)
+                        if event_usage and event_usage.get("total_tokens", 0):
+                            usage = event_usage
+                        if event_model:
+                            response_model = event_model
                         if chunk:
                             emitted = True
                             yield chunk
@@ -474,6 +501,7 @@ async def _gateway_stream(
                         raise LLMError(
                             "HardcoreAI Cloud returned an empty response. Please try again."
                         )
+                    record_usage(user_id=request_user_id(), project_id=project_id, provider="cloud", model=response_model, request_type=mode, usage=usage)
                     return
             except httpx.RequestError as exc:
                 if not emitted and attempt + 1 < CLOUD_MAX_ATTEMPTS:
@@ -492,26 +520,29 @@ async def complete(
     access_token: str | None = None,
 ) -> CompletionText:
     if provider in CLOUD_PROVIDER_ALIASES:
-        return await _gateway_complete(
+        result = await _gateway_complete(
             messages,
             mode=mode,
             project_id=project_id,
             agent_run_id=agent_run_id,
             access_token=access_token,
         )
-    if provider == "llamacpp":
-        return await _openai_style_complete(
+    elif provider == "llamacpp":
+        result = await _openai_style_complete(
             f"{LLAMACPP_URL}/v1/chat/completions",
             LLAMACPP_MODEL,
             messages,
         )
-    if provider == "ollama":
-        return await _openai_style_complete(
+    elif provider == "ollama":
+        result = await _openai_style_complete(
             f"{OLLAMA_URL}/v1/chat/completions",
             OLLAMA_MODEL,
             messages,
         )
-    raise LLMError(f"Unknown provider '{provider}'.")
+    else:
+        raise LLMError(f"Unknown provider '{provider}'.")
+    record_usage(user_id=request_user_id(), project_id=project_id, provider=provider, model=result.model or model_for_provider(provider), request_type=mode, usage=result.usage)
+    return result
 
 
 async def stream(
@@ -539,5 +570,8 @@ async def stream(
         config = (f"{OLLAMA_URL}/v1/chat/completions", OLLAMA_MODEL)
     else:
         raise LLMError(f"Unknown provider '{provider}'.")
-    async for chunk in _openai_style_stream(config[0], config[1], messages):
+    async for chunk in _openai_style_stream(
+        config[0], config[1], messages, provider=provider, mode=mode,
+        project_id=project_id,
+    ):
         yield chunk

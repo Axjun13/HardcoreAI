@@ -21,12 +21,42 @@ router = APIRouter(prefix="/api/boards", tags=["Boards"])
 
 
 @router.get("")
-def list_boards(family: str | None = None) -> list[dict]:
-    """List all known boards (curated + imported), optionally filtered by family."""
+def list_boards(
+    family: str | None = None,
+    manufacturer: str | None = None,
+    architecture: str | None = None,
+    board_type: str | None = None,
+    connectivity: str | None = None,
+    framework: str | None = None,
+    debug_interface: str | None = None,
+    q: str | None = None,
+) -> list[dict]:
+    """List boards with composable catalog filters and free-text search."""
     boards = registry.list()
     if family:
-        boards = [b for b in boards if b.family.lower() == family.lower()]
+        boards = [b for b in boards if family.lower() in b.family.lower()]
+    if manufacturer:
+        boards = [b for b in boards if (b.manufacturer or b.vendor).lower() == manufacturer.lower()]
+    if architecture:
+        boards = [b for b in boards if (b.architecture or b.arch).lower() == architecture.lower()]
+    if board_type:
+        boards = [b for b in boards if (b.board_type or "").lower() == board_type.lower()]
+    if connectivity:
+        key = connectivity.lower()
+        boards = [b for b in boards if getattr(b, key, False) is True]
+    if framework:
+        boards = [b for b in boards if framework.lower() in {f.lower() for f in b.frameworks}]
+    if debug_interface:
+        boards = [b for b in boards if debug_interface.lower() in {d.lower() for d in (b.debug_interface or [])}]
+    if q:
+        needle = q.lower()
+        boards = [b for b in boards if needle in " ".join(filter(None, [b.id, b.label, b.mcu, b.family, b.manufacturer, b.mcu_manufacturer, b.series])).lower()]
     return [b.model_dump() for b in boards]
+
+
+@router.get("/search")
+def search_boards(q: str) -> list[dict]:
+    return list_boards(q=q)
 
 
 @router.get("/{board_id}")

@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 
 from boards.device import Device
+from boards.catalog import load_catalog
 from boards.family_map import derive_family_info
 from boards.pio_importer import import_arduino_framework_boards, import_boards
 from boards.stm32_part import derive_package_pin_count
@@ -342,6 +343,7 @@ class BoardRegistry:
     def __init__(self) -> None:
         self._imported: dict[str, Device] = {}
         self._custom: dict[str, Device] = {}
+        self._catalog: dict[str, Device] = load_catalog()
         self._load_cache()
         self._load_custom()
 
@@ -378,6 +380,14 @@ class BoardRegistry:
         cache was last generated) — this makes the cache self-heal on every
         load rather than silently carrying "unknown"/wrong classifications
         until someone remembers to hit /api/boards/refresh."""
+        # PlatformIO abbreviates Texas Instruments as "TI". Normalize it at
+        # the registry boundary so a manufacturer filter returns both the
+        # curated TI catalog and every PlatformIO-imported TI board.
+        if device.vendor.strip().lower() == "ti" and not device.manufacturer:
+            device = device.model_copy(update={
+                "manufacturer": "Texas Instruments",
+                "mcu_manufacturer": "Texas Instruments",
+            })
         if device.family != "unknown" and device.family != "":
             # Already classified — still worth reconciling core/hal_header/
             # openocd_target in case family_map.py's mapping for this family
@@ -415,7 +425,9 @@ class BoardRegistry:
         CUSTOM_PATH.write_text(json.dumps(raw, indent=2), encoding="utf-8")
 
     def list(self) -> list[Device]:
-        merged = {**self._imported, **_SEED, **self._custom}  # custom wins
+        # Existing curated seed keeps precedence for backward compatibility;
+        # custom boards still win over every built-in source.
+        merged = {**self._catalog, **self._imported, **_SEED, **self._custom}
         return sorted((self._with_pinout_metadata(d) for d in merged.values()), key=lambda d: d.id)
 
     def default(self) -> Device:
@@ -430,7 +442,7 @@ class BoardRegistry:
         imported = import_boards(query)
         if not imported:
             return 0
-        self._imported.update({d.id: d for d in imported})
+        self._imported.update({d.id: self._reclassify(d) for d in imported})
         self._write_cache()
         return len(imported)
 
@@ -443,18 +455,21 @@ class BoardRegistry:
         self._imported = {}
         breakdown: dict[str, int] = {}
         arduino_imported = import_arduino_framework_boards()
-        self._imported.update({d.id: d for d in arduino_imported})
+        self._imported.update({d.id: self._reclassify(d) for d in arduino_imported})
         breakdown["Arduino-framework"] = len(arduino_imported)
 
-        for query in ("STM32", "ESP32", "ESP8266"):
+        # TI is queried explicitly as PlatformIO does not include it in the
+        # STM32/Arduino/ESP platform searches.  These independent searches
+        # keep every currently PlatformIO-listed TI target discoverable.
+        for query in ("STM32", "ESP32", "ESP8266", "MSP430", "MSP432", "Tiva"):
             imported = import_boards(query)
-            self._imported.update({d.id: d for d in imported})
+            self._imported.update({d.id: self._reclassify(d) for d in imported})
             breakdown[query] = len(imported)
         self._write_cache()
         return breakdown
     
     def get(self, board_id: str) -> Device | None:
-        device = self._custom.get(board_id) or _SEED.get(board_id) or self._imported.get(board_id)
+        device = self._custom.get(board_id) or _SEED.get(board_id) or self._imported.get(board_id) or self._catalog.get(board_id)
         if device:
             device = self._with_pinout_metadata(device)
         if device and device.full_pinout is None:

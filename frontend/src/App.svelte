@@ -13,6 +13,11 @@
   import EmbeddedConfigurator from "./components/EmbeddedConfigurator.svelte";
   import RagUploadPanel from "./components/RagUploadPanel.svelte";
   import ResearchPanel from "./components/ResearchPanel.svelte";
+  import AdminPanel from "./components/AdminPanel.svelte";
+  import Onboarding from "./components/Onboarding.svelte";
+  import Loader from "./components/Loader.svelte";
+  import ReadmeModal from "./components/ReadmeModal.svelte";
+  import ProjectLimitModal from "./components/ProjectLimitModal.svelte";
   import hardcoreaiLogo from "./assets/Symbolwhite.png";
 
   import {
@@ -60,8 +65,35 @@
     Github,
     LogOut,
     UserRound,
+    BookOpen,
   } from "lucide-svelte";
 
+  let showOnboarding = false;
+  let showReadme = false;
+  let showProjectLimitModal = false;
+  let onboardingCheckedFor = "";
+  async function checkOnboarding() {
+    try {
+      const data = await api.getOnboarding();
+      showOnboarding = !data.completed;
+      // The getting-started guide is the first thing shown after onboarding.
+      showReadme = Boolean(data.completed);
+    } catch (error) {
+      // A profile outage must never prevent an authenticated user from working.
+      console.warn("Unable to check onboarding status", error);
+    }
+  }
+  $: if ($authState.user?.id && onboardingCheckedFor !== $authState.user.id) {
+    onboardingCheckedFor = $authState.user.id;
+    void checkOnboarding();
+  }
+  $: if (!$authState.user) {
+    onboardingCheckedFor = "";
+    showOnboarding = false;
+  }
+
+  let showAdminPanel = false;
+  let projectActionPending = false;
   let aiInput = "";
   let serialInput = "";
   let selectedPeripheral = "Core Registers";
@@ -76,6 +108,8 @@
   // (STM32F1, STM32H7, ...) so the dropdown stays usable now that it spans
   // 15+ STM32 families instead of a handful of boards.
   let boardSearchQuery = "";
+  let boardManufacturerFilter = "";
+  let boardFamilyFilter = "";
   let detectingBoard = false;
   let refreshingBoards = false;
   let importingStm32Metadata = false;
@@ -208,15 +242,16 @@
   }
   $: groupedBoards = (() => {
     const q = boardSearchQuery.trim().toLowerCase();
-    const filtered = q
-      ? $workspaceStore.boardCatalog.filter(
+    const filtered = $workspaceStore.boardCatalog.filter(
           (b) =>
+            (!boardManufacturerFilter || (b.manufacturer ?? b.vendor ?? "").toLowerCase() === boardManufacturerFilter.toLowerCase()) &&
+            (!boardFamilyFilter || (b.family ?? "") === boardFamilyFilter) &&
+            (!q ||
             b.label.toLowerCase().includes(q) ||
             b.id.toLowerCase().includes(q) ||
             (b.mcu ?? "").toLowerCase().includes(q) ||
-            (b.family ?? "").toLowerCase().includes(q),
-        )
-      : $workspaceStore.boardCatalog;
+            (b.family ?? "").toLowerCase().includes(q)),
+        );
     const byFamily = new Map<string, typeof filtered>();
     for (const board of filtered) {
       const key = board.family || "Other";
@@ -230,6 +265,8 @@
         boards.slice().sort((a, b) => a.label.localeCompare(b.label)),
       ]) as [string, typeof filtered][];
   })();
+  $: boardManufacturers = [...new Set($workspaceStore.boardCatalog.map((b) => b.manufacturer ?? b.vendor).filter(Boolean))].sort();
+  $: boardFamilies = [...new Set($workspaceStore.boardCatalog.map((b) => b.family).filter(Boolean))].sort();
 
   // The configurator is available from View, but no longer consumes half the
   // workspace on every launch.
@@ -563,6 +600,22 @@
     showAccountMenu = false;
     choosingAnotherUser = false;
     if (await signOut()) clearUserWorkspace();
+  }
+
+  async function runProjectAction(action: () => Promise<void>) {
+    if (projectActionPending) return;
+    projectActionPending = true;
+    try {
+      await action();
+    } finally {
+      projectActionPending = false;
+    }
+  }
+
+  function handleProjectCreateError(error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.toLowerCase().includes("project limit")) showProjectLimitModal = true;
+    actions.addBuildLog("Failed to create project: " + message);
   }
 
   function handleMouseUp() {
@@ -1455,7 +1508,8 @@
   }
 
   async function handleOpenFolder() {
-    try {
+    await runProjectAction(async () => {
+      try {
       const path = await api.pickFolder();
       if (!path) return; // user cancelled the native dialog
 
@@ -1469,9 +1523,10 @@
       await actions.loadProject(project.id);
       actions.setShowWelcomeScreen(false);
       actions.setActiveSidebarTab("explorer");
-    } catch (err) {
-      console.error("Open Folder failed:", err);
-    }
+      } catch (err) {
+        console.error("Open Folder failed:", err);
+      }
+    });
   }
 </script>
 
@@ -1530,11 +1585,19 @@
   </main>
 {/if}
 
+{#if $authState.user && showOnboarding}
+  <Onboarding
+    onComplete={() => { showOnboarding = false; showReadme = true; }}
+    onDismiss={() => { showOnboarding = false; showReadme = true; }}
+  />
+{/if}
+
 <div
   class="helix-app {isLightTheme ? 'light-theme' : ''}"
   class:auth-hidden={!$authState.user}
 >
   <!-- 1. Header Command Bar -->
+  {#if !showAdminPanel}
   <header class="helix-header">
     <div class="logo-section">
       <div class="logo-text">HARDCORE<span>AI</span></div>
@@ -1614,7 +1677,7 @@
     </div>
 
     <!-- Connectivity Status & Controls -->
-    <div class="connection-status-group">
+      <div class="connection-status-group">
       <div class="connection-status">
         <button
           class="status-pill"
@@ -1780,6 +1843,15 @@
             showCopilot = true;
           }}
         />
+        <button
+          type="button"
+          class="control-icon-btn readme-trigger"
+          onclick={() => (showReadme = true)}
+          title="Open HardcoreAI Getting Started"
+          aria-label="Open HardcoreAI Getting Started"
+        >
+          <BookOpen size={14} />
+        </button>
         <!-- svelte-ignore a11y-click-events-have-key-events -->
         <!-- svelte-ignore a11y-no-static-element-interactions -->
         <div
@@ -1827,6 +1899,10 @@
                   <small>{$authState.user?.email || "Authenticated user"}</small>
                 </div>
               </div>
+              <button type="button" role="menuitem" onclick={() => { showAdminPanel = true; showAccountMenu = false; }}>
+                <Database size={15} />
+                <span>Admin panel</span>
+              </button>
               <button type="button" role="menuitem" onclick={handleSwitchUser}>
                 <UserRound size={15} />
                 <span>Switch user</span>
@@ -1846,8 +1922,18 @@
       </div>
     </div>
   </header>
+  {/if}
 
-  {#if $workspaceStore.showWelcomeScreen}
+  {#if $authState.user && showReadme && !showOnboarding}
+    <ReadmeModal onClose={() => (showReadme = false)} />
+  {/if}
+  {#if $authState.user && showProjectLimitModal}
+    <ProjectLimitModal onClose={() => (showProjectLimitModal = false)} />
+  {/if}
+
+  {#if showAdminPanel}
+    <AdminPanel onClose={() => (showAdminPanel = false)} />
+  {:else if $workspaceStore.showWelcomeScreen}
     <div class="welcome-screen">
       <div class="welcome-container">
         <div class="welcome-header">
@@ -1879,26 +1965,28 @@
                   >
                 </button>
               {/if}
-              <button
-                class="welcome-action-btn"
-                onclick={async () => {
-                  if ($workspaceStore.projectsList.length > 0) {
+                <button
+                  class="welcome-action-btn"
+                  disabled={projectActionPending}
+                  onclick={() => runProjectAction(async () => {
+                    if ($workspaceStore.projectsList.length > 0) {
                     await actions.loadProject(
                       $workspaceStore.projectsList[0].id,
                     );
                     actions.setShowWelcomeScreen(false);
                     actions.setActiveSidebarTab("explorer");
                   } else {
-                    alert("No recent projects found. Please create one.");
-                  }
-                }}
-              >
-                <FolderOpen size={16} class="welcome-action-icon" />
-                <span>Open Project Folder...</span>
+                      alert("No recent projects found. Please create one.");
+                    }
+                  })}
+                >
+                  {#if projectActionPending}<Loader size="sm" />{:else}<FolderOpen size={16} class="welcome-action-icon" />{/if}
+                  <span>Open Project Folder...</span>
               </button>
-              <button
-                class="welcome-action-btn"
-                onclick={async () => {
+                <button
+                  class="welcome-action-btn"
+                  disabled={projectActionPending}
+                  onclick={() => runProjectAction(async () => {
                   if ($workspaceStore.projectsList.length > 0) {
                     await actions.loadProject(
                       $workspaceStore.projectsList[0].id,
@@ -1906,11 +1994,11 @@
                     actions.setShowWelcomeScreen(false);
                     actions.setActiveSidebarTab("boards");
                   } else {
-                    alert("No recent projects found. Please create one.");
-                  }
-                }}
-              >
-                <Settings size={16} class="welcome-action-icon" />
+                      alert("No recent projects found. Please create one.");
+                    }
+                  })}
+                >
+                  {#if projectActionPending}<Loader size="sm" />{:else}<Settings size={16} class="welcome-action-icon" />{/if}
                 <span>Configure Target Hardware...</span>
               </button>
               <div
@@ -1927,7 +2015,8 @@
                 <button
                   class="welcome-action-btn"
                   style="width: auto; padding: 0 20px; margin: 0;"
-                  onclick={async () => {
+                  disabled={projectActionPending}
+                  onclick={() => runProjectAction(async () => {
                     const inputEl = document.getElementById(
                       "newProjectName",
                     ) as HTMLInputElement;
@@ -1948,13 +2037,11 @@
                         `Created project locally at ${project.path} and saved it to Supabase.`,
                       );
                     } catch (e: any) {
-                      actions.addBuildLog(
-                        "Failed to create project: " + e.message,
-                      );
+                      handleProjectCreateError(e);
                     }
-                  }}
+                  })}
                 >
-                  <Plus size={16} class="welcome-action-icon" />
+                  {#if projectActionPending}<Loader size="sm" />{:else}<Plus size={16} class="welcome-action-icon" />{/if}
                   <span>Create</span>
                 </button>
               </div>
@@ -1972,14 +2059,15 @@
                     type="button"
                     class="recent-item"
                     style="flex: 1; border: none; margin-bottom: 0; background: transparent; text-align: left; cursor: pointer;"
-                    onclick={async () => {
+                    disabled={projectActionPending}
+                    onclick={() => runProjectAction(async () => {
                       await actions.loadProject(project.id);
                       actions.setSelectedBoard("bluepill_f103c8");
                       actions.setSelectedProbe("ST-Link V2");
                       actions.setShowWelcomeScreen(false);
-                    }}
+                    })}
                   >
-                    <div class="recent-name">{project.name}</div>
+                    <div class="recent-name">{#if projectActionPending}<Loader size="sm" />{:else}{project.name}{/if}</div>
                     <div class="recent-path">
                       Project ID: {project.id} | {new Date(
                         project.created_at,
@@ -2022,7 +2110,8 @@
           </div>
           <button
             class="welcome-enter-btn"
-            onclick={async () => {
+            disabled={projectActionPending}
+            onclick={() => runProjectAction(async () => {
               if (!$workspaceStore.activeProjectId) {
                 await actions.loadProjects();
                 if ($workspaceStore.projectsList.length > 0) {
@@ -2040,8 +2129,9 @@
                 }
               }
               actions.setShowWelcomeScreen(false);
-            }}
+            })}
           >
+            {#if projectActionPending}<Loader size="sm" />{/if}
             <span
               >{$workspaceStore.activeProjectId
                 ? "Return to Workspace"
@@ -2510,13 +2600,14 @@
                 <button
                   type="button"
                   class="quick-access-item"
+                  disabled={projectActionPending}
                   onclick={handleOpenFolder}
                 >
                   <div style="display: flex; align-items: center; gap: 8px;">
-                    <FolderOpen
+                    {#if projectActionPending}<Loader size="sm" />{:else}<FolderOpen
                       size={13}
                       style="color: var(--accent-violet);"
-                    />
+                    />{/if}
                     <span>Open Folder...</span>
                   </div>
                   <span class="shortcut-tag">Ctrl+O</span>
@@ -2559,12 +2650,13 @@
                         type="button"
                         class="quick-access-item"
                         style="padding: 4px 8px; font-size: 0.7rem; justify-content: flex-start; gap: 6px;"
-                        onclick={async () => {
+                        disabled={projectActionPending}
+                        onclick={() => runProjectAction(async () => {
                           await actions.loadProject(project.id);
                           recentProjectsExpanded = false;
-                        }}
+                        })}
                       >
-                        <Cpu size={11} style="color: var(--text-dark);" />
+                        {#if projectActionPending}<Loader size="sm" />{:else}<Cpu size={11} style="color: var(--text-dark);" />{/if}
                         <span
                           style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
                           >{project.name}</span
@@ -3143,6 +3235,20 @@
                       placeholder="Filter by board, MCU, or family…"
                       bind:value={boardSearchQuery}
                     />
+                    <div class="custom-board-inline">
+                      <select class="config-select" bind:value={boardManufacturerFilter}>
+                        <option value="">All manufacturers</option>
+                        {#each boardManufacturers as manufacturer}
+                          <option value={manufacturer}>{manufacturer}</option>
+                        {/each}
+                      </select>
+                      <select class="config-select" bind:value={boardFamilyFilter}>
+                        <option value="">All families</option>
+                        {#each boardFamilies as family}
+                          <option value={family}>{family}</option>
+                        {/each}
+                      </select>
+                    </div>
                   {/if}
                   <select
                     class="config-select"
@@ -3153,7 +3259,7 @@
                     {#each groupedBoards as [family, boards]}
                       <optgroup label={family}>
                         {#each boards as board}
-                          <option value={board.id}>{board.label}</option>
+                          <option value={board.id}>{board.label}{board.supported === false ? " (catalog only)" : ""}</option>
                         {/each}
                       </optgroup>
                     {/each}
@@ -5190,9 +5296,7 @@
                           `Created project locally at ${project.path} and saved it to Supabase.`,
                         );
                       } catch (e: any) {
-                        actions.addBuildLog(
-                          "Failed to create project: " + e.message,
-                        );
+                        handleProjectCreateError(e);
                       }
                     })();
                   } else {
@@ -5240,9 +5344,7 @@
                       `Created project locally at ${project.path} and saved it to Supabase.`,
                     );
                   } catch (e: any) {
-                    actions.addBuildLog(
-                      "Failed to create project: " + e.message,
-                    );
+                    handleProjectCreateError(e);
                   }
                 })();
               } else {

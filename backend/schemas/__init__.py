@@ -7,7 +7,7 @@ them to/from the integer primary keys of project_components / project_connection
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 from sqlmodel import SQLModel
 
@@ -79,6 +79,37 @@ class ProjectOut(SQLModel):
     board_id: str
     created_at: datetime
     updated_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# User onboarding
+# ---------------------------------------------------------------------------
+
+UserRole = Literal[
+    "Student", "Hobbyist / Maker", "Embedded Engineer", "Firmware Engineer",
+    "Hardware Engineer", "Researcher", "Startup Founder", "Product / Engineering", "Other",
+]
+PrimaryUseCase = Literal[
+    "Firmware Development", "Hardware Prototyping", "PCB / Electronics Development",
+    "Debugging", "Research", "Learning", "Product Development", "Other",
+]
+CompanySize = Literal["Individual", "2-10", "11-50", "51-200", "200+"]
+ReferralSource = Literal["LinkedIn", "Friend / Colleague", "University", "GitHub", "Search", "Event", "Other"]
+
+
+class UserOnboardingUpdate(BaseModel):
+    company_name: str | None = Field(default=None, max_length=160)
+    phone_number: str | None = Field(default=None, max_length=32)
+    role: UserRole
+    about: str | None = Field(default=None, max_length=600)
+    primary_use_case: PrimaryUseCase
+    company_size: CompanySize | None = None
+    referral_source: ReferralSource | None = None
+
+
+class ProjectLimitFeedback(BaseModel):
+    feedback: str | None = Field(default=None, max_length=2000)
+    willing_to_pay: bool
 
 # ---------------------------------------------------------------------------
 # Workbench & code files

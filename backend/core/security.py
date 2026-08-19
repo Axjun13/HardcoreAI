@@ -11,7 +11,7 @@ import os
 from contextvars import ContextVar
 
 import httpx
-from fastapi import Header, HTTPException
+from fastapi import Depends, Header, HTTPException
 
 _access_token: ContextVar[str | None] = ContextVar("request_access_token", default=None)
 _user_id: ContextVar[str | None] = ContextVar("request_user_id", default=None)
@@ -37,7 +37,7 @@ def cloud_request_context() -> tuple[str | None, str | None]:
     return _agent_run_id.get(), _project_id.get()
 
 
-async def get_current_user_id(authorization: str = Header(None)) -> str:
+async def get_current_user(authorization: str = Header(None)) -> dict:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
 
@@ -49,7 +49,7 @@ async def get_current_user_id(authorization: str = Header(None)) -> str:
             raise HTTPException(status_code=401, detail="Invalid auth token")
         test_user = "cee19697-23d0-44f1-8e98-1460239ed921"
         _user_id.set(test_user)
-        return test_user
+        return {"id": test_user, "email": os.environ.get("TEST_USER_EMAIL", "")}
 
     supabase_url = os.environ.get("SUPABASE_URL")
     anon_key = os.environ.get("SUPABASE_ANON_KEY")
@@ -75,4 +75,19 @@ async def get_current_user_id(authorization: str = Header(None)) -> str:
         user_data = response.json()
         user_id = str(user_data["id"])
         _user_id.set(user_id)
-        return user_id
+        return user_data
+
+
+async def get_current_user_id(authorization: str = Header(None)) -> str:
+    """Return the authenticated Supabase user id (legacy router dependency)."""
+    user = await get_current_user(authorization)
+    return str(user["id"])
+
+
+async def get_current_admin(user: dict = Depends(get_current_user)) -> dict:
+    """Require an authenticated user whose email is explicitly configured as admin."""
+    configured = {email.strip().casefold() for email in os.environ.get("ADMIN_EMAILS", "").split(",") if email.strip()}
+    email = str(user.get("email") or "").casefold()
+    if not configured or email not in configured:
+        raise HTTPException(status_code=403, detail="Administrator access is required")
+    return user
