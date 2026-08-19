@@ -200,10 +200,16 @@ export interface BoardMeta {
   id: string;
   label: string;
   vendor?: string;
+  manufacturer?: string | null;
+  mcu_manufacturer?: string | null;
   mcu?: string;
   family?: string;
   core?: string;
   arch?: string;
+  architecture?: string | null;
+  board_type?: string | null;
+  supported?: boolean;
+  availability?: string | null;
   pio_platform?: string | null;
   flash_bytes?: number;
   ram_bytes?: number;

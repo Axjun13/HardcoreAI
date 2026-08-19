@@ -34,6 +34,8 @@ from api.routers import (
     library_search,
     search,
     boards,
+    admin,
+    profile,
 )
 from db.migrations import lifespan
 
@@ -85,6 +87,8 @@ app.include_router(library_search.router)
 app.include_router(hal_generate.router) 
 app.include_router(search.router)
 app.include_router(boards.router)
+app.include_router(admin.router)
+app.include_router(profile.router)
 if FRONTEND_ASSETS_DIR.exists():
     app.mount(
         "/assets",
